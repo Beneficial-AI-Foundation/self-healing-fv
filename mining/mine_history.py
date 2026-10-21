@@ -225,17 +225,25 @@ def split_header(stmt: str) -> tuple[str, str]:
 
 
 def parse_decls(src: str | None) -> dict[str, dict]:
-    """Map declaration name -> {kind, statement, body, sorry} from Lean source (comments ignored)."""
+    """Map declaration name -> {kind, header, statement, body, sorry, start/body_start/end offsets,
+    line/body_line/end_line (1-indexed)} from Lean source (comments ignored). Offsets index the
+    original source, since comment stripping preserves length."""
     if src is None:
         return {}
     lines = strip_comments(src).split("\n")
+    offsets, off = [], 0
+    for line in lines:
+        offsets.append(off); off += len(line) + 1
     decls: dict[str, dict] = {}
     cur = None
 
     def close():
         if cur is None:
             return
-        text = "\n".join(cur["lines"])
+        idx = cur["idx"]
+        while len(idx) > 1 and not lines[idx[-1]].strip():
+            idx = idx[:-1]  # drop trailing blank lines
+        text = "\n".join(lines[i] for i in idx)
         stmt, body = split_statement(text)
         name = cur["name"] or f"<{cur['kind']}>:{norm(stmt)[:80]}"
         key = name
@@ -243,26 +251,29 @@ def parse_decls(src: str | None) -> dict[str, dict]:
         while key in decls:  # duplicate short names (e.g. in different namespaces)
             key = f"{name}#{k}"; k += 1
         header, statement = split_header(norm(stmt))
+        start = offsets[idx[0]]
         decls[key] = {
             "kind": cur["kind"], "header": header, "statement": statement, "body": norm(body),
             "sorry": len(re.findall(r"\b(sorry|admit)\b", text)),
+            "start": start, "body_start": start + len(stmt), "end": start + len(text),
+            "line": idx[0] + 1, "body_line": idx[0] + 1 + stmt.count("\n"), "end_line": idx[-1] + 1,
         }
 
-    pending: list[str] = []  # attribute / `set_option ... in` lines preceding a declaration
-    for line in lines:
+    pending: list[int] = []  # attribute / `set_option ... in` lines preceding a declaration
+    for i, line in enumerate(lines):
         m = DECL_RE.match(line)
         if m:
             close()
-            cur = {"kind": m.group(1), "name": m.group(2), "lines": pending + [line]}
+            cur = {"kind": m.group(1), "name": m.group(2), "idx": pending + [i]}
             pending = []
         elif line[:1] not in (" ", "\t", "") and BOUNDARY_RE.match(line):
             close(); cur = None
             prefix = line.startswith("@[") or re.match(r"set_option\b.*\bin\s*$", line)
-            pending = pending + [line] if prefix else []
+            pending = pending + [i] if prefix else []
         elif cur is not None:
-            cur["lines"].append(line)
-        elif pending and line.strip():
-            pending.append(line)  # continuation of a multi-line attribute
+            cur["idx"].append(i)
+        elif pending:
+            pending.append(i)  # continuation of a multi-line attribute, or a blank/comment line
     close()
     return decls
 
