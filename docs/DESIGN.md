@@ -248,6 +248,8 @@ TODO: metrics, baselines (plain agent without gates; human fix), cost reporting.
 
 ## 9. Deployment (SCI-1717)
 
+Model keys: the bot runs in the target repo's own CI with that repo's own API keys, stored as repository or organization secrets. BAIF repos use BAIF's API keys; outside users supply their own. BAIF hosts no service and never holds anyone else's keys or code.
+
 TODO: GitHub Actions runner limits, secrets and fork PRs, bring-your-own-model configuration, per-run and monthly cost limits.
 
 ## 10. Related work and reuse
