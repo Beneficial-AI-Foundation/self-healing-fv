@@ -55,11 +55,12 @@ def export(git: Git, rev: str, dest: Path) -> None:
     subprocess.run(["tar", "-x", "-C", str(dest)], input=archive.stdout, check=True)
 
 
-def overlay_change(git: Git, miner: Miner, base: str, change: str, dest: Path) -> list[str]:
-    """Copy the change commit's extraction/toolchain/extraction-config files into dest."""
+def overlay_change(git: Git, miner: Miner, base: str, change: str, dest: Path,
+                   classes=("extraction", "toolchain", "extraction_config")) -> list[str]:
+    """Copy the change commit's files of the given classes into dest."""
     applied = []
     for f in git.changed_files(base, change):
-        if miner.classify(f["path"]) not in ("extraction", "toolchain", "extraction_config"):
+        if miner.classify(f["path"]) not in classes:
             continue
         target = dest / f["path"]
         content = git.show(change, f["path"])
@@ -219,10 +220,15 @@ def parse_diags(out: str) -> list[dict]:
             cur["msg"] += "\n" + line
         else:
             cur = None
-    for x in diags:
+    seen, unique = set(), []
+    for x in diags:  # Lake repeats each diagnostic in its final summary
         x["msg"] = x["msg"].strip()[:2000]
-        x["kind"] = classify_msg(x["msg"])
-    return diags
+        key = (x["severity"], x["file"], x["line"], x["col"], x["msg"])
+        if key not in seen:
+            seen.add(key)
+            x["kind"] = classify_msg(x["msg"])
+            unique.append(x)
+    return unique
 
 
 def classify_msg(msg: str) -> str:
@@ -245,9 +251,11 @@ def locate(diag: dict, decls: dict) -> tuple[str | None, str]:
     """Return (decl name, 'body' | 'statement' | 'file') for a diagnostic."""
     for name, d in decls.items():
         if d["line"] <= diag["line"] <= d["end_line"]:
-            if diag["line"] > d["body_line"] or (diag["line"] == d["body_line"] and d["body"]):
-                return name, "body"
-            return name, "statement"
+            # Compare exact positions: a statement's last line often also holds `:= by`.
+            in_body = d["body"] and (diag["line"], diag["col"]) >= (d["body_line"], d["body_col"])
+            # Lean reports timeouts at the declaration header, but they are elaboration failures.
+            in_body = in_body or (d["body"] and diag.get("kind") == "heartbeats")
+            return name, "body" if in_body else "statement"
     return None, "file"
 
 
@@ -324,6 +332,7 @@ def replay(record: dict, repo: Path, work: Path, skip_base: bool) -> dict:
     timing["broken_setup_s"] = round(time.time() - t0, 1)
 
     rounds, sorried, stmt_errors, file_errors = [], {}, [], []
+    extraction_errors, external_overlaid, setup_failed = [], [], False
     for rnd in range(1, MAX_ROUNDS + 1):
         st = build_state(f"broken-round{rnd}", broken, logdir, fetch_cache=False)
         errs = st["errors"]
@@ -334,13 +343,32 @@ def replay(record: dict, repo: Path, work: Path, skip_base: bool) -> dict:
         if not errs:
             result["broken_tail"] = st["tail"]
             break
+        # Never sorry the extracted code or the external models: they are what the proofs are about.
+        extr = [e for e in errs if miner.classify(e["file"]) in ("extraction", "external")]
+        if extr:
+            extraction_errors = [{k: e[k] for k in ("file", "line", "kind")} | {"msg": e["msg"][:600], "round": rnd}
+                                 for e in extr]
+            if not external_overlaid:
+                # The new extraction may need the change's updated hand-written external models.
+                external_overlaid = overlay_change(git, miner, base, change, broken, classes=("external",))
+                if external_overlaid:
+                    continue
+            setup_failed = True
+            break
         to_sorry: dict[str, set[str]] = {}
+        seen_errs = {(x["file"], x["decl"], x["msg"]) for x in stmt_errors + file_errors}
         for e in errs:
             src_path = broken / e["file"]
             decls = parse_decls(src_path.read_text()) if src_path.exists() else {}
             name, where = locate(e, decls)
             entry = {"file": e["file"], "line": e["line"], "decl": name, "where": where,
                      "kind": e["kind"], "msg": e["msg"][:600], "round": rnd}
+            already = f"{e['file']}::{name}" in sorried and decls[name]["body"] == ":= by sorry"
+            if where == "body" and already:
+                where = entry["where"] = "statement"  # error survives sorrying: not a proof error
+            if (e["file"], name, entry["msg"]) in seen_errs:
+                continue  # same error as earlier in this or a previous round
+            seen_errs.add((e["file"], name, entry["msg"]))
             if where == "body" and decls[name]["kind"] in SORRYABLE:
                 to_sorry.setdefault(e["file"], set()).add(name)
                 sorried.setdefault(f"{e['file']}::{name}", {**entry, "decl_kind": decls[name]["kind"]})
@@ -355,20 +383,31 @@ def replay(record: dict, repo: Path, work: Path, skip_base: bool) -> dict:
             src = p.read_text()
             p.write_text(sorry_out(src, parse_decls(src), names))
 
+    # A declaration whose statement fails is statement-broken, not (also) a proof break.
+    stmt_broken = {f"{e['file']}::{e['decl']}" for e in stmt_errors}
+    sorried = {k: v for k, v in sorried.items() if k not in stmt_broken}
     failing_modules = {module_of(e["file"]) for e in stmt_errors + file_errors}
     result.update({
+        # The change also edited trusted external models, and the new extraction needs them.
+        "external_models_overlaid": external_overlaid,
+        "extraction_errors": extraction_errors if setup_failed else [],
         "broken_rounds": rounds,
         "broken_green_after_sorry": bool(rounds and rounds[-1]["ok"]),
         "broken_proofs": sorted(sorried),
         "broken_proofs_detail": list(sorried.values()),
         "statement_errors": stmt_errors,
+        "statement_broken": sorted(stmt_broken),
+        # Repairable by proof edits alone? If not, the bot must escalate (gates forbid statement changes).
+        "needs_statement_change": bool(stmt_broken),
         "file_errors": file_errors,
         "blocked_modules": blocked_modules(broken, failing_modules),
     })
     result["comparison"] = compare(record, result)
     timing["broken_rounds_s"] = sum(r["build_s"] for r in rounds)
     timing["total_s"] = round(time.time() - t_start)
-    if not rounds[0]["ok"]:
+    if setup_failed:
+        result["verdict"] = "setup failure: extracted code does not build in the broken state"
+    elif sorried or stmt_errors or file_errors:
         result["verdict"] = "break confirmed"
     else:
         result["verdict"] = "no break: broken state builds green"

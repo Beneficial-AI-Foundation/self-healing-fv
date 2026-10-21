@@ -42,7 +42,8 @@ REPO_CONFIGS = {
         "extraction_config": ["aeneas-config.yml", "functions.json", ".github/workflows/aeneas-extract.yml"],
         "rust": ["curve25519-dalek/*.rs", "curve25519-dalek/*Cargo.toml", "src-modifications.diff"],
         # Every other tracked .lean file under these prefixes is treated as specs/proofs.
-        "proof_roots": ["Curve25519Dalek/", "Utils/"],
+        # (Utils/ is the repo's status-sync tooling and is not part of the default build.)
+        "proof_roots": ["Curve25519Dalek/"],
     },
 }
 
@@ -196,6 +197,12 @@ def norm(s: str) -> str:
     return " ".join(s.split())
 
 
+def canon(s: str) -> str:
+    """Comparison key: also drop whitespace next to punctuation, which Lean ignores
+    (e.g. `(u : T): P` vs `(u : T) : P`)."""
+    return re.sub(r" ?([^\w\s.'!?]) ?", r"\1", norm(s))
+
+
 def split_header(stmt: str) -> tuple[str, str]:
     """Split leading `@[...]` attributes and `set_option ... in` off a normalized statement."""
     i = 0
@@ -245,18 +252,24 @@ def parse_decls(src: str | None) -> dict[str, dict]:
             idx = idx[:-1]  # drop trailing blank lines
         text = "\n".join(lines[i] for i in idx)
         stmt, body = split_statement(text)
-        name = cur["name"] or f"<{cur['kind']}>:{norm(stmt)[:80]}"
+        header, statement = split_header(norm(stmt))
+        name = cur["name"]
+        if not name:  # name wrapped onto the next line, e.g. long Aeneas-generated names
+            m = re.match(r"(?:(?:private|protected|noncomputable|partial|unsafe|nonrec) )*\w+ ([^\s:({\[⦃]+)", statement)
+            name = m.group(1) if m and cur["kind"] != "instance" else f"<{cur['kind']}>:{statement[:80]}"
         key = name
         k = 2
         while key in decls:  # duplicate short names (e.g. in different namespaces)
             key = f"{name}#{k}"; k += 1
-        header, statement = split_header(norm(stmt))
         start = offsets[idx[0]]
+        body_start = start + len(stmt)
+        body_line0 = idx[0] + stmt.count("\n")
         decls[key] = {
             "kind": cur["kind"], "header": header, "statement": statement, "body": norm(body),
             "sorry": len(re.findall(r"\b(sorry|admit)\b", text)),
-            "start": start, "body_start": start + len(stmt), "end": start + len(text),
-            "line": idx[0] + 1, "body_line": idx[0] + 1 + stmt.count("\n"), "end_line": idx[-1] + 1,
+            "start": start, "body_start": body_start, "end": start + len(text),
+            "line": idx[0] + 1, "body_line": body_line0 + 1, "body_col": body_start - offsets[body_line0],
+            "end_line": idx[-1] + 1,
         }
 
     pending: list[int] = []  # attribute / `set_option ... in` lines preceding a declaration
@@ -278,17 +291,25 @@ def parse_decls(src: str | None) -> dict[str, dict]:
     return decls
 
 
+CONTEXT_RE = re.compile(r"^(namespace|open|section|end|variable|universe|export)\b.*$", re.M)
+
+
+def context_lines(src: str | None) -> list[str]:
+    """Non-declaration lines that change how names in a file resolve (namespace, open, ...)."""
+    return [norm(m.group(0)) for m in CONTEXT_RE.finditer(strip_comments(src))] if src else []
+
+
 def diff_decls(before: dict, after: dict) -> dict:
     added = sorted(set(after) - set(before))
     removed = sorted(set(before) - set(after))
     stmt_changed, body_changed, header_changed = [], [], []
     for name in sorted(set(before) & set(after)):
         b, a = before[name], after[name]
-        if b["statement"] != a["statement"]:
+        if canon(b["statement"]) != canon(a["statement"]):
             stmt_changed.append(name)
-        elif b["body"] != a["body"]:
+        elif canon(b["body"]) != canon(a["body"]):
             body_changed.append(name)
-        if b["header"] != a["header"]:
+        if canon(b["header"]) != canon(a["header"]):
             header_changed.append(name)  # attributes / set_option only, e.g. @[progress] -> @[step]
     return {"added": added, "removed": removed, "statement_changed": stmt_changed,
             "body_changed": body_changed, "header_changed": header_changed}
@@ -346,8 +367,11 @@ class Miner:
         (short names repeat across files); renamed files keep their keys via the new path,
         while a theorem moved to another file shows up as removed + added."""
         before, after = {}, {}
-        new_text = {}
+        new_text, context_changed_files = {}, set()
         for f in files:
+            old_src = self.git.show(parent, f["old_path"]) if parent else None
+            if old_src is not None and context_lines(old_src) != context_lines(self.git.show(sha, f["path"])):
+                context_changed_files.add(f["path"])
             for k, v in parse_decls(self.git.show(parent, f["old_path"]) if parent else None).items():
                 before[f"{f['path']}::{k}"] = dict(v, file=f["old_path"])
             new_text[f["path"]] = self.git.show(sha, f["path"]) or ""
@@ -361,6 +385,11 @@ class Miner:
             return re.search(rf"\b(theorem|lemma)\s+{re.escape(name)}(?![\w.'])", new_text.get(path, ""))
         d["commented_out"] = [k for k in d["removed"]
                               if before[k]["kind"] in ("theorem", "lemma") and commented(k)]
+        # Theorems whose text is unchanged but whose file's namespace/open context changed: the
+        # same text may now resolve to different names (e.g. Aeneas moved `sub` into a namespace).
+        d["context_changed"] = sorted(k for k in set(before) & set(after)
+                                      if k.split("::", 1)[0] in context_changed_files
+                                      and k not in d["statement_changed"] and k not in d["body_changed"])
         d["sorry_before"] = sum(v["sorry"] for v in before.values())
         d["sorry_after"] = sum(v["sorry"] for v in after.values())
         d["axioms_added"] = [n for n in d["added"] if after[n]["kind"] in ("axiom", "opaque")]
@@ -369,10 +398,14 @@ class Miner:
         d["_before"], d["_after"] = before, after
         return d
 
-    def proof_summary(self, parent, sha, files) -> dict:
+    def proof_summary(self, parent, sha, files, changed_extraction: list[str] | None = None) -> dict:
         d = self.lean_diff(parent, sha, files)
         before, after = d.pop("_before"), d.pop("_after")
         thm = lambda n, side: side.get(n, {}).get("kind") in ("theorem", "lemma")
+        # Short names (last component) of extracted defs this change modified or removed.
+        short = {k.split("::", 1)[1].rsplit(".", 1)[-1] for k in changed_extraction or []}
+        short = {n for n in short if not n.startswith("<")}
+        refs = lambda n: n in before and bool(short) and bool(set(re.findall(r"[\w']+", before[n]["statement"] + " " + before[n]["body"])) & short)
         existing_touched = sorted({n for n in d["statement_changed"] + d["body_changed"] + d["header_changed"]
                                    if thm(n, before)})
         return {
@@ -390,8 +423,21 @@ class Miner:
             "defs_statement_changed_n": sum(1 for n in d["statement_changed"] if not thm(n, before)),
             "theorem_headers_changed_n": sum(1 for n in d["header_changed"] if thm(n, before)),
             "theorems_removed": cap([n for n in d["removed"] if thm(n, before)]),
+            # Replays: deleted theorems that mention changed extracted code were usually broken
+            # (e.g. merged into a new spec); others were cleanup.
+            "theorems_removed_referencing_extraction": cap([n for n in d["removed"] if thm(n, before) and refs(n)]),
+            "theorems_touched_referencing_extraction_n": sum(1 for n in existing_touched if refs(n)),
+            # Every changed declaration in these files that mentions changed extracted code.
+            "decls_referencing_extraction": sorted(n for n in set(before) & (
+                set(d["statement_changed"]) | set(d["body_changed"]) | set(d["header_changed"])
+                | set(d["removed"]) | set(d["context_changed"]) | set(d["sorry_added_in"])) if refs(n)),
             "theorems_removed_n": sum(1 for n in d["removed"] if thm(n, before)),
             "theorems_commented_out": cap(d["commented_out"]),
+            "theorems_context_changed": cap([n for n in d["context_changed"] if thm(n, before)]),
+            # Hand-written defs in spec/proof files edited by the fix (they break too, e.g. when
+            # an extracted name they mention is renamed).
+            "defs_touched": cap(sorted(n for n in d["statement_changed"] + d["body_changed"]
+                                       if not thm(n, before) and before[n]["kind"] in ("def", "abbrev"))),
             "theorems_added_n": sum(1 for n in d["added"] if thm(n, after)),
             "sorry_delta": d["sorry_after"] - d["sorry_before"],
             "sorry_added_in": cap(d["sorry_added_in"]),
@@ -476,7 +522,8 @@ def mine(repo: Path, cfg_name: str, rev: str | None) -> list[dict]:
             causes.append("extraction-config" if "extraction_config" in groups else "extraction-only")
 
         external_files = groups.get("external", [])
-        proofs_in_change = miner.proof_summary(c["parent"], c["sha"], groups["proof"]) \
+        changed_extraction = (extraction["defs_modified"] + extraction["defs_removed"]) if extraction else []
+        proofs_in_change = miner.proof_summary(c["parent"], c["sha"], groups["proof"], changed_extraction) \
             if "proof" in groups else None
 
         # Follow-up fixes: commits after the trigger, before the next trigger, within limits.
@@ -520,7 +567,17 @@ def mine(repo: Path, cfg_name: str, rev: str | None) -> list[dict]:
         for fu in followups:
             stmt_names += fu["statements_changed"]
         extraction_modifies = bool(extraction and not extraction["only_additions"])
+        pc = proofs_in_change or {}
+        heuristic = sorted(set(
+            pc.get("theorems_touched", []) + pc.get("theorems_commented_out", [])
+            + pc.get("theorems_removed_referencing_extraction", []) + pc.get("defs_touched", [])
+            + pc.get("sorry_added_in", []) + pc.get("theorems_context_changed", [])
+        ) - {""})
         core_pin_change = bool({"aeneas", "lean", "mathlib"} & set(pin_changes))
+        if proofs_in_change and not core_pin_change:
+            # No pin change: only the extracted code changed, so (replays: #445) only declarations
+            # that mention a changed extracted definition can break.
+            heuristic = [n for n in heuristic if n in set(pc.get("decls_referencing_extraction", []))]
         pr = pr_number(c["subject"])
 
         records.append({
@@ -546,11 +603,7 @@ def mine(repo: Path, cfg_name: str, rev: str | None) -> list[dict]:
             },
             "proofs_in_change_commit": proofs_in_change,
             # Heuristic: existing theorems the human edited, removed, or sorried while fixing.
-            "broken_theorems_heuristic": cap(sorted(set(
-                (proofs_in_change or {}).get("theorems_touched", [])
-                + (proofs_in_change or {}).get("theorems_removed", [])
-                + (proofs_in_change or {}).get("sorry_added_in", [])
-            ) - {""})),
+            "broken_theorems_heuristic": cap(heuristic),
             "statements_changed_by_fix": bool(stmt_names),
             "statements_changed_by_fix_n": len(stmt_names),
             "size": {
@@ -562,7 +615,9 @@ def mine(repo: Path, cfg_name: str, rev: str | None) -> list[dict]:
                                      + sum(fu["proofs"]["theorems_touched_n"] for fu in followups)),
             },
             # Worth replaying: something the proofs depend on changed and humans edited proofs.
-            "likely_break": bool((extraction_modifies or core_pin_change) and (fix_in_change or followups)),
+            "likely_break": bool((core_pin_change and (fix_in_change or followups)) or
+                                 (extraction_modifies and proofs_in_change and
+                                  heuristic)),
             "mined_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         })
     return records
@@ -579,13 +634,15 @@ def main() -> int:
     records = mine(args.repo.expanduser(), args.config, args.rev)
     if args.out:
         args.out.parent.mkdir(parents=True, exist_ok=True)
-    out = open(args.out, "w") if args.out else sys.stdout
+    tmp = args.out.with_suffix(args.out.suffix + ".tmp") if args.out else None
+    out = open(tmp, "w") if tmp else sys.stdout
     try:
         for r in records:
             out.write(json.dumps(r, ensure_ascii=False) + "\n")
     finally:
-        if args.out:
+        if tmp:
             out.close()
+            tmp.replace(args.out)  # atomic: readers never see a partial file
     n_likely = sum(r["likely_break"] for r in records)
     print(f"{len(records)} trigger commits, {n_likely} likely breaks -> {args.out or 'stdout'}", file=sys.stderr)
     return 0
