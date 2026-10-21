@@ -30,9 +30,9 @@ Verdicts:
 | 15 | `lake build` is not "whole project" | minor | **Accept** |
 | 16 | Stop rule can block the frontier-model attempt | minor | **Accept** |
 | A1 | Narrow batch repairer for the prototype | alternative | **Accept in part**: the prototype is a narrow slice, but keeps component acceptance (#4) |
-| A2 | Challenge-and-proof architecture (comparator) | alternative | **Accept** as the gate's target design; compatibility to verify |
+| A2 | Challenge-and-proof architecture (comparator) | alternative | **Deferred**: hardening option if the threat model is raised (see Threat model) |
 | A3 | Separate auditing from repair | alternative | **Accept** |
-| Q | Threat model | open question | **Discuss** (recommendation given) |
+| Q | Threat model | open question | **Decided** (owner, 2026-10-21): honest mistakes |
 
 No finding is rejected outright. Three proposed *fixes* are replaced by different ones (#4, #8, #9), and parts of two suggestions are rejected (see #4 and #12).
 
@@ -42,10 +42,10 @@ No finding is rejected outright. Three proposed *fixes* are replaced by differen
 
 Reproduced independently on Lean 4.35.0: the probe prints `'gateProbe' does not depend on any axioms`. Lean's [proof-validation guide](https://lean-lang.org/doc/reference/latest/ValidatingProofs/) classes "un-reviewed AI-generated proofs" as the *malicious* threat level, where elaboration-time checks and `#print axioms` are not enough.
 
-Changes:
-- New mandatory check **G5 Kernel replay** in an isolated job: the candidate is built in a sandbox with no secrets; a separate checker replays the proof terms through the kernel and compares statements against a trusted statement file. Target tool: `lake comparator`. Fallback if it does not support a target's (older) toolchain: `lean4checker` on the built `.olean` files.
-- The checker loads modules without running their initializers, so candidate code cannot run inside it.
-- G0 adds cheap textual deterrents (`debug.*` options, `sorry`/`admit`), but the design no longer relies on textual bans for soundness.
+Changes (scaled to the threat model the owner chose, honest mistakes; see below):
+- New mandatory check **G5 Kernel replay**: after the gate's build, `lean4checker` replays every declaration in the built files through the kernel. This catches this exact probe and is cheap.
+- G0 adds cheap textual deterrents (`debug.*` options, `sorry`/`admit`).
+- The design states plainly that the gate does not claim to withstand deliberately crafted false proofs. The stronger setup the review proposed (sandboxed build, separate checker job, `lake comparator`) is recorded as a future hardening option.
 - Planted-violation tests add this exact probe.
 
 ### 2. Broken snapshot may not exist: Accept
@@ -134,9 +134,11 @@ The target config lists the required build targets and the audited module invent
 
 "Two attempts at the same goal" now ends the current *strategy*, not the theorem. The next strategy or model tier still runs while budget remains.
 
-### Threat model: Discuss (recommendation)
+### Threat model: Decided (owner, 2026-10-21): honest mistakes
 
-Recommendation: **design the gate for the malicious level.** Lean's own guide puts unreviewed AI-generated proofs there, and a prompt-injected agent is an attacker by definition. Practically: build candidates in a sandbox, kernel-replay in an isolated checker (G5), and treat textual checks as deterrents only. The extra cost is mainly G5, which v0 needs anyway after #1.
+The triage recommended the malicious level, following Lean's guide, which classes un-reviewed AI-generated proofs there. The owner chose **honest mistakes**: the gate guards against agent errors and obvious shortcuts, not against deliberately crafted false proofs. The design keeps `lean4checker` (cheap, recommended for CI even at the honest level) and records the sandbox-plus-comparator setup as future hardening.
+
+This decision is about trusting proofs. The CI-security measures for outside contributors (SHA-bound fork approval, keeping the model key away from code built from PRs) stay, because they protect secrets rather than proofs.
 
 ### Open questions from the review
 

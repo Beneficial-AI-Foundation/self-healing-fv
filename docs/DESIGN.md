@@ -26,8 +26,8 @@ This document describes the target design. The prototype is the slice of it that
 - **One repo:** curve25519-dalek-lean-verify, which includes the PR 535 showcase. curve25519-dalek-u32 only if time allows.
 - **Data:** mining and replay with completeness flags (§6.5), on a small set of hand-audited cases.
 - **Audit** (§4.7): model-free, run on historical commits including PR 535.
-- **Repair loop** (§3.3, S4): one agent adapter, one model, one tool profile. Which adapter is still to decide.
-- **Gate:** G0–G5, including kernel replay with whichever of `lake comparator` and `lean4checker` works on dalek's toolchain; component acceptance; the planted-violation tests (§4.6).
+- **Repair loop** (§3.3, S4): one agent adapter (**Claude Code**, headless), one model, one tool profile.
+- **Gate:** G0–G5, including kernel replay with `lean4checker`; component acceptance; the planted-violation tests (§4.6).
 - **Pilot runs** to set budget defaults (§8.5).
 - **Evaluation:** repair rate, cost, gate rejections, audit result on PR 535, the no-LLM sweep baseline, and comparison with the human fix. Without a held-out repo, results are reported on newer dalek cases than those used for tuning.
 - **One run on GitHub Actions** on a fork of the repo, with delivery as a run-record artifact and a comment (shadow mode).
@@ -81,7 +81,7 @@ This document describes the target design. The prototype is the slice of it that
  S4 Repair loop    per broken theorem, leaves first; fresh agent session;
     (agentic)      attempt schedule; budgets; pre-gate feedback
         │
- S5 Gate (§4)      sandboxed build, then isolated kernel replay; no model key
+ S5 Gate (§4)      separate job, no model key; clean build + kernel replay
         │
  S6 Delivery       separate job, no model; PR + report, or comment (shadow)
         │
@@ -150,11 +150,10 @@ The delivered revision must itself be verified by the repo's normal CI. Pushes m
 | `context` | no | no | package caches | context bundle, snapshots, coverage |
 | `behavior` | no | no | crate caches | behavior-difference annotations |
 | `repair` | via proxy only | no | model proxy + package caches | candidate diff, attempts |
-| `gate-build` | no | no | package caches | candidate build outputs |
-| `gate-check` | no | no | none | verdict JSON |
+| `gate` | no | no | package caches | verdict JSON |
 | `deliver` | no | GitHub App token (scoped) | GitHub API | PR, patch or comment |
 
-Jobs pass data only as artifacts, bound to repository, PR, head SHA and workflow attempt. The `gate-build` job starts from a fresh checkout and applies the candidate diff only after the scope check (§4.3, G0) passes; it builds the candidate in a sandbox. The `gate-check` job never builds or runs candidate code: it replays the build outputs through the kernel and compares them with the trusted snapshots (G5). This way neither the agent nor code it wrote can change what the gate checks.
+Jobs pass data only as artifacts, bound to repository, PR, head SHA and workflow attempt. The `gate` job starts from a fresh checkout and applies the candidate diff only after the scope check (§4.3, G0) passes. This way the agent cannot change what the gate runs.
 
 Inside the `repair` job, **all candidate code runs in a container with no secrets and no network**: builds, the `check` tool and the Lean language server. The agent process reaches the model only through a small **metering proxy** in a separate container, which holds the real key and enforces the cost cap (§9.5). Building Lean code runs arbitrary code, so this keeps the key out of reach of anything the agent writes.
 
@@ -188,9 +187,9 @@ Runner limits shape the design. A standard hosted runner has 4 cores, 16 GB RAM,
 
 ### 4.1 Principles
 
-- **Threat model: malicious.** Lean's own proof-validation guide [LeanValidate] places un-reviewed AI-generated proofs at the *malicious* level, and a prompt-injected agent is an attacker by definition. A proof body can run metaprograms: it can, for example, add an unchecked theorem with kernel checking switched off, after which `#print axioms` reports nothing (reproduced on Lean 4.35.0). So acceptance rests on an **independent kernel replay** in an isolated job (G5). Textual checks are deterrents and early feedback, not the guarantee.
+- **Threat model: honest mistakes** (owner decision, 2026-10-21). The gate guards against errors an agent makes, and against the obvious shortcuts it may take to make a build pass (statement edits, `sorry`, new axioms, out-of-scope files). It does **not** claim to withstand a deliberately crafted false proof. Example: a proof body can run a metaprogram that adds an unchecked theorem with kernel checking switched off, after which `#print axioms` reports nothing (reproduced on Lean 4.35.0 in the design review). Lean's proof-validation guide [LeanValidate] classes un-reviewed AI-generated proofs at the stronger *malicious* level; the hardening for that level (building in a sandbox and checking with `lake comparator` in a separate job) is a future option. As a cheap step that Lean recommends for CI even at the honest level, G5 replays the built proofs through the kernel with `lean4checker`, which also catches that example.
 - **Deterministic and model-free.** The gate takes a finished candidate diff and returns pass or fail per theorem. It never writes anything.
-- **Isolated.** The candidate is built in a sandbox (`gate-build`), and checked in a separate job that never runs candidate code (`gate-check`, §3.4), with the target repo's own pinned toolchain.
+- **Isolated.** It runs in its own job (§3.4) on a fresh checkout, with the target repo's own pinned toolchain.
 - **Compared against the stubbed broken state, not the base commit.** If the triggering change itself changed statements (a human did it, in the PR), that is the PR author's change. The gate holds the bot to the statements as they stand after the change. Statement and trust changes made *by the triggering change* are reported by the audit (§4.7). This is exactly the class of change behind issue 873.
 - **Tested against planted violations** before any autonomy is granted (§4.6).
 
@@ -213,7 +212,7 @@ The bot may change proof bodies of broken theorems, and add new lemmas in the sa
 | G2 | Trust base | For each repaired theorem `T`, its transitive axiom closure must be a subset of the three standard Lean axioms (`propext`, `Classical.choice`, `Quot.sound`) plus the closure `T` had at the base commit. In particular there is no `sorryAx`, and `Lean.ofReduceBool` (`native_decide`) is allowed only where `T` already used it. Every **added** declaration is audited the same way, whether or not anything uses it. Beyond the stubs for still-broken theorems, any new `sorryAx` anywhere in the candidate rejects it. |
 | G3 | Clean build | Build the **required targets** listed in the target config (the audited module inventory; a default `lake build` may exclude some, such as tests) from a fresh checkout with dependency caches only (no project `.lake`). The build is of the stubbed candidate: accepted repairs applied, still-broken theorems stubbed. It must succeed, and no theorem outside the broken set may newly fail. The report states which targets were covered. |
 | G4 | Quality (report only) | Proof size and elaboration time compared with the base proof. These are reported, not blocking, in v0. |
-| G5 | Kernel replay | In the isolated `gate-check` job: replay every declaration of the candidate build through the Lean kernel, and check that the statements match the trusted snapshot. Modules are loaded without running their initializers. Target tool: `lake comparator` [LeanValidate]; fallback where it does not support a target's toolchain: `lean4checker` on the build outputs. Mandatory. |
+| G5 | Kernel replay | After the build, replay every declaration in the built files through the Lean kernel with `lean4checker` [LeanValidate]. Catches declarations that were added without kernel checking. Mandatory. |
 
 **Component acceptance.** A repair of theorem `A` is accepted when G0–G5 pass on the stubbed candidate and `A`'s axiom closure contains no `sorryAx`. `A` then does not depend on any still-broken theorem, so its proof is valid on its own, even though the project as a whole still fails until the remaining theorems are fixed.
 
@@ -240,7 +239,7 @@ Changed:
 - **Base-relative trust check.** G2 uses each theorem's own base closure instead of one frozen whitelist file.
 - **Coverage and added declarations.** Snapshots record coverage (§4.4), and G2 audits every added declaration.
 
-The vendored code is unverified against our target toolchains: whether it compiles across the historical Lean versions in the mined cases is an early check (§11). G5 is a separate tool (comparator or `lean4checker`), not vendored code.
+The vendored code is unverified against our target toolchains: whether it compiles across the historical Lean versions in the mined cases is an early check (§11). G5 is a separate tool (`lean4checker`), not vendored code.
 
 Interface:
 - `gate snapshot --config T.toml --out S.json`
@@ -403,7 +402,7 @@ An agent adapter (§3.5) takes one broken theorem's context bundle, the allowed-
 
 | Adapter | Status | Notes |
 |---|---|---|
-| Claude Code (headless) | v0, first-class | Native MCP and skills |
+| Claude Code (headless) | v0, first-class; the prototype's adapter (§2) | Native MCP and skills |
 | Codex CLI | v0, first-class | Native MCP; the FVS [FVS] playbook is passed as prompt text |
 | Minimal loop | v0, fallback | Our own loop calling any model API with tool calling. The most portable option, and a baseline (bash-only coding agents are strong baselines in Lean [miniLean]). |
 | No-tools loop | v1 | For models without tool calling (e.g. open Lean provers): the model writes a whole proof; we compile it and send back errors and goal states. |
@@ -611,7 +610,7 @@ Each question is answered by a measurement or an early prototype, not by more de
 7. **Decision models.** Does the Decisions API beat the rules on routing and labels, and is its confidence calibrated (§3.5)? It is in public beta, so its availability is also a risk.
 8. **Differential tests.** For curve25519-dalek: how do we map a broken theorem to its Rust function (through Aeneas names), and generate valid inputs for its types (field elements, scalars, points)?
 
-9. **Comparator support.** Does `lake comparator` work with each target's (sometimes older) Lean toolchain? If not, G5 falls back to `lean4checker`.
+9. **Kernel replay support.** Is a `lean4checker` release available for each target's (sometimes older) Lean toolchain? If a stronger threat model is adopted later, does `lake comparator` work there too?
 10. **Vendored gates.** Do the vendored statement and trust checks compile across the historical Lean versions in the mined cases?
 11. **Frozen-set coverage.** Which declaration kinds does the frozen set include: instances, inductives, constructors, generated auxiliaries, external axioms?
 
