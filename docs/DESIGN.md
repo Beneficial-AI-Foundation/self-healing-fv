@@ -1,6 +1,6 @@
 # Design: self-healing CI for verified Rust (v0)
 
-Status: draft (§3–§4 written; other sections outline). Owner: Dana Mukusheva. Linear: SCI-1706 (sub-issues SCI-1714, SCI-1715, SCI-1717).
+Status: draft (§3–§5 written; other sections outline). Owner: Dana Mukusheva. Linear: SCI-1706 (sub-issues SCI-1714, SCI-1715, SCI-1717).
 
 ## 1. Problem
 
@@ -232,7 +232,66 @@ A candidate that does any of the following must be rejected. Each case is a test
 
 ## 5. Escalation
 
-TODO: when and what the reviewer sees (before/after statements, evidence, cause).
+The bot never decides whether a statement or trust change is acceptable. It shows the right person the evidence and stops.
+
+### 5.1 When
+
+Every run that does not end with all broken theorems repaired escalates. Per theorem, the outcomes are the ones from S6 (§3.3):
+
+| Outcome | Meaning | Main evidence |
+|---|---|---|
+| `statement-must-change` | The old statement no longer elaborates against the new extracted code. The `rename-only` flag is set when the only difference is a name. | The old statement, the elaboration error, the rename |
+| `spec-suspect` | The repair failed, and the differential test (S3) found that behavior changed. | The witness input, with old and new outputs |
+| `proof-hard` | The budget ran out with no evidence against the statement. | The last goal state, an attempt summary |
+| `blocked-on` | The theorem depends on another theorem that is still broken. | The blocking theorem |
+
+Separately, **every** run reports statement and trust changes **made by the triggering change itself** (§4.7), even when every repair succeeds. A run with all theorems repaired but a weakened statement in the PR still needs a human.
+
+### 5.2 Where
+
+Escalations go to GitHub, where every user of the bot already works:
+- **A check run** on the PR (or on the commit, for runs on `main`). Its summary holds the full report (§5.4).
+  - Conclusion `success` only when every broken theorem was repaired and the triggering change made no statement or trust change.
+  - Otherwise `failure`.
+
+  The repo's own verification job stays the source of truth for whether the proofs build. The bot's check never turns it green.
+- **One PR comment.** A short summary with a link to the check run. The bot edits this comment in place on every new push instead of adding new ones. A hidden marker in the comment identifies it.
+- **Linear (optional).** BAIF repos can turn on filing each escalation as a Linear issue. It is off by default, since outside users do not use BAIF's Linear.
+
+GitHub limits a check-run summary and a comment to about 65,000 characters each. The report is truncated to fit, and the full report is always in the run record artifact (S7).
+
+### 5.3 Who
+
+- **By default, the PR author** is asked to review: they made the change and know its intent.
+- **Code owners**, from the repo's `CODEOWNERS` file, are added as requested reviewers when:
+  - the triggering change itself changed a statement or the trust base; or
+  - an outcome is `statement-must-change` or `spec-suspect`.
+
+  Those cases are decisions about the spec, so they need someone with authority over it.
+- **Runs on `main`** (e.g. a scheduled build after a toolchain bump) have no PR author. They go to the reviewer group named in the target config, falling back to code owners.
+
+### 5.4 What the reviewer sees
+
+The report has four parts:
+
+1. **Summary.** Counts per outcome, the cause of the break (`rust` / `aeneas` / `lean-mathlib`, from the diffs), the cost and wall time of the run, and a link to the run record.
+2. **Changes made by the triggering change.**
+   - Each changed statement, before and after, pretty-printed for reading. The canonical fingerprint decides whether something changed; the pretty-printed text is for display only.
+   - Axioms added to or removed from each theorem's closure.
+   - Changed trusted-model files.
+3. **One entry per escalated theorem**:
+   - its name, with a link to `file:line`;
+   - its outcome and the evidence from §5.1;
+   - the attempts made, with the model and the cost of each.
+4. **Repaired theorems.** For each: name, diff size, and any `maxHeartbeats` raise or elaboration-time increase (G4).
+
+Model-written text in the report (the agent's own diagnosis, and labels from the decision adapter) is marked as model output, shown with its confidence, and never decides the outcome. It is untrusted, so it is rendered as quoted plain text, truncated, with `@` mentions and links neutralized. A prompt-injected agent cannot ping people or plant links through the report.
+
+### 5.5 What the bot never does
+
+- Approve a statement or trust change, or say that one looks fine.
+- Propose a new statement in v0. Draft statement changes (a separate, clearly labeled run whose output a human merges) are deferred to v1.
+- Hide a broken theorem behind `sorry`, or mark the repo's own verification check as passing.
 
 ## 6. Data: historical breaks (SCI-1714)
 
