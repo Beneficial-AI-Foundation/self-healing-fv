@@ -1,6 +1,6 @@
 # Design: self-healing CI for verified Rust (v0)
 
-Status: draft (§3–§8 and references written; §9–§11 outline). Owner: Dana Mukusheva. Linear: SCI-1706 (sub-issues SCI-1714, SCI-1715, SCI-1717).
+Status: draft (all sections written; for review). Owner: Dana Mukusheva. Linear: SCI-1706 (sub-issues SCI-1714, SCI-1715, SCI-1717).
 
 ## 1. Problem
 
@@ -62,7 +62,7 @@ Non-goals (v0):
  S7 Run record     JSON artifact: inputs, attempts, cost, gate results, outcome
 ```
 
-**S1 Input.** In live CI the trigger is the failure of the repo's existing verification job, via `workflow_run`, so the bot never runs fork code with secrets. A maintainer label (e.g. `self-heal`) re-runs it on demand. The bot never uses `pull_request_target`. A new push to the same PR cancels a running bot run. Runs are keyed by head SHA so the bot never opens duplicate PRs. In replay, the case record (§6) gives base, change and fix commits. The broken state is the base tree with the change commit's extracted code, toolchain files and extraction config laid over it. The replay harness (`replay/replay_case.py`) builds it and records the ground-truth broken set: proofs that fail are replaced by `sorry` in rounds until the build is green, so failures in one module do not hide failures in the modules that import it. v0 never runs Charon/Aeneas: the extracted code comes from history (replay) or from the repo's own extraction job (live).
+**S1 Input.** In live CI the trigger is the failure of the repo's existing verification job, via `workflow_run`. A maintainer label (`self-heal`) re-runs it on demand. Building Lean runs arbitrary code, so the bot runs on fork PRs only after a maintainer adds that label (§9.2), and never uses `pull_request_target`. A new push to the same PR cancels a running bot run. Runs are keyed by head SHA so the bot never opens duplicate PRs. In replay, the case record (§6) gives base, change and fix commits. The broken state is the base tree with the change commit's extracted code, toolchain files and extraction config laid over it. The replay harness (`replay/replay_case.py`) builds it and records the ground-truth broken set: proofs that fail are replaced by `sorry` in rounds until the build is green, so failures in one module do not hide failures in the modules that import it. v0 never runs Charon/Aeneas: the extracted code comes from history (replay) or from the repo's own extraction job (live).
 
 **S2 Context capture** (deterministic). Build the broken state and record:
 - broken theorems: those that fail now but were proved at the base commit;
@@ -105,7 +105,7 @@ A hit cap escalates as `proof-hard`, with the partial state. If a theorem stays 
 
 One run produces one delivery. It contains every repaired theorem plus an escalation report for the rest (§5). The bot never inserts `sorry` to make CI green. Delivery modes, set per repo:
 - **shadow**: a comment with the diff and the report;
-- **propose**: a PR that targets the broken PR's branch (or `main` for toolchain bumps), merged by a human;
+- **propose**: a PR that targets the broken PR's branch (or `main` for toolchain bumps), merged by a human. For fork PRs, whose branches the bot cannot push to, a patch instead (§9.2);
 - **auto-merge**: deferred, opt-in per repo, after a track record in propose mode.
 
 On day 1 the thing being trusted is the gate, which is new code, so autonomy is earned.
@@ -480,15 +480,95 @@ The escalation confusion matrix compares the bot with the human fix:
 
 Model keys: the bot runs in the target repo's own CI with that repo's own API keys, stored as repository or organization secrets. BAIF repos use BAIF's API keys; outside users supply their own. BAIF hosts no service and never holds anyone else's keys or code.
 
-TODO: GitHub Actions runner limits, secrets and fork PRs, bring-your-own-model configuration, per-run and monthly cost limits.
+### 9.1 Packaging and install
+
+The bot ships as a **reusable GitHub Actions workflow** in this repo, because it is several jobs with different permissions (§3.4), which a single action cannot express. A target repo installs it by adding:
+- a short workflow file that calls the bot's workflow, pinned to a release tag or commit SHA;
+- the target config (§3.5): Lean roots, paths, build command, Rust crate path, agent adapter, model, tool profile, budgets, delivery mode;
+- its model API key(s) as repository or organization secrets;
+- optionally, a `CODEOWNERS` file for escalation routing (§5.3).
+
+Releases are versioned. Each run record stores the bot version, gate version, target config hash and toolchain versions, so any result can be traced to the exact code that produced it.
+
+### 9.2 Triggers and fork PRs
+
+- **Same-repo PRs and `main`:** the bot runs automatically when the repo's verification job fails (`workflow_run`).
+- **Fork PRs:** the bot runs only after a maintainer adds the `self-heal` label *(proposed)*. Building Lean code runs arbitrary code: `lakefile.lean`, macros and `#eval` all execute at build time. The `repair` job builds the PR's code *and* holds a model key, so it must never build unreviewed code from strangers. The label means "a maintainer has looked at this code". Jobs without secrets (`context`, `falsity`, `gate`) carry no such risk, but they run under the same rule for simplicity.
+- **Delivery to fork PRs:** the bot cannot push branches to a fork. It posts the repair as a patch (a downloadable artifact, plus GitHub suggested changes for small diffs) that the author applies.
+- **Opt-out:** a `no-self-heal` label skips a PR, and a repository variable turns the bot off entirely.
+
+### 9.3 Secrets and permissions
+
+- The model key is exposed only to the `repair` job, and only as an environment variable for the adapter.
+- The `deliver` job gets a `GITHUB_TOKEN` with the minimum permissions: `contents: write` (to push the repair branch), `pull-requests: write`, `checks: write`. Every other job runs with `contents: read`.
+- We recommend a dedicated model key per repo, with the provider's own spend limit set on it. A leaked or misused key is then bounded by that limit.
+- Hosted runners do not restrict network egress by default. The `repair` job enforces its allowlist (model API, package caches) with an egress-filtering step. Which tool to use is an implementation choice for SCI-1717.
+
+### 9.4 Runners
+
+- **Hosted runners** by default: 4 cores, 16 GB RAM, about 14 GB of free disk and a 6 h job cap.
+- Lean and Mathlib come from `elan` and the Mathlib build cache. The project's `.lake` build output is cached between runs with `actions/cache` (limited to 10 GB per repo, evicted when unused).
+- Each job has its own timeout below the 6 h cap. A timeout escalates as `proof-hard` with the partial state, never as a silent failure.
+- Repos whose clean build does not fit (measured early, §3.4) use **larger hosted runners** or **self-hosted runners**. Self-hosted runners must be ephemeral (one fresh machine per job), because a persistent machine would carry one PR's state and code into the next.
+
+### 9.5 Cost controls
+
+- **Per run:** a mandatory cap in the target config, enforced by the bot from the usage each model response reports. When the cap is hit the run stops and escalates with its partial state.
+- **Per month:** enforced by the model provider's own spend limit on the key (§9.3), which is the only place a limit holds across runs. The bot also reports month-to-date spend from its run records in each delivery, so maintainers see the trend before the limit hits.
+- **Concurrency:** one bot run per PR (a new push cancels the old run), and an optional limit on concurrent runs per repo.
+
+No default numbers yet: they come from the pilot runs (§8.5).
+
+### 9.6 Observability
+
+- **Run record** (S7): uploaded as a workflow artifact. GitHub keeps artifacts for 90 days by default; BAIF's evaluation runs archive them permanently.
+- **Job summary:** each run writes a short human-readable summary to the workflow run page.
+- **Bot health:** the run record holds the data for a few simple counters: runs, outcomes, gate rejections by check, and cost. A small script turns them into a weekly report for BAIF's own repos.
 
 ## 10. Related work and reuse
 
-TODO: a paragraph each on [AVD], [FVS], [KVerus], [Maestro], [LeanMarathon], [miniLean], [ProofHarness], [Radar]: what each does, what we reuse, and how we differ.
+**Agent harnesses for Lean verification of Rust.** *auto_verify_dalek* [AVD] removes every proof and internal spec from the verified curve25519-dalek, keeps the extracted code and top-level specs, and asks agents to rebuild the rest. Its harness runs a headless coding agent per node of the call graph, leaves first, and accepts work only through deterministic gates: scope, statement fingerprints, `sorry` accounting and an axiom whitelist. We reuse its gates (§4.5) and its per-node, leaves-first structure (§3.3, S4). The difference is the direction of trust: there the code is frozen and the agent writes specs, while here the specs are frozen and the code has changed under them.
+
+**Agent skills.** *Formal Verification Skills* [FVS] packages verification workflows for coding agents, including proof attempts (`lean-verify`), spec review and trust audits. We use `lean-verify` as an optional repair playbook (§7.3). Its spec review is a natural next step for escalations, which v0 only reports (§5.5).
+
+**Proof generation and repair for Rust.** *KVerus* [KVerus] generates and repairs Verus proofs for Rust using a knowledge store (code metadata, lemma meanings, toolchain details), dependency-aware analysis and "error-driven self-refinement", and it degrades less than earlier tools under breaking Verus updates. It is the closest prior work on repair after code and toolchain changes. We differ in target (Lean via Aeneas, not Verus), in making the acceptance gate and escalation central, and in evaluating on mined real breaks. Its knowledge store is a precedent for giving our repair agent retrieval over past repairs (v1).
+
+**Coordination and diagnosis.** *Maestro* [Maestro] coordinates many prover agents on one large proof, with provers reporting *why* they failed so a coordinator can guide, correct or replan. Our diagnosis format (§7.4) follows this idea. Our setting needs less coordination: the call graph and the statements are fixed, so repairs are independent except for dependency order.
+
+**Harness design.** *LeanMarathon* [LeanMarathon] is a multi-agent harness for research-level autoformalization, built around a shared proof file and CI-gated rounds; it uses the Lean language server for live feedback. *mini-Lean-agent* [miniLean] shows that a minimal coding agent with only `bash` is a strong Lean baseline. Together they motivate our tool profiles: `minimal` as the baseline, and `lsp` as an ablation (§7.3, §8.3), rather than assuming that richer tools help.
+
+**Verification environments.** *Towards Agentic Proof Harness Engineering* [ProofHarness] has an agent build the verification environment for a C function, checked by a soundness guard and a precision guard. In the Aeneas setting, the analogue is the extraction config and the hand-written models of external code. A future "step 0" of this bot could set up a new repo's config and models under similar guards. Note the term clash: "harness" there means the verification environment, while elsewhere in this doc it means agent scaffolding.
+
+**Proof performance.** *Radar* [Radar] benchmarks Lean projects per commit (build time, memory). Our G4 report (§4.3) covers only the repaired proofs. A later proof-optimization mode, where the bot proposes faster proofs when idle, would use Radar to measure the gains (non-goal for v0, §2).
+
+**Verified cryptography at scale.** The SymCrypt verification effort [SymCrypt] verifies post-quantum cryptography in Rust with Aeneas and Lean, and is our held-out evaluation repo (§6.1).
 
 ## 11. Open questions
 
-TODO.
+Each question is answered by a measurement or an early prototype, not by more design.
+
+**Feasibility (answer first, week 1)**
+1. **Build time.** How long does a clean build of each target repo take on a hosted runner, and does it fit the job cap with room for repair attempts (§9.4)?
+2. **Gate scale.** Do the statement and trust snapshots (§4.4) run in reasonable time and memory on a full repo such as curve25519-dalek or SymCrypt? Snapshotting every declaration in a large project may need batching.
+3. **Data volume.** How many valid cases does mining yield per repo and per cause (§6)? If there are too few `rust` cases, the evaluation leans on `aeneas` cases.
+
+**Design choices to revisit with data**
+
+4. **Frozen set.** How often does the strict frozen set (§4.2) over-escalate, for example when humans change internal helper lemma statements? Would freezing only spec theorems be safe enough?
+5. **Renames.** How many `statement-must-change` escalations are `rename-only`? That decides whether a human-approved rename map (v1) is worth building.
+6. **Tools.** Does the `lsp` profile beat `minimal` per dollar (§7.3)?
+7. **Decision models.** Does the Decisions API beat the rules on routing and labels, and is its confidence calibrated (§3.5)? It is in public beta, so its availability is also a risk.
+8. **Differential tests.** For curve25519-dalek: how do we map a broken theorem to its Rust function (through Aeneas names), and generate valid inputs for its types (field elements, scalars, points)?
+
+**Live deployment**
+
+9. **Extraction in live CI.** The target repos run extraction in different workflows. How does the bot wait for and consume each repo's extraction output (§3.6)?
+10. **Escalation usability.** Will reviewers read and act on the report (§5.4)? This needs feedback from first users of the live bot.
+11. **Shared auditor.** If a shared BAIF auditor for "statement unchanged, no new trust" becomes available, swap it in behind the gate interface (§4.5).
+
+**Publication**
+
+12. **Dataset release.** Which licenses apply to statement excerpts from each source repo, and do run records need redaction before release (§6.6)?
 
 ## 12. References
 
