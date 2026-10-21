@@ -1,10 +1,10 @@
 # Design: self-healing CI for verified Rust (v0)
 
-Status: draft (§3–§5, §7 and §8 written; other sections outline). Owner: Dana Mukusheva. Linear: SCI-1706 (sub-issues SCI-1714, SCI-1715, SCI-1717).
+Status: draft (§3–§8 and references written; §9–§11 outline). Owner: Dana Mukusheva. Linear: SCI-1706 (sub-issues SCI-1714, SCI-1715, SCI-1717).
 
 ## 1. Problem
 
-Verified Rust at BAIF follows Rust → Charon/Aeneas → Lean, with hand-written specs and proofs about the extracted code. Every Rust change, Aeneas update, or Lean/Mathlib bump can break proofs, and humans repair them by hand. Hand repairs can silently weaken specs (curve25519-dalek-lean-verify issue 873, introduced in the Aeneas update of PR 535).
+Verified Rust at BAIF follows Rust → Charon/Aeneas → Lean [Charon, Aeneas], with hand-written specs and proofs about the extracted code. Every Rust change, Aeneas update, or Lean/Mathlib bump can break proofs, and humans repair them by hand. Hand repairs can silently weaken specs (curve25519-dalek-lean-verify issue 873, introduced in the Aeneas update of PR 535).
 
 ## 2. Goals and non-goals
 
@@ -73,7 +73,7 @@ Non-goals (v0):
 
 In live CI the baseline snapshot of `main` is cached as an artifact after each green build, so it is not recomputed per run.
 
-Theorems whose *statement* no longer elaborates (e.g. Aeneas renamed a type) cannot be repaired without a statement change. They go straight to escalation as `statement-must-change`, with a `rename-only` flag when the only difference is a name A human-approved rename map is deferred to v1.
+Theorems whose *statement* no longer elaborates (e.g. Aeneas renamed a type) cannot be repaired without a statement change. They go straight to escalation as `statement-must-change`, with a `rename-only` flag when the only difference is a name. A human-approved rename map is deferred to v1.
 
 **S3 Falsity check** (differential tests). When the Rust source of a function under a broken theorem changed, build the Rust before and after the change and run both on generated inputs (random plus boundary values from the argument types). Disagreement shows that **behavior changed**. That is evidence, not proof, that the old statement is false, because a weak spec can still hold for both versions. So disagreement does not skip the repair. It changes what the outcome means:
 - if the repair passes the gate, the report says "behavior changed and the spec still holds" (useful to the reviewer);
@@ -136,7 +136,7 @@ Runner limits shape the design. A standard hosted runner has 4 cores, 16 GB RAM,
   - ordering escalations by urgency (score);
   - in SCI-1714 mining, whether a commit is a proof break, a fix, or neither (choice).
 
-  The default is **rules only**. The first model-backed adapter is the OpenAI Decisions API, which returns a choice, predicate or score with a confidence. Below a confidence threshold the rules decide. A model-backed adapter stays enabled only if it beats the rules on the mined cases. **A decision model never sits in the gate.**
+  The default is **rules only**. The first model-backed adapter is the OpenAI Decisions API [DecisionsAPI], which returns a choice, predicate or score with a confidence. Below a confidence threshold the rules decide. A model-backed adapter stays enabled only if it beats the rules on the mined cases. **A decision model never sits in the gate.**
 - **Gate.** A command-line tool with a JSON interface (§4.5), so the vendored implementation can later be swapped for a shared BAIF auditor without touching the pipeline.
 - **Target config.** One file per target repo: Lean root modules, paths for extracted code and trusted models, the build command, the Rust crate path (for S3), budgets and the delivery mode. The config file itself is protected (§4.2).
 
@@ -190,7 +190,7 @@ The gate works on snapshots. A snapshot is one JSON record per declaration: name
 
 ### 4.5 Implementation: vendored, then adapted
 
-We vendor (copy, with attribution) the statement and trust checks from [auto_verify_dalek](https://github.com/Beneficial-AI-Foundation/auto_verify_dalek) at commit `32ed856` (MIT): `harness/gates/StmtCanon.lean` and `harness/gates/g2_trust_base.py`. The copies live in `gates/` with the source URL, commit and MIT notice in their headers. There is no runtime dependency on that repo.
+We vendor (copy, with attribution) the statement and trust checks from auto_verify_dalek [AVD] at commit `32ed856` (MIT): `harness/gates/StmtCanon.lean` and `harness/gates/g2_trust_base.py`. The copies live in `gates/` with the source URL, commit and MIT notice in their headers. There is no runtime dependency on that repo.
 
 Kept as-is:
 - per-declaration JSON records;
@@ -295,7 +295,56 @@ Model-written text in the report (the agent's own diagnosis, and labels from the
 
 ## 6. Data: historical breaks (SCI-1714)
 
-TODO: sources (curve25519-dalek-lean-verify, curve25519-dalek-u32, SparsePostQuantumRatchet-verify, microsoft/SymCrypt `feature/verifiedcrypto`), case record format, cause labels (Rust change / Aeneas bump / Lean or Mathlib bump), statement-changed label.
+Real proof breaks, mined from the git history of verified-Rust repos. The miner (`mining/mine_history.py`) and the replay harness (`replay/replay_case.py`) implement this section.
+
+### 6.1 Sources
+
+| Repo | Role | Notes |
+|---|---|---|
+| [Beneficial-AI-Foundation/curve25519-dalek-lean-verify](https://github.com/Beneficial-AI-Foundation/curve25519-dalek-lean-verify) | dev and test | Includes PR 535 (Aeneas update; issue 873), the showcase case. S3 differential tests in v0. |
+| [Beneficial-AI-Foundation/curve25519-dalek-u32](https://github.com/Beneficial-AI-Foundation/curve25519-dalek-u32) | dev and test | Same crate, 32-bit backend |
+| [Beneficial-AI-Foundation/SparsePostQuantumRatchet-verify](https://github.com/Beneficial-AI-Foundation/SparsePostQuantumRatchet-verify) | dev and test | Nightly toolchain and Aeneas updates; upstream merges bring Rust changes |
+| [microsoft/SymCrypt](https://github.com/microsoft/SymCrypt/tree/feature/verifiedcrypto), branch `feature/verifiedcrypto` | **held out** (§8.5) | Rust in `SymCRust/src/`, extracted Lean in `SymCRust/lean/Symcrust/Code/`, proofs in `SymCRust/lean/Symcrust/Properties/` [SymCrypt] |
+
+### 6.2 What counts as a case
+
+- A **trigger** is a first-parent commit that changes the extracted Lean code or the toolchain pin (`lean-toolchain`, `lakefile`, `lake-manifest.json`). A Rust change can only break proofs once it is re-extracted, so Rust-only commits are not triggers. Their effect shows up in the trigger that re-extracts them.
+- The **base** is the trigger's parent. It must build green.
+- The **fix** is the human's proof edits: in the trigger commit itself (common in squash-merged repos), and in follow-up commits before the next trigger that look like repairs.
+- The **broken set** is ground truth from the replay harness (§3.3, S1): the declarations whose proofs fail in the broken state. Theorem-level fields from the miner are textual heuristics until the replay confirms them.
+
+### 6.3 Cause labels
+
+The miner labels each case from which files the trigger changed. A case can have several causes; the first in this order is the primary one.
+
+| Label | The trigger changed | Reported as (§5.4) |
+|---|---|---|
+| `aeneas` | the Aeneas pin | `aeneas` |
+| `lean-mathlib` | the Lean toolchain or Mathlib pin | `lean-mathlib` |
+| `rust` | Rust sources | `rust` |
+| `lean-dep` | another Lake dependency | `lean-mathlib` |
+| `extraction-config` | the extraction config, with no pin change | `aeneas` |
+| `extraction-only` | only the extracted code | `aeneas` |
+
+### 6.4 Case record
+
+One JSON object per case (JSON Lines), with:
+- **identity**: repo, base commit, trigger (change) commit, fix commits with dates and PR numbers;
+- **cause** and **causes** (§6.3);
+- **extraction summary**: files, definitions added, removed and changed, and a `comment_only` flag (for example, doc-comment reformatting by a new Aeneas);
+- **human fix summary**: theorems touched, **statements changed** (before and after), theorems removed or commented out, the `sorry` delta and where it changed, axioms added, and lines changed;
+- **replay result** (from the replay harness): whether base and fixed states build, the broken set, statement-level errors, and modules blocked by failures.
+
+### 6.5 Filtering and labels
+
+- Cases whose base or fixed state does not build are **invalid** and dropped.
+- Comment-only extraction changes are dropped: they break nothing.
+- Cases where the human fix added `sorry`, or commented out or deleted a broken theorem, are **kept and labeled** `human-gave-up`. There is no human reference proof, so they are hard cases, and a bot repair there is a strong result.
+- The human-fix labels used in §8 (statement changed, proof-change size) come from the human fix summary.
+
+### 6.6 Publishing the data
+
+Case records hold commit SHAs and derived metadata, plus short statement excerpts from public repos. Before the dataset is published, check each source repo's license and keep excerpts within it. Run records (S7) may include model transcripts and are reviewed before release.
 
 ## 7. Agent
 
@@ -308,8 +357,8 @@ An agent adapter (§3.5) takes one broken theorem's context bundle, the allowed-
 | Adapter | Status | Notes |
 |---|---|---|
 | Claude Code (headless) | v0, first-class | Native MCP and skills |
-| Codex CLI | v0, first-class | Native MCP; the FVS playbook is passed as prompt text |
-| Minimal loop | v0, fallback | Our own loop calling any model API with tool calling. The most portable option, and a baseline (bash-only agents are strong baselines in Lean). |
+| Codex CLI | v0, first-class | Native MCP; the FVS [FVS] playbook is passed as prompt text |
+| Minimal loop | v0, fallback | Our own loop calling any model API with tool calling. The most portable option, and a baseline (bash-only coding agents are strong baselines in Lean [miniLean]). |
 | No-tools loop | v1 | For models without tool calling (e.g. open Lean provers): the model writes a whole proof; we compile it and send back errors and goal states. |
 | Custom | user-supplied | Any agent that meets the contract and passes the conformance check (§7.5) |
 
@@ -346,11 +395,11 @@ Rules that no profile can override:
 - Remote search tools (e.g. LeanSearch, Loogle) are off by default. A profile enables them only by explicitly allowlisting those hosts, and the run record notes it.
 - No tool writes outside the working tree.
 
-Liao's harness did not adopt the Lean language server: the work was closed before it was tried, so its value is unmeasured. Whether `lsp` beats `minimal`, and at what cost, is an ablation in §8 rather than a decision here.
+The auto_verify_dalek harness [AVD] did not adopt the Lean language server: a review of the LeanMarathon harness [LeanMarathon], which uses it, recommended it, but that work was closed before it was tried, so its value is unmeasured. Our tools come from the Lean LSP MCP server [LeanLSPMCP]. Whether `lsp` beats `minimal`, and at what cost, is an ablation in §8 rather than a decision here.
 
 ### 7.4 Diagnosis
 
-When an attempt gives up, the agent returns a structured diagnosis, following Maestro's idea that "provers report why they failed, not just that they failed":
+When an attempt gives up, the agent returns a structured diagnosis, following Maestro's idea that "provers report why they failed, not just that they failed" [Maestro]:
 - **approaches tried**, each with the reason it failed;
 - **scope**: `local` (e.g. a missing helper lemma) or `global` (the approach hits a fundamental barrier);
 - **statement doubt**: whether the agent believes the statement is now false, and why;
@@ -435,8 +484,29 @@ TODO: GitHub Actions runner limits, secrets and fork PRs, bring-your-own-model c
 
 ## 10. Related work and reuse
 
-TODO: auto_verify_dalek gates and harness (incl. its LeanMarathon review), FVS, KVerus, Maestro (arXiv 2610.25920), LeanMarathon, mini-Lean-agent (arXiv 2610.17331), agentic proof-harness engineering, Radar.
+TODO: a paragraph each on [AVD], [FVS], [KVerus], [Maestro], [LeanMarathon], [miniLean], [ProofHarness], [Radar]: what each does, what we reuse, and how we differ.
 
 ## 11. Open questions
 
 TODO.
+
+## 12. References
+
+Papers
+
+- **[Aeneas]** Son Ho, Jonathan Protzenko. *Aeneas: Rust Verification by Functional Translation.* Proc. ACM Program. Lang. 6 (ICFP), 2022. https://www.microsoft.com/en-us/research/publication/aeneas-rust-verification-by-functional-translation/
+- **[Charon]** Son Ho, Guillaume Boisseau, Lucas Franceschino, Yoann Prak, Aymeric Fromherz, Jonathan Protzenko. *Charon: An Analysis Framework for Rust.* arXiv:2410.18042, 2024. https://arxiv.org/abs/2410.18042
+- **[KVerus]** Yuwei Liu, Xinyi Wan, Yanhao Wang, Minghua Wang, Lin Huang, Tao Wei. *KVerus: Scalable and Resilient Formal Verification Proof Generation for Rust Code.* arXiv:2605.03822, 2026. https://arxiv.org/abs/2605.03822
+- **[LeanMarathon]** Yuanhe Zhang et al. *LeanMarathon* (multi-agent harness for research-level Lean autoformalization). arXiv:2606.05400, 2026. https://arxiv.org/abs/2606.05400. Code: https://github.com/YuanheZ/LeanMarathon
+- **[Maestro]** Haoyu Li, Zeren Shui, Yuhao Zhang, Ferhat Erata, Benjamin Mikek, Murali Krishna Ramanathan, Hao Zhou. *Maestro: Agentic Formal Proof Development by Coordination.* arXiv:2610.25920, 2026. https://arxiv.org/abs/2610.25920
+- **[miniLean]** Tomàs Ortega, Simon Park, Ayush Khaitan, Liam Fowl, Alex Kontorovich, Sanjeev Arora. *Do Theorem Provers Need Theorem-Proving Agents? mini-Lean-agent: A Coding-Agent Baseline for Lean.* arXiv:2610.17331, 2026. https://arxiv.org/abs/2610.17331
+- **[ProofHarness]** Rohith Kumar Shanmuganathan, Cedric Richter, Heike Wehrheim. *Towards Agentic Proof Harness Engineering.* arXiv:2610.23241, 2026. https://arxiv.org/abs/2610.23241
+- **[SymCrypt]** Son Ho, Cédric Fournet, Jonathan Protzenko, Michael Naehrig, Joshua Clune, Patrick Longa, Guillaume Boisseau, Fernando Leal Sánchez, Aymeric Fromherz, Antoine Delignat-Lavaud. *Scaling Verification of Cryptographic Software with Aeneas, Rust, and Lean.* arXiv:2609.15648, 2026. https://arxiv.org/abs/2609.15648
+
+Software and services
+
+- **[AVD]** Beneficial AI Foundation. *auto_verify_dalek* (agent harness and gates for recovering dalek specs and proofs; MIT). https://github.com/Beneficial-AI-Foundation/auto_verify_dalek, commit `32ed856`.
+- **[FVS]** Beneficial AI Foundation. *Formal Verification Skills* (agent skills for Lean verification). https://github.com/Beneficial-AI-Foundation/formal-verification-skills
+- **[LeanLSPMCP]** *lean-lsp-mcp* (MCP server for the Lean language server; MIT). https://github.com/oOo0oOo/lean-lsp-mcp
+- **[Radar]** Lean FRO. *Radar* (benchmarking service for Lean projects: build time, memory, per commit). https://github.com/leanprover/radar
+- **[DecisionsAPI]** OpenAI. *Decisions API* (public beta from 2026-10-06; choice, predicate and score outputs with confidences). Overview: https://www.eesel.ai/blog/openai-decisions-api. TODO: replace with the official OpenAI documentation URL.
