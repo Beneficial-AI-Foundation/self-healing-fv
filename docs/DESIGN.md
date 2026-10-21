@@ -1,6 +1,6 @@
 # Design: self-healing CI for verified Rust (v0)
 
-Status: draft (§3–§5 and §8 written; other sections outline). Owner: Dana Mukusheva. Linear: SCI-1706 (sub-issues SCI-1714, SCI-1715, SCI-1717).
+Status: draft (§3–§5, §7 and §8 written; other sections outline). Owner: Dana Mukusheva. Linear: SCI-1706 (sub-issues SCI-1714, SCI-1715, SCI-1717).
 
 ## 1. Problem
 
@@ -299,7 +299,74 @@ TODO: sources (curve25519-dalek-lean-verify, curve25519-dalek-u32, SparsePostQua
 
 ## 7. Agent
 
-TODO: runtime (headless Claude Code, FVS `lean-verify`), tools (Lean LSP), budget, diagnosis format (cf. Maestro's `failure_scope`).
+We expect most users to run Claude Code or Codex CLI, so those two are first-class: shipped, tested, and compared in §8. Users with strong preferences for another agent or model can plug it in through the same contract, without changes to the pipeline or the gate. The gate checks the diff the same way whatever produced it, so this flexibility never costs soundness. The risks are only wasted runs and unfair comparisons, and the design addresses those below.
+
+### 7.1 Adapters
+
+An agent adapter (§3.5) takes one broken theorem's context bundle, the allowed-edit rules, a tool profile and a budget. It returns a candidate diff, attempt records and, when it gives up, a diagnosis (§7.4).
+
+| Adapter | Status | Notes |
+|---|---|---|
+| Claude Code (headless) | v0, first-class | Native MCP and skills |
+| Codex CLI | v0, first-class | Native MCP; the FVS playbook is passed as prompt text |
+| Minimal loop | v0, fallback | Our own loop calling any model API with tool calling. The most portable option, and a baseline (bash-only agents are strong baselines in Lean). |
+| No-tools loop | v1 | For models without tool calling (e.g. open Lean provers): the model writes a whole proof; we compile it and send back errors and goal states. |
+| Custom | user-supplied | Any agent that meets the contract and passes the conformance check (§7.5) |
+
+Each adapter declares its **capabilities**: tool calling, MCP, skills, structured output, and context size. Each tool profile states what it requires. An adapter that cannot meet the selected profile refuses to start, rather than silently running with fewer tools.
+
+### 7.2 Tool contract
+
+We define the tools; vendors do not. The contract is a small set of functions, exposed over MCP to adapters that support it and called directly by our own loops:
+
+| Tool | Does |
+|---|---|
+| `read`, `search` | Read and search files in the working tree (and the read-only dependency sources: Mathlib, Aeneas) |
+| `edit` | Edit only the regions the gate allows (proof bodies of the assigned theorem, new lemmas in the same file). Other edits are refused at the tool, before the gate ever sees them. |
+| `check` | Build the current file with a timeout. Returns a clear status (ok, error, timeout), the first errors and the elapsed time. Our equivalent of Liao's `lean_check.py`. |
+| `goal`, `diagnostics` | The goal state or the errors at a position (needs the Lean language server) |
+| `try_tactics` | Try several tactics at a position without editing (needs the Lean language server) |
+| `pregate` | Run the scope and statement checks locally (§3.3, S4) |
+| `give_up` | End the attempt with a diagnosis (§7.4) |
+
+**Tool output is capped and summarized** at our layer, with limits set per adapter from its context size. Large goal states (hundreds of hypotheses) are cut down to the target and the hypotheses it mentions, and the full state goes to the run record.
+
+### 7.3 Tool profiles
+
+The target config names a profile. The run record stores which one was used.
+
+| Profile | Tools | Requires |
+|---|---|---|
+| `minimal` | `read`, `search`, `edit`, `check`, `pregate`, `give_up` | tool calling |
+| `lsp` | `minimal` plus `goal`, `diagnostics`, `try_tactics` | tool calling, a Lean language server in the job |
+| `lsp+fvs` | `lsp` plus the FVS `lean-verify` playbook | as `lsp`; loaded as a skill where supported, else as prompt text |
+
+Rules that no profile can override:
+- Every tool runs inside the `repair` job sandbox (§3.4). There is no GitHub token and no network beyond the model API and package caches.
+- Remote search tools (e.g. LeanSearch, Loogle) are off by default. A profile enables them only by explicitly allowlisting those hosts, and the run record notes it.
+- No tool writes outside the working tree.
+
+Liao's harness did not adopt the Lean language server: the work was closed before it was tried, so its value is unmeasured. Whether `lsp` beats `minimal`, and at what cost, is an ablation in §8 rather than a decision here.
+
+### 7.4 Diagnosis
+
+When an attempt gives up, the agent returns a structured diagnosis, following Maestro's idea that "provers report why they failed, not just that they failed":
+- **approaches tried**, each with the reason it failed;
+- **scope**: `local` (e.g. a missing helper lemma) or `global` (the approach hits a fundamental barrier);
+- **statement doubt**: whether the agent believes the statement is now false, and why;
+- **counterexample**: if it has one, as concrete inputs, ideally checked in Lean with `#eval`;
+- the **last goal state**.
+
+The diagnosis is validated against a JSON schema. An invalid one is recorded as "no diagnosis" and never breaks the run. It is advisory, model-written text (§5.4): it feeds the escalation report and the decision adapter's labels, and never decides an outcome.
+
+### 7.5 Conformance check
+
+Before a custom adapter is used on a real repo, it must pass a fixture case shipped with the bot: a toy Lean project with one broken theorem. To pass, it must:
+- repair the theorem through the gate;
+- return a valid diagnosis on a second fixture that cannot be repaired;
+- stay within the tool and network rules (the sandbox logs any violation).
+
+This gives users a quick "does my setup work?" answer, and lets the bot refuse misconfigured agents up front.
 
 ## 8. Evaluation
 
@@ -308,7 +375,7 @@ TODO: runtime (headless Claude Code, FVS `lean-verify`), tools (Lean LSP), budge
 1. **Repair.** How many broken theorems does the bot repair, and at what cost and wall time?
 2. **Soundness.** Does the gate reject every candidate that breaks a rule, and what do agents try that the gate has to stop?
 3. **Escalation.** Are escalations correct and useful? In particular, would the weakened statements of curve25519-dalek-lean-verify PR 535 have reached a reviewer?
-4. **Configuration.** Which agent adapter and model tier repair the most per dollar?
+4. **Configuration.** Which agent adapter, model tier and tool profile (§7.3) repair the most per dollar?
 5. **Decision models.** Does a model-backed decision adapter beat the rules?
 
 ### 8.2 Unit and ground truth
@@ -326,7 +393,7 @@ Results are reported per theorem and per case. A case counts as fully repaired o
 | Repair | Repair rate (gate-passed / broken), per repo and per cause. Cost, tokens and wall time per repaired theorem, and per case. Attempts-to-success distribution. |
 | Soundness | Planted-violation tests (§4.6) all rejected (must be 100%). In real runs: candidates rejected per check (G0–G3), with what was attempted (statement edit, `sorry`, new axiom, out-of-scope file). |
 | Escalation | Bot outcome vs human label, as a confusion matrix (below). Recall of the triggering-change report (§4.7) on cases where the change itself edited statements or axioms. |
-| Configuration | Repair rate and cost per repaired theorem for each adapter × model tier. |
+| Configuration | Repair rate and cost per repaired theorem for each adapter × model tier. Tool-profile ablation (`minimal` vs `lsp` vs `lsp+fvs`) on the repetition subset. |
 | Decision models | Agreement with hand labels (escalation labels, mining labels). For routing: cost to success vs the rules. Calibration of the reported confidence. |
 
 The escalation confusion matrix compares the bot with the human fix:
@@ -368,7 +435,7 @@ TODO: GitHub Actions runner limits, secrets and fork PRs, bring-your-own-model c
 
 ## 10. Related work and reuse
 
-TODO: auto_verify_dalek gates, FVS, KVerus, Maestro, agentic proof-harness engineering, Radar.
+TODO: auto_verify_dalek gates and harness (incl. its LeanMarathon review), FVS, KVerus, Maestro (arXiv 2610.25920), LeanMarathon, mini-Lean-agent (arXiv 2610.17331), agentic proof-harness engineering, Radar.
 
 ## 11. Open questions
 
