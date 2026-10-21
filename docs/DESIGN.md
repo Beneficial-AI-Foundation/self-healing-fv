@@ -1,6 +1,6 @@
 # Design: self-healing CI for verified Rust (v0)
 
-Status: draft (§3–§5 written; other sections outline). Owner: Dana Mukusheva. Linear: SCI-1706 (sub-issues SCI-1714, SCI-1715, SCI-1717).
+Status: draft (§3–§5 and §8 written; other sections outline). Owner: Dana Mukusheva. Linear: SCI-1706 (sub-issues SCI-1714, SCI-1715, SCI-1717).
 
 ## 1. Problem
 
@@ -62,7 +62,7 @@ Non-goals (v0):
  S7 Run record     JSON artifact: inputs, attempts, cost, gate results, outcome
 ```
 
-**S1 Input.** In live CI the trigger is the failure of the repo's existing verification job, via `workflow_run`, so the bot never runs fork code with secrets. A maintainer label (e.g. `self-heal`) re-runs it on demand. The bot never uses `pull_request_target`. A new push to the same PR cancels a running bot run. Runs are keyed by head SHA so the bot never opens duplicate PRs. In replay, the case record (§6) gives base, change and fix commits. The broken state is the tree at the change commit, with proof files restored from the base commit if the change commit touched them. v0 never runs Charon/Aeneas: the extracted code comes from history (replay) or from the repo's own extraction job (live).
+**S1 Input.** In live CI the trigger is the failure of the repo's existing verification job, via `workflow_run`, so the bot never runs fork code with secrets. A maintainer label (e.g. `self-heal`) re-runs it on demand. The bot never uses `pull_request_target`. A new push to the same PR cancels a running bot run. Runs are keyed by head SHA so the bot never opens duplicate PRs. In replay, the case record (§6) gives base, change and fix commits. The broken state is the base tree with the change commit's extracted code, toolchain files and extraction config laid over it. The replay harness (`replay/replay_case.py`) builds it and records the ground-truth broken set: proofs that fail are replaced by `sorry` in rounds until the build is green, so failures in one module do not hide failures in the modules that import it. v0 never runs Charon/Aeneas: the extracted code comes from history (replay) or from the repo's own extraction job (live).
 
 **S2 Context capture** (deterministic). Build the broken state and record:
 - broken theorems: those that fail now but were proved at the base commit;
@@ -303,7 +303,62 @@ TODO: runtime (headless Claude Code, FVS `lean-verify`), tools (Lean LSP), budge
 
 ## 8. Evaluation
 
-TODO: metrics, baselines (plain agent without gates; human fix), cost reporting.
+### 8.1 Questions
+
+1. **Repair.** How many broken theorems does the bot repair, and at what cost and wall time?
+2. **Soundness.** Does the gate reject every candidate that breaks a rule, and what do agents try that the gate has to stop?
+3. **Escalation.** Are escalations correct and useful? In particular, would the weakened statements of curve25519-dalek-lean-verify PR 535 have reached a reviewer?
+4. **Configuration.** Which agent adapter and model tier repair the most per dollar?
+5. **Decision models.** Does a model-backed decision adapter beat the rules?
+
+### 8.2 Unit and ground truth
+
+The unit is one **broken theorem** in one case. The broken set comes from the replay harness (§3.3, S1), not from the human fix. Each theorem is also labeled from the human fix (§6):
+- whether the human changed its statement;
+- the size of the human's proof change.
+
+Results are reported per theorem and per case. A case counts as fully repaired only if all its broken theorems are.
+
+### 8.3 Metrics
+
+| Question | Metric |
+|---|---|
+| Repair | Repair rate (gate-passed / broken), per repo and per cause. Cost, tokens and wall time per repaired theorem, and per case. Attempts-to-success distribution. |
+| Soundness | Planted-violation tests (§4.6) all rejected (must be 100%). In real runs: candidates rejected per check (G0–G3), with what was attempted (statement edit, `sorry`, new axiom, out-of-scope file). |
+| Escalation | Bot outcome vs human label, as a confusion matrix (below). Recall of the triggering-change report (§4.7) on cases where the change itself edited statements or axioms. |
+| Configuration | Repair rate and cost per repaired theorem for each adapter × model tier. |
+| Decision models | Agreement with hand labels (escalation labels, mining labels). For routing: cost to success vs the rules. Calibration of the reported confidence. |
+
+The escalation confusion matrix compares the bot with the human fix:
+
+| | Human kept the statement | Human changed the statement |
+|---|---|---|
+| **Bot repaired** | agreement | the bot proved the *original* statement: a finding to review (the human may have weakened a spec without need) |
+| **Bot escalated `statement-must-change`** | over-escalation: the cost of the strict frozen set (§4.2) | agreement |
+| **Bot escalated `proof-hard` / `spec-suspect`** | a miss of repair | partial agreement: escalated, for a different reason |
+
+### 8.4 Baselines
+
+- **No-LLM sweep.** Only step 1 of the attempt schedule (§3.3, S4). It shows how many breaks are trivial, and it is the floor every model configuration must beat.
+- **Ungated agent.** The same agent, accepting anything that passes `lake build`. Comparing it with the gated run shows how often an unconstrained agent changes statements, adds `sorry` or axioms, or edits files it should not. That difference is the measured value of the gate.
+- **Human fix.** The reference for statement changes (§8.3) and for proof size.
+
+### 8.5 Protocol
+
+- **Pilot first.** Run the full pipeline on a few small cases. The attempts-to-success distribution from the pilot sets the budget defaults (§3.3, S4). Evaluation runs then use fixed budgets.
+- **Dev/test split by time and by repo.** We iterate on prompts, the attempt schedule, budgets and routing rules ("tuning") using only older cases from the dalek repos. Results are reported on newer cases and on one repo held out entirely during development (SymCrypt), so no reported number comes from a case we tuned on.
+- **Repetitions.** Agents are nondeterministic. Each configuration runs once on every case, and three times on a fixed subset, to estimate run-to-run variance. Comparisons between configurations report that variance. The ungated-agent baseline (§8.4) runs on the same subset, since it doubles agent cost.
+- **Leakage.** We train no models. But the target repos are public, so the model vendors' own training data may include the human fix, and a "repair" may partly be recall. Mitigations:
+  - The agent sees only `git archive` trees, with no future history, and its network reaches only the model API (§3.4), so it cannot look up the fix.
+  - Each case records whether the fix commit predates the model's training-data cutoff, and results are split on that.
+  - Repairs that closely match the human fix text are flagged as possible memorization.
+- **Reproducibility.** Every number in the results is computed by a script from run records (S7). Run records stay out of git (see `.gitignore`) and are archived with the results.
+
+### 8.6 Not measured in v0
+
+- Whether specs are adequate (non-goal, §2).
+- Reviewer time and reviewer satisfaction, which need live use.
+- Long-term effects of merged repairs (proof maintainability, build time drift), beyond the G4 report.
 
 ## 9. Deployment (SCI-1717)
 
