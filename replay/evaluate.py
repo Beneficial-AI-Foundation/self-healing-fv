@@ -24,6 +24,15 @@ def statement_broken(res: dict) -> set[str]:
     return {f"{e['file']}::{e['decl']}" for e in res["statement_errors"]}
 
 
+def outcome(res: dict, act: set) -> str:
+    stmt = [e for e in res["statement_errors"] if e["decl"]]
+    if stmt and all(e["kind"] == "name-clash" or "already been declared" in e["msg"] for e in stmt):
+        return "repair: delete duplicate of upstream decl"
+    if stmt:
+        return "ESCALATE (statement broken)"
+    return "proof repair" if act else "NO BREAK"
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--cases", required=True, type=Path)
@@ -52,7 +61,13 @@ def main() -> int:
         # Edited by the human only because a statement they changed (in the same module) forced it.
         stmt_mods = {mod(k) for k in statement_broken(res)}
         conseq = {p for p in pred - act - unknown if mod(p) in stmt_mods}
-        tp, fp, fn = pred & act, pred - act - unknown - conseq, act - pred
+        # Proof breaks the human never touched, in a module with a file-level error (e.g. an
+        # unknown attribute): the human fixed the file-level cause and these followed.
+        file_err_mods = {e["file"][:-len(".lean")].replace("/", ".") for e in res["file_errors"]}
+        # Same for breaks in a module with a statement-broken declaration they depend on (#764).
+        cascade = {a for a in act - pred if mod(a) in file_err_mods | stmt_mods and a not in statement_broken(res)}
+        tp, fp, fn = pred & act, pred - act - unknown - conseq, act - pred - cascade
+        tot.update(cascade=len(cascade))
         tot.update(conseq=len(conseq), unknown=len(unknown))
         tot.update(tp=len(tp), fp=len(fp), fn=len(fn), cases=1,
                    confirmed=res["verdict"] == "break confirmed", seconds=res.get("timing", {}).get("total_s", 0))
@@ -62,16 +77,17 @@ def main() -> int:
         print(f"{rec['case_id']:28} {rec['change_pr'] or '':>4} {res['verdict'][:12]:12} {len(pred):>4} {len(act):>4} "
               f"{len(tp):>3} {len(fp):>3} {len(fn):>3} {len(statement_broken(res)):>4} "
               f"{len(res['blocked_modules']):>4} {len(unknown):>3} {len(conseq):>3} {mins / 60 if mins else float('nan'):>5.1f}  "
-              f"{'ESCALATE (statement broken)' if statement_broken(res) else 'proof repair' if act else 'NO BREAK'}")
+              f"{outcome(res, act)}")
         if args.details:
-            for label, xs in (("FP", fp), ("FN", fn), ("CSQ", conseq)):
+            for label, xs in (("FP", fp), ("FN", fn), ("CSQ", conseq), ("CASCADE", cascade)):
                 for x in sorted(xs):
                     print(f"    {label} {x}")
     p = tot["tp"] / (tot["tp"] + tot["fp"]) if tot["tp"] + tot["fp"] else float("nan")
     r = tot["tp"] / (tot["tp"] + tot["fn"]) if tot["tp"] + tot["fn"] else float("nan")
     print(f"\n{tot['cases']} cases, {tot['confirmed']} confirmed breaks; theorem-level precision {p:.2f}, "
           f"recall {r:.2f} (TP {tot['tp']}, FP {tot['fp']}, FN {tot['fn']}; not scored: "
-          f"{tot['unknown']} in blocked modules, {tot['conseq']} consequential); "
+          f"{tot['unknown']} in blocked modules, {tot['conseq']} consequential, "
+          f"{tot['cascade']} cascades of file-level or statement errors); "
           f"replay time {tot['seconds'] / 60:.0f} min total")
     print("error kinds:", dict(kinds.most_common()))
     return 0

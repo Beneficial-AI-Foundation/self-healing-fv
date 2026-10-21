@@ -174,6 +174,7 @@ CLOSE = ")]}⦄⟩"
 def split_statement(text: str) -> tuple[str, str]:
     """Split a declaration into (statement, body) at the first top-level ':=' / '|' / 'where'."""
     depth = 0
+    binders = 0  # `let`/`have` inside the statement: their `:=` is not the declaration's
     i = 0
     while i < len(text):
         c = text[i]
@@ -182,7 +183,14 @@ def split_statement(text: str) -> tuple[str, str]:
         elif c in CLOSE:
             depth = max(0, depth - 1)
         elif depth == 0:
+            m = re.match(r"(let|have|letI|haveI)\b", text[i:i + 6])
+            if m and (i == 0 or not (text[i - 1].isalnum() or text[i - 1] in "_'.")):
+                binders += 1
+                i += len(m.group(1)); continue
             if text.startswith(":=", i):
+                if binders:
+                    binders -= 1
+                    i += 2; continue
                 return text[:i], text[i:]
             if c == "|" and (i == 0 or text[i - 1] == "\n" or text[:i].rstrip(" \t").endswith("\n")):
                 return text[:i], text[i:]
@@ -426,6 +434,10 @@ class Miner:
             # Replays: deleted theorems that mention changed extracted code were usually broken
             # (e.g. merged into a new spec); others were cleanup.
             "theorems_removed_referencing_extraction": cap([n for n in d["removed"] if thm(n, before) and refs(n)]),
+            # Project declarations placed in a library namespace clash when the library adds the
+            # same name; the fix deletes them (replays: #638).
+            "removed_in_library_namespace": cap([n for n in d["removed"]
+                                                 if re.match(r"(Aeneas|Std|Mathlib)\.", n.split("::", 1)[1])]),
             "theorems_touched_referencing_extraction_n": sum(1 for n in existing_touched if refs(n)),
             # Every changed declaration in these files that mentions changed extracted code.
             "decls_referencing_extraction": sorted(n for n in set(before) & (
@@ -572,6 +584,7 @@ def mine(repo: Path, cfg_name: str, rev: str | None) -> list[dict]:
             pc.get("theorems_touched", []) + pc.get("theorems_commented_out", [])
             + pc.get("theorems_removed_referencing_extraction", []) + pc.get("defs_touched", [])
             + pc.get("sorry_added_in", []) + pc.get("theorems_context_changed", [])
+            + (pc.get("removed_in_library_namespace", []) if "aeneas" in pin_changes else [])
         ) - {""})
         core_pin_change = bool({"aeneas", "lean", "mathlib"} & set(pin_changes))
         if proofs_in_change and not core_pin_change:

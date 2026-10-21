@@ -52,7 +52,21 @@ NEW_ITEM_RE = re.compile(r"^(error|warning|info|trace)\b|^[✖⚠✔ℹ] |^Some 
 def export(git: Git, rev: str, dest: Path) -> None:
     dest.mkdir(parents=True, exist_ok=True)
     archive = subprocess.run(["git", "-C", str(git.repo), "archive", rev], check=True, capture_output=True)
-    subprocess.run(["tar", "-x", "-C", str(dest)], input=archive.stdout, check=True)
+    # -m: stamp files with the current time, not the commit time (see freshen()).
+    subprocess.run(["tar", "-x", "-m", "-C", str(dest)], input=archive.stdout, check=True)
+
+
+def freshen(d: Path) -> None:
+    """Touch every source file outside .lake. Lake (seen with v4.30) trusts a module's build
+    artifacts when its source is older than the trace, without re-hashing. Sources from
+    `git archive` carry old commit dates, and seeded or cloned .lake dirs come from other
+    commits, so without this Lake silently reuses artifacts built from different sources (#824).
+    Touched-but-unchanged files are re-hashed and replayed, not rebuilt."""
+    now = time.time()
+    for f in d.rglob("*"):
+        if ".lake" in f.relative_to(d).parts or not f.is_file():
+            continue
+        os.utime(f, (now, now))
 
 
 def overlay_change(git: Git, miner: Miner, base: str, change: str, dest: Path,
@@ -159,19 +173,35 @@ class Store:
             cp_cow(d / ".lake" / "build", self.builds / sha)
 
 
-def lake(cmd: list[str], cwd: Path, log: Path) -> tuple[int, float, str]:
+ORPHAN_RE = re.compile(r"info: (\S+): checking out revision '([0-9a-f]{7,40})'\s*\ninfo: stderr:\s*\n"
+                       r"fatal: (?:unable to read tree|reference is not a tree)")
+
+
+def lake(cmd: list[str], cwd: Path, log: Path, orphans: list | None = None) -> tuple[int, float, str]:
+    """Run lake. If a dependency pin points at a commit no branch reaches any more (history
+    rewritten upstream), fetch that commit by SHA (GitHub still serves it) and retry."""
     t0 = time.time()
-    p = subprocess.run(["lake", *cmd], cwd=cwd, capture_output=True, text=True, errors="replace")
-    out = p.stdout + p.stderr
-    with open(log, "a") as fh:
-        fh.write(f"\n$ lake {' '.join(cmd)}\n{out}\nEXIT={p.returncode}\n")
+    for _ in range(3):
+        p = subprocess.run(["lake", *cmd], cwd=cwd, capture_output=True, text=True, errors="replace")
+        out = p.stdout + p.stderr
+        with open(log, "a") as fh:
+            fh.write(f"\n$ lake {' '.join(cmd)}\n{out}\nEXIT={p.returncode}\n")
+        m = ORPHAN_RE.search(out)
+        pkg_dir = cwd / ".lake" / "packages" / m.group(1) if m else None
+        if p.returncode == 0 or not (pkg_dir and pkg_dir.exists()):
+            break
+        f = subprocess.run(["git", "-C", str(pkg_dir), "fetch", "-q", "origin", m.group(2)], capture_output=True)
+        if f.returncode != 0:
+            break
+        if orphans is not None:
+            orphans.append({"package": m.group(1), "rev": m.group(2)})
     return p.returncode, time.time() - t0, out
 
 
 def build_state(name: str, d: Path, logdir: Path, fetch_cache: bool,
                 store: Store | None = None, sha: str | None = None) -> dict:
     log = logdir / f"{name}.log"
-    timings, reuse = {}, None
+    timings, reuse, orphans = {}, None, []
     if store is not None:
         t0 = time.time()
         reuse = store.seed(d, sha)
@@ -182,12 +212,12 @@ def build_state(name: str, d: Path, logdir: Path, fetch_cache: bool,
         with open(logdir.parent.parent / ".cache-get.lock", "w") as lock:
             fcntl.flock(lock, fcntl.LOCK_EX)
             timings["cache_lock_wait_s"] = round(time.time() - t0, 1)
-            rc, t, out = lake(["exe", "cache", "get"], d, log)
+            rc, t, out = lake(["exe", "cache", "get"], d, log, orphans)
         timings["cache_get_s"] = round(t)
         if rc != 0:
-            return {"ok": False, "stage": "cache_get", "timings": timings, "reuse": reuse,
+            return {"ok": False, "stage": "cache_get", "timings": timings, "reuse": reuse, "orphaned_pins": orphans,
                     "errors": parse_diags(out), "tail": out[-3000:]}
-    rc, t, out = lake(["build"], d, log)
+    rc, t, out = lake(["build"], d, log, orphans)
     timings["build_s"] = round(t)
     diags = parse_diags(out)
     if rc == 0 and store is not None:
@@ -195,6 +225,7 @@ def build_state(name: str, d: Path, logdir: Path, fetch_cache: bool,
         store.save(d, sha)
         timings["store_s"] = round(time.time() - t0, 1)
     return {"ok": rc == 0, "stage": "build", "timings": timings, "reuse": reuse,
+            "orphaned_pins": orphans,  # pins fetchable only by SHA: a live CI bot would hit this too
             "jobs": count_jobs(out),
             "errors": [x for x in diags if x["severity"] == "error"],
             "tail": "" if rc == 0 else out[-3000:]}
@@ -235,6 +266,7 @@ def classify_msg(msg: str) -> str:
     first = msg.split("\n", 1)[0].lower()
     for key, pat in [
         ("no-goals", r"no goals( to be solved)?"),  # leftover tactics: automation got stronger
+        ("name-clash", r"has already been declared|environment already contains"),  # upstream added it
         ("unknown-identifier", r"unknown (identifier|constant)|unknown namespace"),
         ("heartbeats", r"heartbeats|maximum recursion|timeout"),
         ("unsolved-goals", r"unsolved goals"),
@@ -255,6 +287,14 @@ def locate(diag: dict, decls: dict) -> tuple[str | None, str]:
             in_body = d["body"] and (diag["line"], diag["col"]) >= (d["body_line"], d["body_col"])
             # Lean reports timeouts at the declaration header, but they are elaboration failures.
             in_body = in_body or (d["body"] and diag.get("kind") == "heartbeats")
+            return name, "body" if in_body else "statement"
+    # Lean's declaration range starts at its doc comment, which the parser leaves in the gap
+    # before the declaration: attribute errors there to the next declaration (#734).
+    following = [(d["line"], n) for n, d in decls.items() if d["line"] > diag["line"]]
+    if following:
+        line, name = min(following)
+        if not any(diag["line"] <= d["end_line"] < line for d in decls.values()):
+            in_body = bool(decls[name]["body"]) and diag.get("kind") == "heartbeats"
             return name, "body" if in_body else "statement"
     return None, "file"
 
@@ -308,6 +348,7 @@ def replay(record: dict, repo: Path, work: Path, skip_base: bool) -> dict:
     for state, rev in (("base", base), ("fixed", change)):
         if not (root / state / "lakefile.toml").exists() and not (root / state / "lakefile.lean").exists():
             export(git, rev, root / state)
+        freshen(root / state)
     timing["export_s"] = round(time.time() - t0, 1)
     t0 = time.time()
     with ThreadPoolExecutor(2) as pool:
@@ -329,9 +370,10 @@ def replay(record: dict, repo: Path, work: Path, skip_base: bool) -> dict:
     export(git, base, broken)
     result["overlay"] = overlay_change(git, miner, base, change, broken)
     clone_lake_dir(root / "fixed" / ".lake", broken / ".lake")
+    freshen(broken)
     timing["broken_setup_s"] = round(time.time() - t0, 1)
 
-    rounds, sorried, stmt_errors, file_errors = [], {}, [], []
+    rounds, sorried, stmt_errors, file_errors, cascades = [], {}, [], [], []
     extraction_errors, external_overlaid, setup_failed = [], [], False
     for rnd in range(1, MAX_ROUNDS + 1):
         st = build_state(f"broken-round{rnd}", broken, logdir, fetch_cache=False)
@@ -357,7 +399,21 @@ def replay(record: dict, repo: Path, work: Path, skip_base: bool) -> dict:
             break
         to_sorry: dict[str, set[str]] = {}
         seen_errs = {(x["file"], x["decl"], x["msg"]) for x in stmt_errors + file_errors}
+        # Process "unknown identifier/constant X" errors last: when X is a declaration that failed
+        # (and is sorried) this round, they are cascades; defer them a round and count them only
+        # if they persist (#720 kernel errors, #535 `decompress_edwards_pure`).
+        # Names may end in primes (`foo'`), so match backticks, or quotes up to the line end.
+        UNKNOWN_RE = r"(?:\(kernel\) )?[Uu]nknown (?:constant|identifier) (?:`([^`]+)`|'(.+)'\s*$)"
+        unknown = lambda e: re.match(UNKNOWN_RE, e["msg"].split("\n", 1)[0])
+        errs = sorted(errs, key=lambda e: bool(unknown(e)))
         for e in errs:
+            m = unknown(e)
+            if m:
+                short = (m.group(1) or m.group(2)).rsplit(".", 1)[-1]
+                pending = {n for names in to_sorry.values() for n in names} | {k.split("::", 1)[1] for k in sorried}
+                if short in pending or any(n.endswith("." + short) for n in pending):
+                    cascades.append({"file": e["file"], "line": e["line"], "msg": e["msg"][:300], "round": rnd})
+                    continue
             src_path = broken / e["file"]
             decls = parse_decls(src_path.read_text()) if src_path.exists() else {}
             name, where = locate(e, decls)
@@ -396,6 +452,7 @@ def replay(record: dict, repo: Path, work: Path, skip_base: bool) -> dict:
         "broken_proofs": sorted(sorried),
         "broken_proofs_detail": list(sorried.values()),
         "statement_errors": stmt_errors,
+        "cascades": cascades,  # kernel errors explained by an upstream failure, not breaks
         "statement_broken": sorted(stmt_broken),
         # Repairable by proof edits alone? If not, the bot must escalate (gates forbid statement changes).
         "needs_statement_change": bool(stmt_broken),
