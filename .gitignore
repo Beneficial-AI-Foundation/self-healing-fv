@@ -1,0 +1,33 @@
+# Lean / Lake build output
+.lake/
+lake-packages/
+build/
+
+# Local clones of target repos and replay workspaces
+work/
+repos/
+
+# Mined case data and run artifacts (large; publish selectively)
+data/raw/
+runs/
+*.log
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+
+# Secrets and local config
+.env
+.env.*
+*.key
+secrets/
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/
+
+# Personal Claude Code context (not committed)
+CLAUDE.local.md
