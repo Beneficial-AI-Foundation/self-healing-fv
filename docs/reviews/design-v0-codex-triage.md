@@ -24,12 +24,12 @@ Verdicts:
 | 9 | Fork label persists across pushes; raw key in candidate process | major | **Accept, different fix** |
 | 10 | Cost cap is accounting after spending | major | **Accept** |
 | 11 | Evaluation does not establish escalation correctness | major | **Accept** |
-| 12 | Two-week scope holds several projects | major | **Discuss** |
+| 12 | Two-week scope holds several projects | major | **Accept** (owner, 2026-10-21): prototype section added to §2 |
 | 13 | Differential testing is not evidence of falsity | major | **Accept** (v0 scope part of #12) |
 | 14 | Delivered revision may not get verified | major | **Accept** |
 | 15 | `lake build` is not "whole project" | minor | **Accept** |
 | 16 | Stop rule can block the frontier-model attempt | minor | **Accept** |
-| A1 | Narrow batch repairer for the prototype | alternative | **Discuss** (with #12) |
+| A1 | Narrow batch repairer for the prototype | alternative | **Accept in part**: the prototype is a narrow slice, but keeps component acceptance (#4) |
 | A2 | Challenge-and-proof architecture (comparator) | alternative | **Accept** as the gate's target design; compatibility to verify |
 | A3 | Separate auditing from repair | alternative | **Accept** |
 | Q | Threat model | open question | **Discuss** (recommendation given) |
@@ -105,7 +105,11 @@ Changes: the metering proxy (#9) enforces the per-run cap **before dispatch**: i
 
 Changes to §8: a hand-adjudicated sample labels each broken theorem as *repairable within policy*, *incompatible statement*, *changed trusted assumptions*, *unknown*, or *infrastructure failure*. Escalation precision and recall, and **false accepts**, are reported against these labels; the coarse "human changed the statement" label stays only as a secondary view. Results report sample counts, confidence intervals, coverage, and case-level results, with repetitions clustered by triggering commit. The note on `replay/evaluate.py` (module-level causality) goes to the SCI-1714 branch.
 
-### 12. Scope: Discuss
+### 12. Scope: Accept (decided by the owner on 2026-10-21)
+
+Resolution: DESIGN.md stays the target design, and §2 now has a **Prototype (by 2026-11-03)** section along the lines proposed below. The choice of the first agent adapter is still open.
+
+Original proposal:
 
 The reviewer's core point is fair: the doc mixes the long-term design with what one engineer can build by 2026-11-03. Proposal for the owner:
 - Keep DESIGN.md as the **target design**, and add a **v0 build scope** section that says what ships by 11-03.

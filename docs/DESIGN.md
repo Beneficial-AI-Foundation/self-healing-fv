@@ -18,6 +18,29 @@ Non-goals (v0):
 - Running Charon/Aeneas ourselves for historical replays (the repo history already contains the new extraction).
 - Proof optimization (V2, future exploration).
 
+### Prototype (by 2026-11-03)
+
+This document describes the target design. The prototype is the slice of it that one engineer builds and tests on real history by 2026-11-03. Everything outside the slice keeps its design here and is built afterwards.
+
+**In the prototype**
+- **One repo:** curve25519-dalek-lean-verify, which includes the PR 535 showcase. curve25519-dalek-u32 only if time allows.
+- **Data:** mining and replay with completeness flags (§6.5), on a small set of hand-audited cases.
+- **Audit** (§4.7): model-free, run on historical commits including PR 535.
+- **Repair loop** (§3.3, S4): one agent adapter, one model, one tool profile. Which adapter is still to decide.
+- **Gate:** G0–G5, including kernel replay with whichever of `lake comparator` and `lean4checker` works on dalek's toolchain; component acceptance; the planted-violation tests (§4.6).
+- **Pilot runs** to set budget defaults (§8.5).
+- **Evaluation:** repair rate, cost, gate rejections, audit result on PR 535, the no-LLM sweep baseline, and comparison with the human fix. Without a held-out repo, results are reported on newer dalek cases than those used for tuning.
+- **One run on GitHub Actions** on a fork of the repo, with delivery as a run-record artifact and a comment (shadow mode).
+
+**Deferred until after the prototype**
+- S3 behavior check (differential tests).
+- Decision models (the prototype uses rules only).
+- The second adapter, the adapter comparison, and the tool-profile ablation.
+- The conformance check for custom adapters.
+- The metering proxy and the secret-free candidate container (§3.4). The prototype replays BAIF's own history, which is trusted input, and runs with a capped key. These are required before live use on PRs.
+- Delivery as PRs through a GitHub App, fork handling, and live triggers (§9).
+- Other repos, including the held-out SymCrypt evaluation.
+
 ## 3. Architecture
 
 ### 3.1 Principles
@@ -53,7 +76,7 @@ Non-goals (v0):
         │          snapshots and coverage (§4.4); eligibility
         │
  S3 Behavior check Rust changed? → differential test old vs new Rust
-        │          (annotation only; v0 scope: §11)
+        │          (annotation only; not in the prototype)
         │
  S4 Repair loop    per broken theorem, leaves first; fresh agent session;
     (agentic)      attempt schedule; budgets; pre-gate feedback
@@ -84,7 +107,7 @@ Theorems whose *statement* no longer elaborates (e.g. Aeneas renamed a type) can
 
 **S3 Behavior check** (differential tests). When the Rust source of a function under a broken theorem changed, build the Rust before and after the change and run both on generated inputs (random plus boundary values from the argument types). Outputs are compared through **canonical observations** (e.g. serialized bytes), not raw structures: dalek field elements, for example, have several internal representations of the same value, so raw outputs can differ while both versions are correct.
 
-A disagreement is reported as the annotation `behavior-difference-observed`, independently of the repair outcome. It is **not** a counterexample to the theorem: the change may be intended, or may lie outside the theorem's preconditions. "Counterexample" is reserved for a checked violation of the statement itself (§5.1, `spec-suspect`). Whether S3 is built in v0 is part of the scope discussion (§11).
+A disagreement is reported as the annotation `behavior-difference-observed`, independently of the repair outcome. It is **not** a counterexample to the theorem: the change may be intended, or may lie outside the theorem's preconditions. "Counterexample" is reserved for a checked violation of the statement itself (§5.1, `spec-suspect`). S3 is deferred until after the prototype (§2).
 
 **S4 Repair loop.** One fresh agent session per broken theorem, leaves first. Per theorem, an attempt schedule:
 1. a free automation sweep (re-run the old proof with standard closing tactics; no model);
@@ -588,24 +611,23 @@ Each question is answered by a measurement or an early prototype, not by more de
 7. **Decision models.** Does the Decisions API beat the rules on routing and labels, and is its confidence calibrated (§3.5)? It is in public beta, so its availability is also a risk.
 8. **Differential tests.** For curve25519-dalek: how do we map a broken theorem to its Rust function (through Aeneas names), and generate valid inputs for its types (field elements, scalars, points)?
 
-9. **v0 build scope.** The design above is the target. What is built by 2026-11-03 is under discussion (see the [review triage](reviews/design-v0-codex-triage.md), item 12): likely one repo, one adapter, the full gate including G5, the audit, and replay on audited cases, with differential tests, decision models and the second adapter deferred.
-10. **Comparator support.** Does `lake comparator` work with each target's (sometimes older) Lean toolchain? If not, G5 falls back to `lean4checker`.
-11. **Vendored gates.** Do the vendored statement and trust checks compile across the historical Lean versions in the mined cases?
-12. **Frozen-set coverage.** Which declaration kinds does the frozen set include: instances, inductives, constructors, generated auxiliaries, external axioms?
+9. **Comparator support.** Does `lake comparator` work with each target's (sometimes older) Lean toolchain? If not, G5 falls back to `lean4checker`.
+10. **Vendored gates.** Do the vendored statement and trust checks compile across the historical Lean versions in the mined cases?
+11. **Frozen-set coverage.** Which declaration kinds does the frozen set include: instances, inductives, constructors, generated auxiliaries, external axioms?
 
 **Live deployment**
 
-13. **Extraction in live CI.** The bot requires an extraction-consistency check on the PR's head SHA (S1). Which target repos already have one (dalek does), and what must the others add at install time?
-14. **Escalation usability.** Will reviewers read and act on the report (§5.4)? This needs feedback from first users of the live bot.
-15. **Shared auditor.** If a shared BAIF auditor for "statement unchanged, no new trust" becomes available, swap it in behind the gate interface (§4.5).
-16. **Live baseline.** Which commit is the base in live CI: the PR's base commit, the merge base, or the tested merge commit?
-17. **Toolchain upgrades.** How are definitions and axiom signatures tracked across Lean/Mathlib upgrades, where the meaning of library constants can change?
-18. **Reproducible environments.** Can each target build from a fixed environment manifest, including SymCrypt's external relative Aeneas dependency?
-19. **Provider spend limits.** Does every supported provider offer a per-key spend limit as a backstop to the proxy (§9.5)?
+12. **Extraction in live CI.** The bot requires an extraction-consistency check on the PR's head SHA (S1). Which target repos already have one (dalek does), and what must the others add at install time?
+13. **Escalation usability.** Will reviewers read and act on the report (§5.4)? This needs feedback from first users of the live bot.
+14. **Shared auditor.** If a shared BAIF auditor for "statement unchanged, no new trust" becomes available, swap it in behind the gate interface (§4.5).
+15. **Live baseline.** Which commit is the base in live CI: the PR's base commit, the merge base, or the tested merge commit?
+16. **Toolchain upgrades.** How are definitions and axiom signatures tracked across Lean/Mathlib upgrades, where the meaning of library constants can change?
+17. **Reproducible environments.** Can each target build from a fixed environment manifest, including SymCrypt's external relative Aeneas dependency?
+18. **Provider spend limits.** Does every supported provider offer a per-key spend limit as a backstop to the proxy (§9.5)?
 
 **Publication**
 
-20. **Dataset release.** Which licenses apply to statement excerpts from each source repo, and do run records need redaction before release (§6.6)?
+19. **Dataset release.** Which licenses apply to statement excerpts from each source repo, and do run records need redaction before release (§6.6)?
 
 ## 12. References
 
