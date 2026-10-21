@@ -276,7 +276,7 @@ def parse_decls(src: str | None) -> dict[str, dict]:
             "kind": cur["kind"], "header": header, "statement": statement, "body": norm(body),
             "sorry": len(re.findall(r"\b(sorry|admit)\b", text)),
             "start": start, "body_start": body_start, "end": start + len(text),
-            "line": idx[0] + 1, "body_line": body_line0 + 1, "body_col": body_start - offsets[body_line0],
+            "line": idx[0] + 1, "kw_line": cur["kw_line"], "body_line": body_line0 + 1, "body_col": body_start - offsets[body_line0],
             "end_line": idx[-1] + 1,
         }
 
@@ -285,7 +285,7 @@ def parse_decls(src: str | None) -> dict[str, dict]:
         m = DECL_RE.match(line)
         if m:
             close()
-            cur = {"kind": m.group(1), "name": m.group(2), "idx": pending + [i]}
+            cur = {"kind": m.group(1), "name": m.group(2), "idx": pending + [i], "kw_line": i + 1}
             pending = []
         elif line[:1] not in (" ", "\t", "") and BOUNDARY_RE.match(line):
             close(); cur = None

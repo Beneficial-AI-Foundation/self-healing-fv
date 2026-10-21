@@ -17,7 +17,8 @@ from pathlib import Path
 
 
 def actual_broken(res: dict) -> set[str]:
-    return set(res["broken_proofs"]) | {f"{e['file']}::{e['decl']}" for e in res["statement_errors"]}
+    return (set(res["broken_proofs"]) | {f"{e['file']}::{e['decl']}" for e in res["statement_errors"]}
+            | {f"{e['file']}::{e['decl']}" for e in res.get("header_errors", [])})
 
 
 def statement_broken(res: dict) -> set[str]:
@@ -26,6 +27,11 @@ def statement_broken(res: dict) -> set[str]:
 
 def outcome(res: dict, act: set) -> str:
     stmt = [e for e in res["statement_errors"] if e["decl"]]
+    roots = [e for e in res["file_errors"] if e.get("kind") == "missing-import" or "not portable" in e["msg"]]
+    if roots:
+        what = "dependency removed a module" if roots[0].get("kind") == "missing-import" else "module name rejected"
+        extra = " + statement breaks" if stmt else ""
+        return f"repair imports/modules ({what}; blocks {len(res['blocked_modules'])} modules){extra}"
     if stmt and all(e["kind"] == "name-clash" or "already been declared" in e["msg"] for e in stmt):
         return "repair: delete duplicate of upstream decl"
     if stmt:
@@ -55,7 +61,7 @@ def main() -> int:
         act = actual_broken(res)
         # Status unknown: modules that import a failing module, and failing modules themselves.
         blocked = set(res["blocked_modules"]) | {e["file"][:-len(".lean")].replace("/", ".")
-                                                 for e in res["file_errors"]}
+                                                 for e in res["file_errors"] + res.get("header_errors", [])}
         mod = lambda k: k.split("::")[0][:-len(".lean")].replace("/", ".")
         unknown = {p for p in pred - act if mod(p) in blocked}
         # Edited by the human only because a statement they changed (in the same module) forced it.

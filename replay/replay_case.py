@@ -43,7 +43,8 @@ from mine_history import REPO_CONFIGS, Git, Miner, parse_decls  # noqa: E402
 
 MAX_ROUNDS = 20
 SORRYABLE = ("theorem", "lemma", "def", "abbrev", "instance")
-DIAG_RE = re.compile(r"^(error|warning|info): (?:\./)?(\S+?\.lean):(\d+):(\d+): ?(.*)$")
+# Position is optional: Lake reports e.g. `error: Foo.lean: bad import 'X'` without one.
+DIAG_RE = re.compile(r"^(error|warning|info): (?:\./)?(\S+?\.lean)(?::(\d+):(\d+))?: ?(.*)$")
 NEW_ITEM_RE = re.compile(r"^(error|warning|info|trace)\b|^[✖⚠✔ℹ] |^Some required|^Build completed")
 
 
@@ -244,8 +245,8 @@ def parse_diags(out: str) -> list[dict]:
     for line in out.splitlines():
         m = DIAG_RE.match(line)
         if m:
-            cur = {"severity": m.group(1), "file": m.group(2), "line": int(m.group(3)),
-                   "col": int(m.group(4)), "msg": m.group(5)}
+            cur = {"severity": m.group(1), "file": m.group(2), "line": int(m.group(3) or 0),
+                   "col": int(m.group(4) or 0), "msg": m.group(5)}
             diags.append(cur)
         elif cur is not None and not NEW_ITEM_RE.match(line):
             cur["msg"] += "\n" + line
@@ -265,6 +266,7 @@ def parse_diags(out: str) -> list[dict]:
 def classify_msg(msg: str) -> str:
     first = msg.split("\n", 1)[0].lower()
     for key, pat in [
+        ("missing-import", r"^bad import"),
         ("no-goals", r"no goals( to be solved)?"),  # leftover tactics: automation got stronger
         ("name-clash", r"has already been declared|environment already contains"),  # upstream added it
         ("unknown-identifier", r"unknown (identifier|constant)|unknown namespace"),
@@ -279,10 +281,15 @@ def classify_msg(msg: str) -> str:
     return "other"
 
 
-def locate(diag: dict, decls: dict) -> tuple[str | None, str]:
-    """Return (decl name, 'body' | 'statement' | 'file') for a diagnostic."""
+def locate(diag: dict, decls: dict, src: str = "") -> tuple[str | None, str]:
+    """Return (decl name, 'body' | 'statement' | 'header' | 'file') for a diagnostic. 'header' is
+    an attribute or `set_option ... in` line of the declaration (e.g. a renamed attribute)."""
     for name, d in decls.items():
         if d["line"] <= diag["line"] <= d["end_line"]:
+            # Timeouts are reported at the `set_option maxHeartbeats ... in` line but are
+            # elaboration failures of the declaration (#734), so they are body errors.
+            if diag["line"] < d.get("kw_line", d["line"]) and diag.get("kind") != "heartbeats":
+                return name, "header"
             # Compare exact positions: a statement's last line often also holds `:= by`.
             in_body = d["body"] and (diag["line"], diag["col"]) >= (d["body_line"], d["body_col"])
             # Lean reports timeouts at the declaration header, but they are elaboration failures.
@@ -290,7 +297,9 @@ def locate(diag: dict, decls: dict) -> tuple[str | None, str]:
             return name, "body" if in_body else "statement"
     # Lean's declaration range starts at its doc comment, which the parser leaves in the gap
     # before the declaration: attribute errors there to the next declaration (#734).
-    following = [(d["line"], n) for n, d in decls.items() if d["line"] > diag["line"]]
+    lines = src.split("\n")
+    at_doc = 0 < diag["line"] <= len(lines) and lines[diag["line"] - 1].lstrip().startswith("/--")
+    following = [(d["line"], n) for n, d in decls.items() if d["line"] > diag["line"]] if at_doc else []
     if following:
         line, name = min(following)
         if not any(diag["line"] <= d["end_line"] < line for d in decls.values()):
@@ -373,8 +382,8 @@ def replay(record: dict, repo: Path, work: Path, skip_base: bool) -> dict:
     freshen(broken)
     timing["broken_setup_s"] = round(time.time() - t0, 1)
 
-    rounds, sorried, stmt_errors, file_errors, cascades = [], {}, [], [], []
-    extraction_errors, external_overlaid, setup_failed = [], [], False
+    rounds, sorried, stmt_errors, file_errors, cascades, header_errors = [], {}, [], [], [], []
+    extraction_errors, external_overlaid, setup_failed, unparsed = [], [], False, False
     for rnd in range(1, MAX_ROUNDS + 1):
         st = build_state(f"broken-round{rnd}", broken, logdir, fetch_cache=False)
         errs = st["errors"]
@@ -384,6 +393,7 @@ def replay(record: dict, repo: Path, work: Path, skip_base: bool) -> dict:
             break
         if not errs:
             result["broken_tail"] = st["tail"]
+            unparsed = True  # failed, but no diagnostic we could read: never report this as green
             break
         # Never sorry the extracted code or the external models: they are what the proofs are about.
         extr = [e for e in errs if miner.classify(e["file"]) in ("extraction", "external")]
@@ -398,7 +408,7 @@ def replay(record: dict, repo: Path, work: Path, skip_base: bool) -> dict:
             setup_failed = True
             break
         to_sorry: dict[str, set[str]] = {}
-        seen_errs = {(x["file"], x["decl"], x["msg"]) for x in stmt_errors + file_errors}
+        seen_errs = {(x["file"], x["decl"], x["msg"]) for x in stmt_errors + file_errors + header_errors}
         # Process "unknown identifier/constant X" errors last: when X is a declaration that failed
         # (and is sorried) this round, they are cascades; defer them a round and count them only
         # if they persist (#720 kernel errors, #535 `decompress_edwards_pure`).
@@ -406,7 +416,12 @@ def replay(record: dict, repo: Path, work: Path, skip_base: bool) -> dict:
         UNKNOWN_RE = r"(?:\(kernel\) )?[Uu]nknown (?:constant|identifier) (?:`([^`]+)`|'(.+)'\s*$)"
         unknown = lambda e: re.match(UNKNOWN_RE, e["msg"].split("\n", 1)[0])
         errs = sorted(errs, key=lambda e: bool(unknown(e)))
+        project_mods = {module_of(str(f.relative_to(broken))) for f in broken.rglob("*.lean")
+                        if ".lake" not in f.parts}
         for e in errs:
+            bi = re.match(r"bad import '([^']+)'", e["msg"])
+            if bi and bi.group(1) in project_mods:
+                continue  # importer of a failing project module: reported via blocked_modules
             m = unknown(e)
             if m:
                 short = (m.group(1) or m.group(2)).rsplit(".", 1)[-1]
@@ -415,8 +430,9 @@ def replay(record: dict, repo: Path, work: Path, skip_base: bool) -> dict:
                     cascades.append({"file": e["file"], "line": e["line"], "msg": e["msg"][:300], "round": rnd})
                     continue
             src_path = broken / e["file"]
-            decls = parse_decls(src_path.read_text()) if src_path.exists() else {}
-            name, where = locate(e, decls)
+            src_text = src_path.read_text() if src_path.exists() else ""
+            decls = parse_decls(src_text)
+            name, where = locate(e, decls, src_text)
             entry = {"file": e["file"], "line": e["line"], "decl": name, "where": where,
                      "kind": e["kind"], "msg": e["msg"][:600], "round": rnd}
             already = f"{e['file']}::{name}" in sorried and decls[name]["body"] == ":= by sorry"
@@ -430,6 +446,8 @@ def replay(record: dict, repo: Path, work: Path, skip_base: bool) -> dict:
                 sorried.setdefault(f"{e['file']}::{name}", {**entry, "decl_kind": decls[name]["kind"]})
             elif where == "statement":
                 stmt_errors.append(entry)
+            elif where == "header":
+                header_errors.append(entry)
             else:
                 file_errors.append(entry)
         if not to_sorry:
@@ -442,7 +460,7 @@ def replay(record: dict, repo: Path, work: Path, skip_base: bool) -> dict:
     # A declaration whose statement fails is statement-broken, not (also) a proof break.
     stmt_broken = {f"{e['file']}::{e['decl']}" for e in stmt_errors}
     sorried = {k: v for k, v in sorried.items() if k not in stmt_broken}
-    failing_modules = {module_of(e["file"]) for e in stmt_errors + file_errors}
+    failing_modules = {module_of(e["file"]) for e in stmt_errors + file_errors + header_errors}
     result.update({
         # The change also edited trusted external models, and the new extraction needs them.
         "external_models_overlaid": external_overlaid,
@@ -453,6 +471,7 @@ def replay(record: dict, repo: Path, work: Path, skip_base: bool) -> dict:
         "broken_proofs_detail": list(sorried.values()),
         "statement_errors": stmt_errors,
         "cascades": cascades,  # kernel errors explained by an upstream failure, not breaks
+        "header_errors": header_errors,  # attribute / set_option lines of a declaration
         "statement_broken": sorted(stmt_broken),
         # Repairable by proof edits alone? If not, the bot must escalate (gates forbid statement changes).
         "needs_statement_change": bool(stmt_broken),
@@ -464,7 +483,9 @@ def replay(record: dict, repo: Path, work: Path, skip_base: bool) -> dict:
     timing["total_s"] = round(time.time() - t_start)
     if setup_failed:
         result["verdict"] = "setup failure: extracted code does not build in the broken state"
-    elif sorried or stmt_errors or file_errors:
+    elif unparsed and not (sorried or stmt_errors or file_errors or header_errors):
+        result["verdict"] = "unparsed build failure: see broken_tail"
+    elif sorried or stmt_errors or file_errors or header_errors:
         result["verdict"] = "break confirmed"
     else:
         result["verdict"] = "no break: broken state builds green"
