@@ -1,0 +1,113 @@
+{
+ "case_id": "dalek-lean-verify/5234ce6d",
+ "change_pr_url": "https://github.com/Beneficial-AI-Foundation/curve25519-dalek-lean-verify/pull/232",
+ "replayed_at": "2026-10-21T13:23:07+00:00",
+ "machine": {
+  "cpus": 18
+ },
+ "timing": {
+  "export_s": 1.5,
+  "base_fixed_wall_s": 9,
+  "broken_setup_s": 13.1,
+  "broken_rounds_s": 22,
+  "total_s": 45
+ },
+ "fixed": {
+  "ok": true,
+  "stage": "build",
+  "timings": {
+   "seed_s": 0.0,
+   "cache_lock_wait_s": 3.4,
+   "cache_get_s": 3,
+   "build_s": 2,
+   "store_s": 0.0
+  },
+  "reuse": {
+   "packages_reused": [],
+   "packages_fetched": [],
+   "project_build_seeded_from": null
+  },
+  "orphaned_pins": [],
+  "jobs": 7614,
+  "errors": [],
+  "tail": ""
+ },
+ "base": {
+  "ok": true,
+  "stage": "build",
+  "timings": {
+   "seed_s": 0.0,
+   "cache_lock_wait_s": 0.0,
+   "cache_get_s": 3,
+   "build_s": 2,
+   "store_s": 0.0
+  },
+  "reuse": {
+   "packages_reused": [],
+   "packages_fetched": [],
+   "project_build_seeded_from": null
+  },
+  "orphaned_pins": [],
+  "jobs": 7599,
+  "errors": [],
+  "tail": ""
+ },
+ "overlay": [
+  "Curve25519Dalek/Funs.lean",
+  "Curve25519Dalek/Types.lean",
+  "lake-manifest.json"
+ ],
+ "external_models_overlaid": [],
+ "extraction_errors": [],
+ "broken_rounds": [
+  {
+   "round": 1,
+   "ok": false,
+   "errors_n": 3,
+   "build_s": 18,
+   "jobs": 7614
+  },
+  {
+   "round": 2,
+   "ok": false,
+   "errors_n": 1,
+   "build_s": 4,
+   "jobs": 7614
+  }
+ ],
+ "broken_green_after_sorry": false,
+ "broken_proofs": [],
+ "broken_proofs_detail": [],
+ "statement_errors": [
+  {
+   "file": "Curve25519Dalek/Specs/Backend/Serial/U64/Scalar/Scalar52/Sub.lean",
+   "line": 52,
+   "decl": "sub_loop_spec",
+   "where": "statement",
+   "kind": "type-mismatch",
+   "msg": "Application type mismatch: The argument\n  mask\nhas type\n  U64\nbut is expected to have type\n  backend.serial.u64.scalar.Scalar52\nin the application\n  sub_loop mask",
+   "round": 1
+  }
+ ],
+ "cascades": [],
+ "statement_broken": [
+  "Curve25519Dalek/Specs/Backend/Serial/U64/Scalar/Scalar52/Sub.lean::sub_loop_spec"
+ ],
+ "needs_statement_change": true,
+ "file_errors": [],
+ "blocked_modules": [
+  "Curve25519Dalek"
+ ],
+ "comparison": {
+  "predicted_n": 2,
+  "actual_n": 1,
+  "true_positive": [
+   "Curve25519Dalek/Specs/Backend/Serial/U64/Scalar/Scalar52/Sub.lean::sub_loop_spec"
+  ],
+  "false_positive": [
+   "Curve25519Dalek/Specs/Backend/Serial/U64/Scalar/Scalar52/Sub.lean::sub_spec"
+  ],
+  "false_negative": []
+ },
+ "verdict": "break confirmed"
+}

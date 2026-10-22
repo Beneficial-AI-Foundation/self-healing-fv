@@ -1,0 +1,344 @@
+{
+ "case_id": "dalek-lean-verify/91666a4a",
+ "change_pr_url": "https://github.com/Beneficial-AI-Foundation/curve25519-dalek-lean-verify/pull/720",
+ "replayed_at": "2026-10-21T14:16:36+00:00",
+ "machine": {
+  "cpus": 18
+ },
+ "timing": {
+  "export_s": 2.3,
+  "base_fixed_wall_s": 29,
+  "broken_setup_s": 25.2,
+  "broken_rounds_s": 107,
+  "total_s": 165
+ },
+ "fixed": {
+  "ok": true,
+  "stage": "build",
+  "timings": {
+   "seed_s": 0.0,
+   "cache_lock_wait_s": 14.7,
+   "cache_get_s": 14,
+   "build_s": 1,
+   "store_s": 0.0
+  },
+  "reuse": {
+   "packages_reused": [],
+   "packages_fetched": [],
+   "project_build_seeded_from": null
+  },
+  "orphaned_pins": [],
+  "jobs": 3547,
+  "errors": [],
+  "tail": ""
+ },
+ "base": {
+  "ok": true,
+  "stage": "build",
+  "timings": {
+   "seed_s": 0.0,
+   "cache_lock_wait_s": 0.0,
+   "cache_get_s": 15,
+   "build_s": 1,
+   "store_s": 0.0
+  },
+  "reuse": {
+   "packages_reused": [],
+   "packages_fetched": [],
+   "project_build_seeded_from": null
+  },
+  "orphaned_pins": [],
+  "jobs": 3498,
+  "errors": [],
+  "tail": ""
+ },
+ "overlay": [
+  "Curve25519Dalek/Funs.lean",
+  "Curve25519Dalek/Types.lean",
+  "aeneas-config.yml",
+  "functions.json",
+  "lake-manifest.json",
+  "lakefile.toml"
+ ],
+ "external_models_overlaid": [],
+ "extraction_errors": [],
+ "broken_rounds": [
+  {
+   "round": 1,
+   "ok": false,
+   "errors_n": 14,
+   "build_s": 50,
+   "jobs": 3547
+  },
+  {
+   "round": 2,
+   "ok": false,
+   "errors_n": 6,
+   "build_s": 43,
+   "jobs": 3547
+  },
+  {
+   "round": 3,
+   "ok": false,
+   "errors_n": 2,
+   "build_s": 14,
+   "jobs": 3547
+  }
+ ],
+ "broken_green_after_sorry": false,
+ "broken_proofs": [
+  "Curve25519Dalek/Specs/Backend/Serial/U64/Field/FieldElement51/AddAssign.lean::add_assign_loop_spec",
+  "Curve25519Dalek/Specs/Backend/Serial/U64/Field/FieldElement51/FromBytes.lean::from_bytes_bitList_spec",
+  "Curve25519Dalek/Specs/Backend/Serial/U64/Field/FieldElement51/Pow2K.lean::pow2k_loop_spec",
+  "Curve25519Dalek/Specs/Backend/Serial/U64/Field/FieldElement51/Square2.lean::square2_loop_spec",
+  "Curve25519Dalek/Specs/Backend/Serial/U64/Field/FieldElement51/ToBytes.lean::decompose_or_limbs_shift1",
+  "Curve25519Dalek/Specs/Backend/Serial/U64/Field/FieldElement51/ToBytes.lean::decompose_or_limbs_shift3",
+  "Curve25519Dalek/Specs/Backend/Serial/U64/Field/FieldElement51/ToBytes.lean::decompose_or_limbs_shift4",
+  "Curve25519Dalek/Specs/Backend/Serial/U64/Field/FieldElement51/ToBytes.lean::decompose_or_limbs_shift6",
+  "Curve25519Dalek/Specs/Backend/Serial/U64/Field/FieldElement51/ToBytes.lean::to_bytes_spec",
+  "Curve25519Dalek/Specs/Scalar/Scalar/FromU128.lean::from_spec",
+  "Curve25519Dalek/Specs/Scalar/Scalar/FromU16.lean::from_spec",
+  "Curve25519Dalek/Specs/Scalar/Scalar/FromU32.lean::from_spec",
+  "Curve25519Dalek/Specs/Scalar/Scalar/FromU64.lean::from_spec"
+ ],
+ "broken_proofs_detail": [
+  {
+   "file": "Curve25519Dalek/Specs/Scalar/Scalar/FromU128.lean",
+   "line": 177,
+   "decl": "from_spec",
+   "where": "body",
+   "kind": "tactic-failed",
+   "msg": "Could not find theorem: core.num.U128.to_le_bytes.progress_spec",
+   "round": 1,
+   "decl_kind": "theorem"
+  },
+  {
+   "file": "Curve25519Dalek/Specs/Backend/Serial/U64/Field/FieldElement51/AddAssign.lean",
+   "line": 50,
+   "decl": "add_assign_loop_spec",
+   "where": "body",
+   "kind": "tactic-failed",
+   "msg": "`simp` made no progress",
+   "round": 1,
+   "decl_kind": "theorem"
+  },
+  {
+   "file": "Curve25519Dalek/Specs/Backend/Serial/U64/Field/FieldElement51/FromBytes.lean",
+   "line": 249,
+   "decl": "from_bytes_bitList_spec",
+   "where": "body",
+   "kind": "tactic-failed",
+   "msg": "Could not find theorem: Array.to_slice.progress_spec",
+   "round": 1,
+   "decl_kind": "theorem"
+  },
+  {
+   "file": "Curve25519Dalek/Specs/Backend/Serial/U64/Field/FieldElement51/ToBytes.lean",
+   "line": 111,
+   "decl": "decompose_or_limbs_shift3",
+   "where": "body",
+   "kind": "unsolved-goals",
+   "msg": "unsolved goals\nlimb0 limb1 : U64\nh : limb0.bv < 2251799813685248#64\n⊢ ↑limb1 <<< 3 % U64.size = (limb1.bv <<< 3).toNat",
+   "round": 1,
+   "decl_kind": "theorem"
+  },
+  {
+   "file": "Curve25519Dalek/Specs/Backend/Serial/U64/Field/FieldElement51/ToBytes.lean",
+   "line": 119,
+   "decl": "decompose_or_limbs_shift6",
+   "where": "body",
+   "kind": "unsolved-goals",
+   "msg": "unsolved goals\nlimb0 limb1 : U64\nh : limb0.bv < 2251799813685248#64\n⊢ ↑limb1 <<< 6 % U64.size = (limb1.bv <<< 6).toNat",
+   "round": 1,
+   "decl_kind": "theorem"
+  },
+  {
+   "file": "Curve25519Dalek/Specs/Backend/Serial/U64/Field/FieldElement51/ToBytes.lean",
+   "line": 127,
+   "decl": "decompose_or_limbs_shift1",
+   "where": "body",
+   "kind": "unsolved-goals",
+   "msg": "unsolved goals\nlimb0 limb1 : U64\nh : limb0.bv < 2251799813685248#64\n⊢ ↑limb1 <<< 1 % U64.size = (limb1.bv <<< 1).toNat",
+   "round": 1,
+   "decl_kind": "theorem"
+  },
+  {
+   "file": "Curve25519Dalek/Specs/Backend/Serial/U64/Field/FieldElement51/ToBytes.lean",
+   "line": 135,
+   "decl": "decompose_or_limbs_shift4",
+   "where": "body",
+   "kind": "unsolved-goals",
+   "msg": "unsolved goals\nlimb0 limb1 : U64\nh : limb0.bv < 2251799813685248#64\n⊢ ↑limb1 <<< 4 % U64.size = (limb1.bv <<< 4).toNat",
+   "round": 1,
+   "decl_kind": "theorem"
+  },
+  {
+   "file": "Curve25519Dalek/Specs/Backend/Serial/U64/Field/FieldElement51/ToBytes.lean",
+   "line": 360,
+   "decl": "to_bytes_spec",
+   "where": "body",
+   "kind": "tactic-failed",
+   "msg": "Could not find theorem: UScalar.cast.progress_spec",
+   "round": 1,
+   "decl_kind": "theorem"
+  },
+  {
+   "file": "Curve25519Dalek/Specs/Backend/Serial/U64/Field/FieldElement51/Pow2K.lean",
+   "line": 542,
+   "decl": "pow2k_loop_spec",
+   "where": "body",
+   "kind": "heartbeats",
+   "msg": "(deterministic) timeout at `whnf`, maximum number of heartbeats (1400000) has been reached\n\nNote: Use `set_option maxHeartbeats <num>` to set the limit.\n\nHint: Additional diagnostic information may be available using the `set_option diagnostics true` command.",
+   "round": 1,
+   "decl_kind": "theorem"
+  },
+  {
+   "file": "Curve25519Dalek/Specs/Scalar/Scalar/FromU16.lean",
+   "line": 100,
+   "decl": "from_spec",
+   "where": "body",
+   "kind": "tactic-failed",
+   "msg": "Could not find theorem: core.num.U16.to_le_bytes.progress_spec",
+   "round": 2,
+   "decl_kind": "theorem"
+  },
+  {
+   "file": "Curve25519Dalek/Specs/Scalar/Scalar/FromU32.lean",
+   "line": 99,
+   "decl": "from_spec",
+   "where": "body",
+   "kind": "tactic-failed",
+   "msg": "Could not find theorem: core.num.U32.to_le_bytes.progress_spec",
+   "round": 2,
+   "decl_kind": "theorem"
+  },
+  {
+   "file": "Curve25519Dalek/Specs/Scalar/Scalar/FromU64.lean",
+   "line": 102,
+   "decl": "from_spec",
+   "where": "body",
+   "kind": "tactic-failed",
+   "msg": "Could not find theorem: core.num.U64.to_le_bytes.progress_spec",
+   "round": 2,
+   "decl_kind": "theorem"
+  },
+  {
+   "file": "Curve25519Dalek/Specs/Backend/Serial/U64/Field/FieldElement51/Square2.lean",
+   "line": 59,
+   "decl": "square2_loop_spec",
+   "where": "body",
+   "kind": "tactic-failed",
+   "msg": "`simp` made no progress",
+   "round": 2,
+   "decl_kind": "theorem"
+  }
+ ],
+ "statement_errors": [],
+ "cascades": [
+  {
+   "file": "Curve25519Dalek/Specs/Backend/Serial/U64/Field/FieldElement51/Pow2K.lean",
+   "line": 635,
+   "msg": "(kernel) unknown constant 'curve25519_dalek.backend.serial.u64.field.FieldElement51.pow2k_loop_spec'",
+   "round": 1
+  }
+ ],
+ "header_errors": [],
+ "statement_broken": [],
+ "needs_statement_change": false,
+ "file_errors": [
+  {
+   "file": "Curve25519Dalek/Specs/Scalar/ClampInteger.lean",
+   "line": 27,
+   "decl": null,
+   "where": "file",
+   "kind": "other",
+   "msg": "Unknown attribute `[bvify_simps]`",
+   "round": 1
+  },
+  {
+   "file": "Curve25519Dalek/Specs/Backend/Serial/U64/Field/FieldElement51/ToBytes.lean",
+   "line": 57,
+   "decl": null,
+   "where": "file",
+   "kind": "other",
+   "msg": "Unknown attribute `[simp_scalar_simps]`",
+   "round": 1
+  }
+ ],
+ "blocked_modules": [
+  "Curve25519Dalek",
+  "Curve25519Dalek.Specs.Backend.Serial.CurveModels.AffineNielsPoint.Eq",
+  "Curve25519Dalek.Specs.Backend.Serial.U64.Field.FieldElement51.AsBytes",
+  "Curve25519Dalek.Specs.Backend.Serial.U64.Field.FieldElement51.CtEq",
+  "Curve25519Dalek.Specs.Edwards.Affine.AffinePoint.CtEq",
+  "Curve25519Dalek.Specs.Edwards.Affine.AffinePoint.Eq",
+  "Curve25519Dalek.Specs.Edwards.CompressedEdwardsY.Step1",
+  "Curve25519Dalek.Specs.Edwards.EdwardsPoint.Compress",
+  "Curve25519Dalek.Specs.Edwards.EdwardsPoint.CtEq",
+  "Curve25519Dalek.Specs.Edwards.EdwardsPoint.Eq",
+  "Curve25519Dalek.Specs.Edwards.EdwardsPoint.IsSmallOrder",
+  "Curve25519Dalek.Specs.Edwards.EdwardsPoint.IsTorsionFree",
+  "Curve25519Dalek.Specs.Edwards.EdwardsPoint.MulBaseClamped",
+  "Curve25519Dalek.Specs.Edwards.EdwardsPoint.MulClamped",
+  "Curve25519Dalek.Specs.Edwards.EdwardsPoint.ToMontgomery",
+  "Curve25519Dalek.Specs.Field.FieldElement51.InvSqrt",
+  "Curve25519Dalek.Specs.Field.FieldElement51.IsNegative",
+  "Curve25519Dalek.Specs.Field.FieldElement51.IsZero",
+  "Curve25519Dalek.Specs.Field.FieldElement51.SqrtRatioi",
+  "Curve25519Dalek.Specs.Montgomery.MontgomeryPoint.AsAffine",
+  "Curve25519Dalek.Specs.Montgomery.MontgomeryPoint.CtEq",
+  "Curve25519Dalek.Specs.Montgomery.MontgomeryPoint.ElligatorEncode",
+  "Curve25519Dalek.Specs.Montgomery.MontgomeryPoint.Eq",
+  "Curve25519Dalek.Specs.Montgomery.MontgomeryPoint.Mul",
+  "Curve25519Dalek.Specs.Montgomery.MontgomeryPoint.MulAssign",
+  "Curve25519Dalek.Specs.Montgomery.MontgomeryPoint.MulBase",
+  "Curve25519Dalek.Specs.Montgomery.MontgomeryPoint.MulBaseClamped",
+  "Curve25519Dalek.Specs.Montgomery.MontgomeryPoint.MulClamped",
+  "Curve25519Dalek.Specs.Montgomery.MontgomeryPoint.ToEdwards",
+  "Curve25519Dalek.Specs.Montgomery.ProjectivePoint.DifferentialAddAndDouble",
+  "Curve25519Dalek.Specs.Ristretto.CompressedRistretto.Decompress",
+  "Curve25519Dalek.Specs.Ristretto.CompressedRistretto.Step1",
+  "Curve25519Dalek.Specs.Ristretto.CompressedRistretto.Step2",
+  "Curve25519Dalek.Specs.Ristretto.RistrettoPoint.Compress",
+  "Curve25519Dalek.Specs.Ristretto.RistrettoPoint.CtEq",
+  "Curve25519Dalek.Specs.Ristretto.RistrettoPoint.ElligatorRistrettoFlavor",
+  "Curve25519Dalek.Specs.Ristretto.RistrettoPoint.Eq",
+  "Curve25519Dalek.Specs.Ristretto.RistrettoPoint.FromUniformBytes"
+ ],
+ "comparison": {
+  "predicted_n": 21,
+  "actual_n": 13,
+  "true_positive": [
+   "Curve25519Dalek/Specs/Backend/Serial/U64/Field/FieldElement51/AddAssign.lean::add_assign_loop_spec",
+   "Curve25519Dalek/Specs/Backend/Serial/U64/Field/FieldElement51/FromBytes.lean::from_bytes_bitList_spec",
+   "Curve25519Dalek/Specs/Backend/Serial/U64/Field/FieldElement51/Pow2K.lean::pow2k_loop_spec",
+   "Curve25519Dalek/Specs/Backend/Serial/U64/Field/FieldElement51/Square2.lean::square2_loop_spec",
+   "Curve25519Dalek/Specs/Backend/Serial/U64/Field/FieldElement51/ToBytes.lean::to_bytes_spec",
+   "Curve25519Dalek/Specs/Scalar/Scalar/FromU128.lean::from_spec",
+   "Curve25519Dalek/Specs/Scalar/Scalar/FromU16.lean::from_spec",
+   "Curve25519Dalek/Specs/Scalar/Scalar/FromU32.lean::from_spec",
+   "Curve25519Dalek/Specs/Scalar/Scalar/FromU64.lean::from_spec"
+  ],
+  "false_positive": [
+   "Curve25519Dalek/Specs/Backend/Serial/CurveModels/AffineNielsPoint/Eq.lean::eq_spec",
+   "Curve25519Dalek/Specs/Backend/Serial/CurveModels/AffineNielsPoint/Eq.lean::eq_spec_aux",
+   "Curve25519Dalek/Specs/Backend/Serial/U64/Field/FieldElement51/AddAssign.lean::add_assign_spec",
+   "Curve25519Dalek/Specs/Backend/Serial/U64/Field/FieldElement51/CtEq.lean::ct_eq_spec",
+   "Curve25519Dalek/Specs/Backend/Serial/U64/Field/FieldElement51/Negate.lean::negate_spec",
+   "Curve25519Dalek/Specs/Backend/Serial/U64/Field/FieldElement51/Pow2K.lean::LOW_51_BIT_MASK_spec",
+   "Curve25519Dalek/Specs/Backend/Serial/U64/Field/FieldElement51/Pow2K.lean::m_spec",
+   "Curve25519Dalek/Specs/Backend/Serial/U64/Field/FieldElement51/Pow2K.lean::pow2k_spec",
+   "Curve25519Dalek/Specs/Backend/Serial/U64/Field/FieldElement51/Square2.lean::square2_spec",
+   "Curve25519Dalek/Specs/Montgomery/MontgomeryPoint/ToEdwards.lean::ONE_bounds_spec",
+   "Curve25519Dalek/Specs/Montgomery/MontgomeryPoint/ToEdwards.lean::to_edwards_spec",
+   "Curve25519Dalek/Specs/Scalar/ClampInteger.lean::clamp_integer_spec"
+  ],
+  "false_negative": [
+   "Curve25519Dalek/Specs/Backend/Serial/U64/Field/FieldElement51/ToBytes.lean::decompose_or_limbs_shift1",
+   "Curve25519Dalek/Specs/Backend/Serial/U64/Field/FieldElement51/ToBytes.lean::decompose_or_limbs_shift3",
+   "Curve25519Dalek/Specs/Backend/Serial/U64/Field/FieldElement51/ToBytes.lean::decompose_or_limbs_shift4",
+   "Curve25519Dalek/Specs/Backend/Serial/U64/Field/FieldElement51/ToBytes.lean::decompose_or_limbs_shift6"
+  ]
+ },
+ "verdict": "break confirmed"
+}

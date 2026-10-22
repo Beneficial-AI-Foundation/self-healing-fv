@@ -1,0 +1,224 @@
+{
+ "case_id": "dalek-lean-verify/e1430358",
+ "change_pr_url": "https://github.com/Beneficial-AI-Foundation/curve25519-dalek-lean-verify/pull/734",
+ "replayed_at": "2026-10-21T14:22:40+00:00",
+ "machine": {
+  "cpus": 18
+ },
+ "timing": {
+  "export_s": 2.2,
+  "base_fixed_wall_s": 27,
+  "broken_setup_s": 24.8,
+  "broken_rounds_s": 129,
+  "total_s": 185
+ },
+ "fixed": {
+  "ok": true,
+  "stage": "build",
+  "timings": {
+   "seed_s": 0.0,
+   "cache_lock_wait_s": 12.7,
+   "cache_get_s": 14,
+   "build_s": 1,
+   "store_s": 0.0
+  },
+  "reuse": {
+   "packages_reused": [],
+   "packages_fetched": [],
+   "project_build_seeded_from": null
+  },
+  "orphaned_pins": [],
+  "jobs": 3550,
+  "errors": [],
+  "tail": ""
+ },
+ "base": {
+  "ok": true,
+  "stage": "build",
+  "timings": {
+   "seed_s": 0.0,
+   "cache_lock_wait_s": 0.0,
+   "cache_get_s": 13,
+   "build_s": 1,
+   "store_s": 0.0
+  },
+  "reuse": {
+   "packages_reused": [],
+   "packages_fetched": [],
+   "project_build_seeded_from": null
+  },
+  "orphaned_pins": [],
+  "jobs": 3547,
+  "errors": [],
+  "tail": ""
+ },
+ "overlay": [
+  "Curve25519Dalek/Funs.lean",
+  "Curve25519Dalek/Types.lean",
+  "aeneas-config.yml",
+  "lake-manifest.json",
+  "lakefile.toml"
+ ],
+ "external_models_overlaid": [],
+ "extraction_errors": [],
+ "broken_rounds": [
+  {
+   "round": 1,
+   "ok": false,
+   "errors_n": 10,
+   "build_s": 35,
+   "jobs": 3550
+  },
+  {
+   "round": 2,
+   "ok": false,
+   "errors_n": 4,
+   "build_s": 34,
+   "jobs": 3550
+  },
+  {
+   "round": 3,
+   "ok": false,
+   "errors_n": 3,
+   "build_s": 38,
+   "jobs": 3550
+  },
+  {
+   "round": 4,
+   "ok": true,
+   "errors_n": 0,
+   "build_s": 22,
+   "jobs": 3550
+  }
+ ],
+ "broken_green_after_sorry": true,
+ "broken_proofs": [
+  "Curve25519Dalek/Specs/Backend/Serial/U64/Field/FieldElement51/FromBytes.lean::from_bytes_bitList_spec",
+  "Curve25519Dalek/Specs/Backend/Serial/U64/Field/FieldElement51/ToBytes.lean::to_bytes_spec",
+  "Curve25519Dalek/Specs/Field/FieldElement51/SqrtRatioi.lean::sqrt_ratio_i_spec'",
+  "Curve25519Dalek/Specs/Montgomery/MontgomeryPoint/ElligatorEncode.lean::elligator_encode_spec",
+  "Curve25519Dalek/Specs/Ristretto/RistrettoPoint/Add.lean::add_spec",
+  "Curve25519Dalek/Specs/Ristretto/RistrettoPoint/ElligatorRistrettoFlavor.lean::elligator_ristretto_flavor_spec",
+  "Curve25519Dalek/Specs/Ristretto/RistrettoPoint/Mul.lean::mul_spec",
+  "Curve25519Dalek/Specs/Ristretto/RistrettoPoint/Sub.lean::sub_spec"
+ ],
+ "broken_proofs_detail": [
+  {
+   "file": "Curve25519Dalek/Specs/Ristretto/RistrettoPoint/Sub.lean",
+   "line": 54,
+   "decl": "sub_spec",
+   "where": "body",
+   "kind": "type-mismatch",
+   "msg": "Type mismatch\n  h_self_valid.left\nhas type\n  edwards.EdwardsPoint.IsValid self\nbut is expected to have type\n  RistrettoPoint.IsValid ep ∧ RistrettoPoint.toPoint ep = self.toPoint - other.toPoint",
+   "round": 1,
+   "decl_kind": "theorem"
+  },
+  {
+   "file": "Curve25519Dalek/Specs/Ristretto/RistrettoPoint/Add.lean",
+   "line": 50,
+   "decl": "add_spec",
+   "where": "body",
+   "kind": "type-mismatch",
+   "msg": "Type mismatch\n  h_self_valid.left\nhas type\n  edwards.EdwardsPoint.IsValid self\nbut is expected to have type\n  RistrettoPoint.IsValid ep ∧ RistrettoPoint.toPoint ep = self.toPoint + other.toPoint",
+   "round": 1,
+   "decl_kind": "theorem"
+  },
+  {
+   "file": "Curve25519Dalek/Specs/Ristretto/RistrettoPoint/Mul.lean",
+   "line": 57,
+   "decl": "mul_spec",
+   "where": "body",
+   "kind": "type-mismatch",
+   "msg": "Type mismatch\n  hself.left\nhas type\n  edwards.EdwardsPoint.IsValid self\nbut is expected to have type\n  RistrettoPoint.IsValid ep ∧ RistrettoPoint.toPoint ep = U8x32_as_Nat scalar.bytes • self.toPoint",
+   "round": 1,
+   "decl_kind": "theorem"
+  },
+  {
+   "file": "Curve25519Dalek/Specs/Backend/Serial/U64/Field/FieldElement51/FromBytes.lean",
+   "line": 275,
+   "decl": "from_bytes_bitList_spec",
+   "where": "body",
+   "kind": "heartbeats",
+   "msg": "(deterministic) timeout at `isDefEq`, maximum number of heartbeats (200000) has been reached\n\nNote: Use `set_option maxHeartbeats <num>` to set the limit.\n\nHint: Additional diagnostic information may be available using the `set_option diagnostics true` command.",
+   "round": 1,
+   "decl_kind": "theorem"
+  },
+  {
+   "file": "Curve25519Dalek/Specs/Backend/Serial/U64/Field/FieldElement51/ToBytes.lean",
+   "line": 338,
+   "decl": "to_bytes_spec",
+   "where": "body",
+   "kind": "heartbeats",
+   "msg": "(deterministic) timeout at `whnf`, maximum number of heartbeats (800000) has been reached\n\nNote: Use `set_option maxHeartbeats <num>` to set the limit.\n\nHint: Additional diagnostic information may be available using the `set_option diagnostics true` command.",
+   "round": 1,
+   "decl_kind": "theorem"
+  },
+  {
+   "file": "Curve25519Dalek/Specs/Field/FieldElement51/SqrtRatioi.lean",
+   "line": 1435,
+   "decl": "sqrt_ratio_i_spec'",
+   "where": "body",
+   "kind": "heartbeats",
+   "msg": "(deterministic) timeout at `whnf`, maximum number of heartbeats (250000) has been reached\n\nNote: Use `set_option maxHeartbeats <num>` to set the limit.\n\nHint: Additional diagnostic information may be available using the `set_option diagnostics true` command.",
+   "round": 2,
+   "decl_kind": "theorem"
+  },
+  {
+   "file": "Curve25519Dalek/Specs/Montgomery/MontgomeryPoint/ElligatorEncode.lean",
+   "line": 578,
+   "decl": "elligator_encode_spec",
+   "where": "body",
+   "kind": "heartbeats",
+   "msg": "(deterministic) timeout at `isDefEq`, maximum number of heartbeats (200000) has been reached\n\nNote: Use `set_option maxHeartbeats <num>` to set the limit.\n\nHint: Additional diagnostic information may be available using the `set_option diagnostics true` command.",
+   "round": 3,
+   "decl_kind": "theorem"
+  },
+  {
+   "file": "Curve25519Dalek/Specs/Ristretto/RistrettoPoint/ElligatorRistrettoFlavor.lean",
+   "line": 1157,
+   "decl": "elligator_ristretto_flavor_spec",
+   "where": "body",
+   "kind": "heartbeats",
+   "msg": "(deterministic) timeout at `whnf`, maximum number of heartbeats (900000) has been reached\n\nNote: Use `set_option maxHeartbeats <num>` to set the limit.\n\nHint: Additional diagnostic information may be available using the `set_option diagnostics true` command.",
+   "round": 3,
+   "decl_kind": "theorem"
+  }
+ ],
+ "statement_errors": [],
+ "cascades": [
+  {
+   "file": "Curve25519Dalek/Specs/Backend/Serial/U64/Field/FieldElement51/FromBytes.lean",
+   "line": 281,
+   "msg": "(kernel) unknown constant 'curve25519_dalek.backend.serial.u64.field.FieldElement51.from_bytes_bitList_spec'",
+   "round": 1
+  },
+  {
+   "file": "Curve25519Dalek/Specs/Field/FieldElement51/SqrtRatioi.lean",
+   "line": 1537,
+   "msg": "(kernel) unknown constant 'curve25519_dalek.field.FieldElement51.sqrt_ratio_i_spec''",
+   "round": 2
+  }
+ ],
+ "header_errors": [],
+ "statement_broken": [],
+ "needs_statement_change": false,
+ "file_errors": [],
+ "blocked_modules": [],
+ "comparison": {
+  "predicted_n": 8,
+  "actual_n": 8,
+  "true_positive": [
+   "Curve25519Dalek/Specs/Backend/Serial/U64/Field/FieldElement51/FromBytes.lean::from_bytes_bitList_spec",
+   "Curve25519Dalek/Specs/Backend/Serial/U64/Field/FieldElement51/ToBytes.lean::to_bytes_spec",
+   "Curve25519Dalek/Specs/Field/FieldElement51/SqrtRatioi.lean::sqrt_ratio_i_spec'",
+   "Curve25519Dalek/Specs/Montgomery/MontgomeryPoint/ElligatorEncode.lean::elligator_encode_spec",
+   "Curve25519Dalek/Specs/Ristretto/RistrettoPoint/Add.lean::add_spec",
+   "Curve25519Dalek/Specs/Ristretto/RistrettoPoint/ElligatorRistrettoFlavor.lean::elligator_ristretto_flavor_spec",
+   "Curve25519Dalek/Specs/Ristretto/RistrettoPoint/Mul.lean::mul_spec",
+   "Curve25519Dalek/Specs/Ristretto/RistrettoPoint/Sub.lean::sub_spec"
+  ],
+  "false_positive": [],
+  "false_negative": []
+ },
+ "verdict": "break confirmed"
+}

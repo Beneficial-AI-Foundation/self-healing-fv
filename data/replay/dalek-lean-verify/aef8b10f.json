@@ -1,0 +1,176 @@
+{
+ "case_id": "dalek-lean-verify/aef8b10f",
+ "change_pr_url": "https://github.com/Beneficial-AI-Foundation/curve25519-dalek-lean-verify/pull/278",
+ "replayed_at": "2026-10-21T13:23:52+00:00",
+ "machine": {
+  "cpus": 18
+ },
+ "timing": {
+  "export_s": 1.6,
+  "base_fixed_wall_s": 16,
+  "broken_setup_s": 14.0,
+  "broken_rounds_s": 73,
+  "total_s": 105
+ },
+ "fixed": {
+  "ok": true,
+  "stage": "build",
+  "timings": {
+   "seed_s": 0.0,
+   "cache_lock_wait_s": 0.0,
+   "cache_get_s": 10,
+   "build_s": 2,
+   "store_s": 0.0
+  },
+  "reuse": {
+   "packages_reused": [],
+   "packages_fetched": [],
+   "project_build_seeded_from": null
+  },
+  "orphaned_pins": [],
+  "jobs": 7836,
+  "errors": [],
+  "tail": ""
+ },
+ "base": {
+  "ok": true,
+  "stage": "build",
+  "timings": {
+   "seed_s": 0.0,
+   "cache_lock_wait_s": 10.4,
+   "cache_get_s": 4,
+   "build_s": 2,
+   "store_s": 0.0
+  },
+  "reuse": {
+   "packages_reused": [],
+   "packages_fetched": [],
+   "project_build_seeded_from": null
+  },
+  "orphaned_pins": [],
+  "jobs": 7631,
+  "errors": [],
+  "tail": ""
+ },
+ "overlay": [
+  "lake-manifest.json",
+  "lean-toolchain"
+ ],
+ "external_models_overlaid": [],
+ "extraction_errors": [],
+ "broken_rounds": [
+  {
+   "round": 1,
+   "ok": false,
+   "errors_n": 9,
+   "build_s": 34,
+   "jobs": 7836
+  },
+  {
+   "round": 2,
+   "ok": false,
+   "errors_n": 1,
+   "build_s": 22,
+   "jobs": 7836
+  },
+  {
+   "round": 3,
+   "ok": true,
+   "errors_n": 0,
+   "build_s": 17,
+   "jobs": 7836
+  }
+ ],
+ "broken_green_after_sorry": true,
+ "broken_proofs": [
+  "Curve25519Dalek/Specs/Backend/Serial/CurveModels/ProjectivePoint/Double.lean::double_spec'",
+  "Curve25519Dalek/Specs/Backend/Serial/U64/Field/FieldElement51/Negate_Hoare.lean::negate_hoare_spec",
+  "Curve25519Dalek/Specs/Backend/Serial/U64/Field/FieldElement51/Square2.lean::square2_spec",
+  "Curve25519Dalek/Specs/Backend/Serial/U64/Field/FieldElement51/Sub.lean::sub_spec",
+  "Curve25519Dalek/Specs/Backend/Serial/U64/Scalar/Scalar52/Add.lean::add_spec",
+  "Curve25519Dalek/Specs/Backend/Serial/U64/Scalar/Scalar52/MontgomeryMul_Hoare.lean::montgomery_mul_hoare_spec"
+ ],
+ "broken_proofs_detail": [
+  {
+   "file": "Curve25519Dalek/Specs/Backend/Serial/U64/Scalar/Scalar52/MontgomeryMul_Hoare.lean",
+   "line": 60,
+   "decl": "montgomery_mul_hoare_spec",
+   "where": "body",
+   "kind": "tactic-failed",
+   "msg": "`grind` failed\ncase grind\nm m' : Aeneas.Std.Array (UScalar UScalarTy.U64) (UScalar.ofNatCore 5 ⋯)\nrange_a :\n  ∀ i ≤ 4,\n    ↑(match (↑m)[i]? with\n        | some e => e\n        | none => outOfBounds) ≤\n      4611686018427387903\nrange_b :\n  ∀ i ≤ 4,\n    ↑(match (↑m')[i]? with\n        | some e => e\n        | none => outOfBounds) ≤\n      4611686018427387903\nr : Aeneas.Std.Array (UScalar UScalarTy.U128) (UScalar.ofNatCore 9 ⋯)\nh : Scalar52_wide_as_Nat r = Scalar52_as_Nat m * Scalar52_as_Nat m'\nr_1 : Aeneas.Std.Array (UScalar UScalarTy.U64) (UScalar.ofNatCore 5 ⋯)\nh_1 : Scalar52_as_Nat r_1 * R % L = ",
+   "round": 1,
+   "decl_kind": "theorem"
+  },
+  {
+   "file": "Curve25519Dalek/Specs/Backend/Serial/U64/Field/FieldElement51/Negate_Hoare.lean",
+   "line": 73,
+   "decl": "negate_hoare_spec",
+   "where": "body",
+   "kind": "syntax",
+   "msg": "type class instance expected\n  (↑r✝).le 36028797018963664",
+   "round": 1,
+   "decl_kind": "theorem"
+  },
+  {
+   "file": "Curve25519Dalek/Specs/Backend/Serial/U64/Field/FieldElement51/Square2.lean",
+   "line": 105,
+   "decl": "square2_spec",
+   "where": "body",
+   "kind": "unsolved-goals",
+   "msg": "unsolved goals\ncase refine_1\na : Aeneas.Std.Array U64 5#usize\nh_bounds : ∀ i < 5, ↑a[i]! < 2 ^ 54\nsquare : FieldElement51\n_✝ : [> let square ← pow2k a 1#u32 <]\nsquare_post_1 : ∀ i < 5, ↑square[i]! < 2 ^ 52\nsquare_post_2 : Field51_as_Nat square ≡ Field51_as_Nat a ^ 2 ^ 1 [MOD p]\nres : FieldElement51\n_ : [> let res ← square.square2_loop 0#usize <]\nres_post_1 : ∀ j < 5, 0 ≤ j → ↑res[j]! = ↑square[j]! * 2\nres_post_2 : ∀ j < 5, j < 0 → res[j]! = square[j]!\nthis : Field51_as_Nat res = 2 * Field51_as_Nat square\n⊢ 2 * Field51_as_Nat a ^ 2 ^ 1 % p = 2 * Field51_as_Nat a ^ 2 % p",
+   "round": 1,
+   "decl_kind": "theorem"
+  },
+  {
+   "file": "Curve25519Dalek/Specs/Backend/Serial/U64/Field/FieldElement51/Sub.lean",
+   "line": 271,
+   "decl": "sub_spec",
+   "where": "body",
+   "kind": "type-mismatch",
+   "msg": "Type mismatch\n  final\nhas type\n  p ∣ kjsum\nbut is expected to have type\n  asum + kjsum ≡ asum [MOD p]",
+   "round": 1,
+   "decl_kind": "theorem"
+  },
+  {
+   "file": "Curve25519Dalek/Specs/Backend/Serial/U64/Scalar/Scalar52/Add.lean",
+   "line": 201,
+   "decl": "add_spec",
+   "where": "body",
+   "kind": "tactic-failed",
+   "msg": "`simp` made no progress",
+   "round": 1,
+   "decl_kind": "theorem"
+  },
+  {
+   "file": "Curve25519Dalek/Specs/Backend/Serial/CurveModels/ProjectivePoint/Double.lean",
+   "line": 319,
+   "decl": "double_spec'",
+   "where": "body",
+   "kind": "other",
+   "msg": "error while initializing `grind ring` operators:\ninstance for `Inv.inv` \n  ZMod.instInv p\nis not definitionally equal to the expected one \n  Field.toGrindField.toInv\nwhen only reducible definitions and instances are reduced",
+   "round": 2,
+   "decl_kind": "theorem"
+  }
+ ],
+ "statement_errors": [],
+ "cascades": [],
+ "statement_broken": [],
+ "needs_statement_change": false,
+ "file_errors": [],
+ "blocked_modules": [],
+ "comparison": {
+  "predicted_n": 6,
+  "actual_n": 6,
+  "true_positive": [
+   "Curve25519Dalek/Specs/Backend/Serial/CurveModels/ProjectivePoint/Double.lean::double_spec'",
+   "Curve25519Dalek/Specs/Backend/Serial/U64/Field/FieldElement51/Negate_Hoare.lean::negate_hoare_spec",
+   "Curve25519Dalek/Specs/Backend/Serial/U64/Field/FieldElement51/Square2.lean::square2_spec",
+   "Curve25519Dalek/Specs/Backend/Serial/U64/Field/FieldElement51/Sub.lean::sub_spec",
+   "Curve25519Dalek/Specs/Backend/Serial/U64/Scalar/Scalar52/Add.lean::add_spec",
+   "Curve25519Dalek/Specs/Backend/Serial/U64/Scalar/Scalar52/MontgomeryMul_Hoare.lean::montgomery_mul_hoare_spec"
+  ],
+  "false_positive": [],
+  "false_negative": []
+ },
+ "verdict": "break confirmed"
+}

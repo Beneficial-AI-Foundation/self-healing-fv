@@ -1,0 +1,111 @@
+{
+ "case_id": "dalek-lean-verify/e65b46d0",
+ "change_pr_url": "https://github.com/Beneficial-AI-Foundation/curve25519-dalek-lean-verify/pull/782",
+ "replayed_at": "2026-10-21T13:18:25+00:00",
+ "machine": {
+  "cpus": 18
+ },
+ "timing": {
+  "export_s": 1.9,
+  "base_fixed_wall_s": 27,
+  "broken_setup_s": 28.4,
+  "broken_rounds_s": 30,
+  "total_s": 89
+ },
+ "fixed": {
+  "ok": true,
+  "stage": "build",
+  "timings": {
+   "seed_s": 0.0,
+   "cache_lock_wait_s": 0.0,
+   "cache_get_s": 12,
+   "build_s": 2,
+   "store_s": 0.0
+  },
+  "reuse": {
+   "packages_reused": [],
+   "packages_fetched": [],
+   "project_build_seeded_from": null
+  },
+  "orphaned_pins": [],
+  "jobs": 8345,
+  "errors": [],
+  "tail": ""
+ },
+ "base": {
+  "ok": true,
+  "stage": "build",
+  "timings": {
+   "seed_s": 0.0,
+   "cache_lock_wait_s": 11.8,
+   "cache_get_s": 13,
+   "build_s": 2,
+   "store_s": 0.0
+  },
+  "reuse": {
+   "packages_reused": [],
+   "packages_fetched": [],
+   "project_build_seeded_from": null
+  },
+  "orphaned_pins": [],
+  "jobs": 8342,
+  "errors": [],
+  "tail": ""
+ },
+ "overlay": [
+  "Curve25519Dalek/Funs.lean",
+  "aeneas-config.yml",
+  "lake-manifest.json",
+  "lakefile.toml"
+ ],
+ "external_models_overlaid": [],
+ "extraction_errors": [],
+ "broken_rounds": [
+  {
+   "round": 1,
+   "ok": false,
+   "errors_n": 2,
+   "build_s": 11,
+   "jobs": 8345
+  },
+  {
+   "round": 2,
+   "ok": true,
+   "errors_n": 0,
+   "build_s": 19,
+   "jobs": 8345
+  }
+ ],
+ "broken_green_after_sorry": true,
+ "broken_proofs": [
+  "Curve25519Dalek/Specs/Scalar/Scalar/ToRadix2wSizeHint.lean::to_radix_2w_size_hint_spec"
+ ],
+ "broken_proofs_detail": [
+  {
+   "file": "Curve25519Dalek/Specs/Scalar/Scalar/ToRadix2wSizeHint.lean",
+   "line": 83,
+   "decl": "to_radix_2w_size_hint_spec",
+   "where": "body",
+   "kind": "no-goals",
+   "msg": "No goals to be solved",
+   "round": 1,
+   "decl_kind": "theorem"
+  }
+ ],
+ "statement_errors": [],
+ "cascades": [],
+ "statement_broken": [],
+ "needs_statement_change": false,
+ "file_errors": [],
+ "blocked_modules": [],
+ "comparison": {
+  "predicted_n": 1,
+  "actual_n": 1,
+  "true_positive": [
+   "Curve25519Dalek/Specs/Scalar/Scalar/ToRadix2wSizeHint.lean::to_radix_2w_size_hint_spec"
+  ],
+  "false_positive": [],
+  "false_negative": []
+ },
+ "verdict": "break confirmed"
+}

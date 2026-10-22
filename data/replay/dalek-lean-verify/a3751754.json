@@ -1,0 +1,133 @@
+{
+ "case_id": "dalek-lean-verify/a3751754",
+ "change_pr_url": "https://github.com/Beneficial-AI-Foundation/curve25519-dalek-lean-verify/pull/764",
+ "replayed_at": "2026-10-21T14:09:02+00:00",
+ "machine": {
+  "cpus": 18
+ },
+ "timing": {
+  "export_s": 2.3,
+  "base_fixed_wall_s": 28,
+  "broken_setup_s": 26.6,
+  "broken_rounds_s": 191,
+  "total_s": 248
+ },
+ "fixed": {
+  "ok": true,
+  "stage": "build",
+  "timings": {
+   "seed_s": 0.0,
+   "cache_lock_wait_s": 11.6,
+   "cache_get_s": 14,
+   "build_s": 2,
+   "store_s": 0.0
+  },
+  "reuse": {
+   "packages_reused": [],
+   "packages_fetched": [],
+   "project_build_seeded_from": null
+  },
+  "orphaned_pins": [],
+  "jobs": 8342,
+  "errors": [],
+  "tail": ""
+ },
+ "base": {
+  "ok": true,
+  "stage": "build",
+  "timings": {
+   "seed_s": 0.0,
+   "cache_lock_wait_s": 0.0,
+   "cache_get_s": 12,
+   "build_s": 3,
+   "store_s": 0.0
+  },
+  "reuse": {
+   "packages_reused": [],
+   "packages_fetched": [],
+   "project_build_seeded_from": null
+  },
+  "orphaned_pins": [],
+  "jobs": 8342,
+  "errors": [],
+  "tail": ""
+ },
+ "overlay": [
+  "Curve25519Dalek/Funs.lean",
+  "Curve25519Dalek/Types.lean",
+  "aeneas-config.yml",
+  "functions.json",
+  "lake-manifest.json",
+  "lakefile.toml"
+ ],
+ "external_models_overlaid": [],
+ "extraction_errors": [],
+ "broken_rounds": [
+  {
+   "round": 1,
+   "ok": false,
+   "errors_n": 7,
+   "build_s": 186,
+   "jobs": 8342
+  },
+  {
+   "round": 2,
+   "ok": false,
+   "errors_n": 1,
+   "build_s": 5,
+   "jobs": 8342
+  }
+ ],
+ "broken_green_after_sorry": false,
+ "broken_proofs": [
+  "Curve25519Dalek/Specs/Backend/Serial/U64/Scalar/Scalar52/Add.lean::add_spec"
+ ],
+ "broken_proofs_detail": [
+  {
+   "file": "Curve25519Dalek/Specs/Backend/Serial/U64/Scalar/Scalar52/Add.lean",
+   "line": 167,
+   "decl": "add_spec",
+   "where": "body",
+   "kind": "tactic-failed",
+   "msg": "`agrind` failed\ncase grind.1.1.1\na b : Scalar52\nha : ∀ i < 5, ↑a[i]! < 2 ^ 52\nhb : ∀ i < 5, ↑b[i]! < 2 ^ 52\nha' : Scalar52_as_Nat a < L\nhb' : Scalar52_as_Nat b ≤ L\ni : U64\n__1 : [> let i ← 1#u64 <<< 52#i32 <]\ni_post1 : ↑i = 1 <<< 52 % U64.size\ni_post2 : i.bv = U64.bv 1#u64 <<< 52\nmask : U64\n_ : [> let mask ← i - 1#u64 <]\nmask_post1 : ↑mask = ↑i - 1\nmask_post2 : 1 ≤ ↑i\nthis : L < 2 ^ 259\nh :\n  ¬(do\n        let sum ←\n          add_loop { start := UScalar.ofNatCore 0 ⋯, «end» := UScalar.ofNatCore 5 ⋯ } a b ZERO mask\n              (UScalar.ofNatCore 0 ⋯)\n        sub sum constants.L) ⦃\n      v =>\n ",
+   "round": 1,
+   "decl_kind": "theorem"
+  }
+ ],
+ "statement_errors": [
+  {
+   "file": "Curve25519Dalek/Specs/Backend/Serial/U64/Scalar/Scalar52/Add.lean",
+   "line": 58,
+   "decl": "add_loop_spec",
+   "where": "statement",
+   "kind": "type-mismatch",
+   "msg": "Application type mismatch: The argument\n  a\nhas type\n  Scalar52\nbut is expected to have type\n  core.ops.range.Range Usize\nin the application\n  add_loop a",
+   "round": 1
+  }
+ ],
+ "cascades": [],
+ "header_errors": [],
+ "statement_broken": [
+  "Curve25519Dalek/Specs/Backend/Serial/U64/Scalar/Scalar52/Add.lean::add_loop_spec"
+ ],
+ "needs_statement_change": true,
+ "file_errors": [],
+ "blocked_modules": [
+  "Curve25519Dalek",
+  "Curve25519Dalek.Specs.Backend.Serial.U64.Scalar.Scalar52.FromBytesWide",
+  "Curve25519Dalek.Specs.Scalar.Scalar.Add",
+  "Curve25519Dalek.Specs.Scalar.Scalar.FromBytesModOrderWide"
+ ],
+ "comparison": {
+  "predicted_n": 1,
+  "actual_n": 2,
+  "true_positive": [
+   "Curve25519Dalek/Specs/Backend/Serial/U64/Scalar/Scalar52/Add.lean::add_loop_spec"
+  ],
+  "false_positive": [],
+  "false_negative": [
+   "Curve25519Dalek/Specs/Backend/Serial/U64/Scalar/Scalar52/Add.lean::add_spec"
+  ]
+ },
+ "verdict": "break confirmed"
+}

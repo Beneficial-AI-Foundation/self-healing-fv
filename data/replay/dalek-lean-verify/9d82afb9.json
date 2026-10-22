@@ -1,0 +1,121 @@
+{
+ "case_id": "dalek-lean-verify/9d82afb9",
+ "change_pr_url": "https://github.com/Beneficial-AI-Foundation/curve25519-dalek-lean-verify/pull/41",
+ "replayed_at": "2026-10-21T13:19:54+00:00",
+ "machine": {
+  "cpus": 18
+ },
+ "timing": {
+  "export_s": 1.5,
+  "base_fixed_wall_s": 13,
+  "broken_setup_s": 12.8,
+  "broken_rounds_s": 86,
+  "total_s": 113
+ },
+ "fixed": {
+  "ok": true,
+  "stage": "build",
+  "timings": {
+   "seed_s": 0.0,
+   "cache_lock_wait_s": 4.8,
+   "cache_get_s": 6,
+   "build_s": 2,
+   "store_s": 0.0
+  },
+  "reuse": {
+   "packages_reused": [],
+   "packages_fetched": [],
+   "project_build_seeded_from": null
+  },
+  "orphaned_pins": [],
+  "jobs": 7579,
+  "errors": [],
+  "tail": ""
+ },
+ "base": {
+  "ok": true,
+  "stage": "build",
+  "timings": {
+   "seed_s": 0.0,
+   "cache_lock_wait_s": 0.0,
+   "cache_get_s": 5,
+   "build_s": 1,
+   "store_s": 0.0
+  },
+  "reuse": {
+   "packages_reused": [],
+   "packages_fetched": [],
+   "project_build_seeded_from": null
+  },
+  "orphaned_pins": [],
+  "jobs": 7130,
+  "errors": [],
+  "tail": ""
+ },
+ "overlay": [
+  "lake-manifest.json",
+  "lean-toolchain"
+ ],
+ "external_models_overlaid": [],
+ "extraction_errors": [],
+ "broken_rounds": [
+  {
+   "round": 1,
+   "ok": false,
+   "errors_n": 2,
+   "build_s": 79,
+   "jobs": 7579
+  },
+  {
+   "round": 2,
+   "ok": true,
+   "errors_n": 0,
+   "build_s": 7,
+   "jobs": 7579
+  }
+ ],
+ "broken_green_after_sorry": true,
+ "broken_proofs": [
+  "Curve25519Dalek/Proofs/Backend/Serial/U64/Scalar/Scalar52/MulInternal.lean::mul_internal_spec",
+  "Curve25519Dalek/Proofs/Backend/Serial/U64/Scalar/Scalar52/SquareInternal.lean::square_internal_spec"
+ ],
+ "broken_proofs_detail": [
+  {
+   "file": "Curve25519Dalek/Proofs/Backend/Serial/U64/Scalar/Scalar52/SquareInternal.lean",
+   "line": 34,
+   "decl": "square_internal_spec",
+   "where": "body",
+   "kind": "unsolved-goals",
+   "msg": "unsolved goals\na : Aeneas.Std.Array U64 5#usize\ni : U64\n_✝³² : [> let i ← a.index_usize 0#usize <]\ni1 : U64\n_✝³¹ : [> let i1 ← i * 2#u64 <]\ni2 : U64\n_✝³⁰ : [> let i2 ← a.index_usize 1#usize <]\ni3 : U64\n_✝²⁹ : [> let i3 ← i2 * 2#u64 <]\ni4 : U64\n_✝²⁸ : [> let i4 ← a.index_usize 2#usize <]\ni5 : U64\n_✝²⁷ : [> let i5 ← i4 * 2#u64 <]\ni6 : U64\n_✝²⁶ : [> let i6 ← a.index_usize 3#usize <]\ni7 : U64\n_✝²⁵ : [> let i7 ← i6 * 2#u64 <]\ni8 : U128\n_✝²⁴ : [> let i8 ← m i i <]\ni9 : U64\n_✝²³ : [> let i9 ← Array.index_usize ⟨[i1, i3, i5, i7], square_internal._proof_2⟩ 0#usize <]\ni10 : U128\n_✝²² : [> let i10 ← m i9",
+   "round": 1,
+   "decl_kind": "theorem"
+  },
+  {
+   "file": "Curve25519Dalek/Proofs/Backend/Serial/U64/Scalar/Scalar52/MulInternal.lean",
+   "line": 41,
+   "decl": "mul_internal_spec",
+   "where": "body",
+   "kind": "unsolved-goals",
+   "msg": "unsolved goals\na b : Aeneas.Std.Array U64 5#usize\ni : U64\n_✝⁵⁸ : [> let i ← a.index_usize 0#usize <]\ni_post : i = (↑a)[0]!\ni1 : U64\n_✝⁵⁷ : [> let i1 ← b.index_usize 0#usize <]\ni1_post : i1 = (↑b)[0]!\ni2 : U128\n_✝⁵⁶ : [> let i2 ← backend.serial.u64.scalar.m i i1 <]\ni2_post : ↑i2 = ↑i * ↑i1\nz1 : Aeneas.Std.Array U128 9#usize\n_✝⁵⁵ : [> let z1 ← (Array.repeat 9#usize 0#u128).update 0#usize i2 <]\nz1_post : z1 = (Array.repeat 9#usize 0#u128).set 0#usize i2\ni3 : U64\n_✝⁵⁴ : [> let i3 ← b.index_usize 1#usize <]\ni3_post : i3 = (↑b)[1]!\ni4 : U128\n_✝⁵³ : [> let i4 ← backend.serial.u64.scalar.m i i3 <]\ni4_",
+   "round": 1,
+   "decl_kind": "theorem"
+  }
+ ],
+ "statement_errors": [],
+ "cascades": [],
+ "statement_broken": [],
+ "needs_statement_change": false,
+ "file_errors": [],
+ "blocked_modules": [],
+ "comparison": {
+  "predicted_n": 2,
+  "actual_n": 2,
+  "true_positive": [
+   "Curve25519Dalek/Proofs/Backend/Serial/U64/Scalar/Scalar52/MulInternal.lean::mul_internal_spec",
+   "Curve25519Dalek/Proofs/Backend/Serial/U64/Scalar/Scalar52/SquareInternal.lean::square_internal_spec"
+  ],
+  "false_positive": [],
+  "false_negative": []
+ },
+ "verdict": "break confirmed"
+}
