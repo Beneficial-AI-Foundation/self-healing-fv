@@ -23,16 +23,22 @@ Non-goals (v0):
 This document describes the target design. The prototype is the slice of it that one engineer builds and tests on real history by 2026-11-03. Everything outside the slice keeps its design here and is built afterwards.
 
 **In the prototype**
-- **One repo:** curve25519-dalek-lean-verify, which includes the PR 535 showcase. curve25519-dalek-u32 only if time allows.
-- **Data:** mining and replay with completeness flags (§6.5), on a small set of hand-audited cases.
-- **Audit** (§4.7): model-free, run on historical commits including PR 535.
-- **Repair loop** (§3.3, S4): one agent adapter (**Claude Code**, headless), one model, one tool profile.
-- **Gate:** G0–G5, including kernel replay with `lean4checker`; component acceptance; the planted-violation tests (§4.6).
+- **One repo, one toolchain:** a fixed, small set of hand-audited cases from curve25519-dalek-lean-verify, all on one Lean toolchain where the snapshot tooling and `lean4checker` are known to work.
+- **Audit** (§4.7): model-free, demonstrated on PR 535. This demonstration may use a different toolchain from the repair cases.
+- **Repair loop** (§3.3, S4): one agent adapter (**Claude Code**, headless), one model, one tool profile. The agent uses the off-the-shelf Lean LSP MCP server [LeanLSPMCP] with its remote search tools turned off, plus compiler feedback. No custom tool layer and no pre-captured goal states: the agent queries goals itself, and out-of-scope edits are caught by G0, not by a restricted `edit` tool.
+- **Gate:** G0–G3 and G5 (kernel replay with `lean4checker`), the planted-violation tests (§4.6), and **complete-case acceptance**: a case is accepted only when every broken theorem is repaired and the unstubbed candidate builds. Repairs from a partly repaired case are kept as unaccepted suggestions in the run record.
+- **Outcomes:** `repaired`, `statement-must-change`, `proof-hard`, `blocked-on`, `infrastructure-failure`, `gate-unavailable` (§5.1).
 - **Pilot runs** to set budget defaults (§8.5).
-- **Evaluation:** repair rate, cost, gate rejections, audit result on PR 535, the no-LLM sweep baseline, and comparison with the human fix. Without a held-out repo, results are reported on newer dalek cases than those used for tuning.
-- **One run on GitHub Actions** on a fork of the repo, with delivery as a run-record artifact and a comment (shadow mode).
+- **Evaluation:** repair rate, cost, gate rejections, the PR 535 audit, the no-LLM sweep baseline, and comparison with the human fix. Without a held-out repo, results are reported on newer cases than those used for tuning.
+- **One manually dispatched GitHub Actions run** on a fork of the repo, producing the run record as an artifact.
+
+**First milestone (two days, by 2026-10-24).** On the chosen toolchain: (1) `lean4checker` and the snapshot tooling run; (2) the frozen inventory of one real case is complete (§4.2); (3) one gate fixture accepts a valid repair and rejects the planted violations. If any of these fails, the prototype supports fewer cases; it never weakens acceptance.
 
 **Deferred until after the prototype**
+- Component acceptance (§4.3), multiple toolchains, curve25519-dalek-u32, and broad mining as evaluation input.
+- The custom tool contract (§7.2), goal-state capture in S2, and G4 quality reports.
+- `spec-suspect` (§5.1).
+- Comment delivery (the prototype delivers artifacts only).
 - S3 behavior check (differential tests).
 - Decision models (the prototype uses rules only).
 - The second adapter, the adapter comparison, and the tool-profile ablation.
@@ -129,9 +135,10 @@ A hit cap escalates as `proof-hard`, with the partial state. If a theorem stays 
 **S6 Delivery** (no model). Outcome per theorem:
 - `repaired` (accepted by the gate, §4.3);
 - `escalated` (`statement-must-change`, `spec-suspect`, `proof-hard`, or `extraction-setup`);
-- `blocked-on`.
+- `blocked-on`;
+- `infrastructure-failure` or `gate-unavailable` (§5.1): not a statement about the theorem.
 
-One run produces one delivery. It contains every accepted repair plus an escalation report for the rest (§5). Repairs are accepted per component (§4.3): if some theorems stay broken, the delivery says so plainly, and the project still does not build until a human fixes them. The bot never inserts `sorry` into the delivered change to make CI green. Delivery modes, set per repo:
+One run produces one delivery. It contains every accepted repair plus an escalation report for the rest (§5). In the target design, repairs are accepted per component (§4.3; the prototype accepts complete cases only): if some theorems stay broken, the delivery says so plainly, and the project still does not build until a human fixes them. The bot never inserts `sorry` into the delivered change to make CI green. Delivery modes, set per repo:
 - **shadow**: a comment with the diff and the report;
 - **propose**: a PR that targets the broken PR's branch (or `main` for toolchain bumps), merged by a human. For fork PRs, whose branches the bot cannot push to, a patch instead (§9.2);
 - **auto-merge**: deferred, opt-in per repo, after a track record in propose mode.
@@ -195,7 +202,13 @@ Runner limits shape the design. A standard hosted runner has 4 cores, 16 GB RAM,
 
 ### 4.2 What is frozen
 
-The frozen set is **every declaration in the stubbed broken state outside extracted code**: all theorems and lemmas (their types) and all defs and abbrevs (their types and bodies), including spec predicates and `Math/` definitions. It is taken only from a snapshot with complete coverage (§4.4), never from whatever happened to compile. Declarations in extracted code are not frozen against the base (the triggering change changed them), but the candidate must leave them exactly as in the stubbed broken state. Protected files that the diff may not touch at all:
+The frozen set covers **user-facing declarations outside extracted code**: theorems and lemmas (their types) and defs and abbrevs (their types and bodies), including spec predicates and `Math/` definitions. **Compiler-generated auxiliaries** (`proof_N`, `match_N`, equation lemmas, instance auxiliaries) and anything created inside a proof are **not** frozen: they are implementation details of editable proofs, and a legitimate repair may change them. (The vendored statement check already separates these, §4.5.)
+
+**Inventory.** Which declarations are frozen is enumerated independently of the broken build, so a declaration that fails to compile cannot silently drop out:
+- from the **base snapshot**, which is complete because the base builds green: its user-facing declarations outside extracted modules;
+- plus declarations parsed from the broken state's source text, to catch any the triggering change added (live mode). In replay the non-extracted source of the broken state equals the base's, so the inventory is exactly the base's.
+
+Every inventory entry must be `observed` in the stubbed broken snapshot, which supplies the fingerprints G1 compares against. Any entry that is not observed makes the case ineligible for acceptance (S2). Declarations in extracted code are not frozen against the base (the triggering change changed them), but the candidate must leave them exactly as in the stubbed broken state. Protected files that the diff may not touch at all:
 - trusted models;
 - extracted code;
 - build config;
@@ -209,19 +222,21 @@ The bot may change proof bodies of broken theorems, and add new lemmas in the sa
 |---|---|---|
 | G0 | Scope | The diff touches only files that contain broken theorems, and within them only proof bodies of broken theorems and added declarations. No new `axiom`, `@[extern]`, `@[implemented_by]`, `opaque`, `import`, `sorry`, `admit`, or `debug.*` option. Raising `maxHeartbeats` is allowed but reported in the delivery, next to the elaboration time (G4): it is a cost issue, not a trust issue, and the target repos already raise it by hand. `maxHeartbeats 0` (no limit) is blocked, because it can hang a CI job. G0 is a textual check, so it runs before anything is built. It is a deterrent and fast feedback; soundness comes from G5. |
 | G1 | Statement identity | For every frozen declaration, the canonical fingerprint (kind, elaborated type, and body for defs) is identical in the stubbed broken state and the candidate, and so is every extracted declaration. A missing declaration counts as a change. This also catches edits that leave a statement's text unchanged but change how it elaborates (e.g. a new local notation or instance placed before it). The fingerprint names extracted constants without unfolding them, so a changed `Funs.lean` does not change the fingerprint of a statement about it. That is intended: the promise is the same, and it is now about the new code. |
-| G2 | Trust base | For each repaired theorem `T`, its transitive axiom closure must be a subset of the three standard Lean axioms (`propext`, `Classical.choice`, `Quot.sound`) plus the closure `T` had at the base commit. In particular there is no `sorryAx`, and `Lean.ofReduceBool` (`native_decide`) is allowed only where `T` already used it. Every **added** declaration is audited the same way, whether or not anything uses it. Beyond the stubs for still-broken theorems, any new `sorryAx` anywhere in the candidate rejects it. |
+| G2 | Trust base | For each repaired theorem `T`, its transitive axiom closure must be a subset of the three standard Lean axioms (`propext`, `Classical.choice`, `Quot.sound`) plus the closure `T` had at the base commit. In particular there is no `sorryAx`, and `Lean.ofReduceBool` (`native_decide`) is allowed only where `T` already used it. **Added declarations:** every added declaration must be used by an accepted repair; unused additions are rejected. A helper's axiom closure is then bounded by its users' allowances, because each user's closure contains the helper's. **Admissions:** the candidate's source may contain no `sorry` other than the gate's own stubs for still-broken theorems (component acceptance only). Accepted repairs and the helpers they use must have no `sorryAx` in their closure. Existing declarations that reach a stub are reported as `blocked-on`, not as violations. |
 | G3 | Clean build | Build the **required targets** listed in the target config (the audited module inventory; a default `lake build` may exclude some, such as tests) from a fresh checkout with dependency caches only (no project `.lake`). The build is of the stubbed candidate: accepted repairs applied, still-broken theorems stubbed. It must succeed, and no theorem outside the broken set may newly fail. The report states which targets were covered. |
 | G4 | Quality (report only) | Proof size and elaboration time compared with the base proof. These are reported, not blocking, in v0. |
 | G5 | Kernel replay | After the build, replay every declaration in the built files through the Lean kernel with `lean4checker` [LeanValidate]. Catches declarations that were added without kernel checking. Mandatory. |
 
-**Component acceptance.** A repair of theorem `A` is accepted when G0–G5 pass on the stubbed candidate and `A`'s axiom closure contains no `sorryAx`. `A` then does not depend on any still-broken theorem, so its proof is valid on its own, even though the project as a whole still fails until the remaining theorems are fixed.
+**Complete-case acceptance** (the prototype): a case is accepted when every broken theorem is repaired, G0–G5 pass, and the candidate builds with no stubs at all.
+
+**Component acceptance** (target design, after the prototype). A repair of theorem `A` is accepted when G0–G5 pass on the stubbed candidate and `A`'s axiom closure, including its helpers, contains no `sorryAx`. `A` then does not depend on any still-broken theorem, so its proof is valid on its own, even though the project as a whole still fails until the remaining theorems are fixed.
 
 ### 4.4 Snapshots
 
 The gate works on snapshots. A snapshot is one JSON record per declaration: name, kind, module, canonical type, canonical body (defs), the constants used, the axiom closure, and any `sorry` sources. It also records **coverage**: every declaration found in the source is `observed`, `statement-error`, or `blocked` (in a module that could not be built), and a missing record never counts as "unchanged". The pipeline takes four snapshots:
 - **base**: the base commit (complete, since it builds green), used for each theorem's original axiom closure (G2);
 - **head**: the actual triggering commit (the PR head; in replay, the change commit), used by the audit (§4.7);
-- **stubbed broken**: defines the frozen set (G1); acceptance requires complete coverage (S2, eligibility);
+- **stubbed broken**: supplies the fingerprints for the frozen inventory (§4.2, G1); acceptance requires every inventory entry to be observed (S2, eligibility);
 - **candidate**: after the repair.
 
 ### 4.5 Implementation: vendored, then adapted
@@ -271,6 +286,11 @@ A candidate that does any of the following must be rejected. Each case is a test
 
 The audit is separate from repair because it must also run when nothing is broken. A PR whose author weakened statements *and* fixed every proof is green, so a repair bot triggered by failures never sees it. The audit therefore runs on every PR that touches extracted code, toolchain pins or Lean files, green or red. In replay it compares the base with the actual change commit; the synthetic broken state omits the human's statement edits by construction, so it cannot be used for this. Whether the audit would have flagged the weakened `*_clamped` statements of PR 535 is checked on the real commits (§8).
 
+The audit compares non-extracted declarations (statements and definition bodies), trusted models, and axiom closures. Changes to extracted code are listed for information but are not themselves a finding, since every extraction update changes it. It has three outcomes:
+- `no-change`: complete coverage on both sides, and no differences;
+- `changed`: at least one difference, each with before and after;
+- `incomplete`: the head (or base) snapshot does not cover every inventory entry, for example because a statement fails to elaborate on a red head. The report lists what could not be compared. An incomplete audit never reports "no changes".
+
 ## 5. Escalation
 
 The bot never decides whether a statement or trust change is acceptable. It shows the right person the evidence and stops.
@@ -282,10 +302,14 @@ Every run that does not end with all broken theorems repaired escalates. Per the
 | Outcome | Meaning | Main evidence |
 |---|---|---|
 | `statement-must-change` | The old statement no longer elaborates against the new extracted code. The `rename-only` flag is set when the only difference is a name. | The old statement, the elaboration error, the rename |
-| `spec-suspect` | The repair failed, and the agent produced a counterexample that a check confirmed violates the statement (e.g. with `#eval`). | The checked counterexample |
+| `spec-suspect` | The repair failed, and the agent proved in Lean that the frozen statement is **false**: a proof of its negation (for example, concrete inputs that satisfy its hypotheses but not its conclusion), accepted by the gate like any other proof, with the negated statement matching the frozen fingerprint. Without such a proof the outcome stays `proof-hard`, and the agent's suspicion is shown only as advisory text. Deferred in the prototype. | The checked refutation |
 | `extraction-setup` | The extracted code could not be trusted or built (live: the extraction-consistency check did not pass on this SHA). | The failing check |
 | `proof-hard` | The budget ran out with no evidence against the statement. | The last goal state, an attempt summary |
 | `blocked-on` | The theorem depends on another theorem that is still broken. | The blocking theorem |
+| `infrastructure-failure` | Setup, build environment, runner, or a timeout outside proof search failed. Says nothing about the theorem. | The failing step and its log |
+| `gate-unavailable` | A gate check could not run (e.g. no `lean4checker` for this toolchain, or a snapshot could not be built). Nothing is accepted. | The missing check, with coverage |
+
+`infrastructure-failure` and `gate-unavailable` are excluded from repair-rate and escalation-quality metrics and reported separately (§8). Coverage stays "unknown" for anything they prevented from being checked.
 
 Any outcome may carry the annotation `behavior-difference-observed` from S3, with the inputs and canonical outputs.
 
@@ -295,7 +319,7 @@ Separately, the **audit** (§4.7) reports statement and trust changes **made by 
 
 Escalations go to GitHub, where every user of the bot already works:
 - **Two check runs** on the PR (or on the commit, for runs on `main`), each with its report in the summary:
-  - the **audit** check: `success` when the change made no statement, definition or trust change, otherwise `failure`;
+  - the **audit** check: `success` for `no-change`; `failure` for `changed`, and also for `incomplete`, with a title that says the audit could not compare everything;
   - the **repair** check (only after a verification failure): `success` only when every broken theorem was repaired, otherwise `failure`.
 
   The repo's own verification job stays the source of truth for whether the proofs build. The bot's check never turns it green.
@@ -517,7 +541,7 @@ As a secondary view, the confusion matrix compares the bot with the human fix:
   - The agent sees only `git archive` trees, with no future history, and its network reaches only the model API (§3.4), so it cannot look up the fix.
   - Each case records whether the fix commit predates the model's training-data cutoff, and results are split on that.
   - Repairs that closely match the human fix text are flagged as possible memorization.
-- **Reporting.** Results give sample counts, confidence intervals, coverage (§6.5), and case-level as well as theorem-level results. Repetitions are clustered by triggering commit, since theorems from one case are not independent. Passing the planted-violation tests shows only that those tests pass.
+- **Reporting.** `infrastructure-failure` and `gate-unavailable` outcomes are reported separately and excluded from repair and escalation metrics. Results give sample counts, confidence intervals, coverage (§6.5), and case-level as well as theorem-level results. Repetitions are clustered by triggering commit, since theorems from one case are not independent. Passing the planted-violation tests shows only that those tests pass.
 - **Reproducibility.** Every number in the results is computed by a script from run records (S7). Run records stay out of git (see `.gitignore`) and are archived with the results.
 
 ### 8.6 Not measured in v0
@@ -558,12 +582,12 @@ Releases are versioned. Each run record stores the bot version, gate version, ta
 
 - **Hosted runners** by default: 4 cores, 16 GB RAM, about 14 GB of free disk and a 6 h job cap.
 - Lean and Mathlib come from `elan` and the Mathlib build cache. The project's `.lake` build output is cached between runs with `actions/cache` (limited to 10 GB per repo, evicted when unused).
-- Each job has its own timeout below the 6 h cap. A timeout escalates as `proof-hard` with the partial state, never as a silent failure.
+- Each job has its own timeout below the 6 h cap. A timeout during proof search escalates as `proof-hard` with the partial state; a timeout anywhere else (setup, build, gate) is an `infrastructure-failure`. Neither is ever a silent failure.
 - Repos whose clean build does not fit (measured early, §3.4) use **larger hosted runners** or **self-hosted runners**. Self-hosted runners must be ephemeral (one fresh machine per job), because a persistent machine would carry one PR's state and code into the next.
 
 ### 9.5 Cost controls
 
-- **Per run:** a mandatory cap in the target config, enforced **before** spending by the metering proxy (§3.4): it reserves each request's worst-case cost (from its `max_tokens`) and refuses requests that could exceed the cap, and it limits concurrent requests. When the cap is reached the run stops and escalates with its partial state.
+- **Per run:** a mandatory cap in the target config, enforced **before** spending by the metering proxy (§3.4): before dispatching a request it reserves that request's worst-case cost, which is the exact input cost (tokens counted before sending, including cache writes) plus `max_tokens` of output, at prices pinned in the config. It refuses requests whose reservation would exceed the remaining cap, and it limits concurrent requests. A retry is a new request with its own reservation. A reservation is released, down to the actual charge, only when the response completes; if a request is cancelled and the provider does not confirm the charge, the full reservation counts as spent. With correct pinned prices, spending cannot exceed the cap. When the cap is reached the run stops and escalates with its partial state.
 - **Per month:** enforced by the model provider's own spend limit on the key (§9.3), which is the only place a limit holds across runs. The bot also reports month-to-date spend from its run records in each delivery, so maintainers see the trend before the limit hits.
 - **Concurrency:** one bot run per PR (a new push cancels the old run), and an optional limit on concurrent runs per repo.
 
