@@ -623,6 +623,8 @@ No default numbers yet: they come from the pilot runs (§8.5).
 
 **Verification environments.** *Towards Agentic Proof Harness Engineering* [ProofHarness] has an agent build the verification environment for a C function, checked by a soundness guard and a precision guard. In the Aeneas setting, the analogue is the extraction config and the hand-written models of external code. A future "step 0" of this bot could set up a new repo's config and models under similar guards. Note the term clash: "harness" there means the verification environment, while elsewhere in this doc it means agent scaffolding.
 
+**Extraction fidelity.** *aeneas_difftest* [AeneasDiffTest] checks whether the Charon/Aeneas translation is faithful: it generates random Rust programs, runs them in Miri, extracts them to Lean, runs the Lean, and compares results bit for bit. That is a different question from our S3, which compares the *old and new Rust* of a real crate function on generated typed inputs and needs no extraction at all, so it is not the engine for S3. Two parts are candidates for reuse: its harness for running extracted Lean on concrete values and decoding the results (useful when building `spec-suspect`, where the agent must find inputs that refute a statement), and its mapping between Rust panics and Aeneas error variants (useful if S3 compares panics as well as values).
+
 **Proof performance.** *Radar* [Radar] benchmarks Lean projects per commit (build time, memory). Our G4 report (§4.3) covers only the repaired proofs. A later proof-optimization mode, where the bot proposes faster proofs when idle, would use Radar to measure the gains (Later, §2.2).
 
 **Verified cryptography at scale.** The SymCrypt verification effort [SymCrypt] verifies post-quantum cryptography in Rust with Aeneas and Lean, and is our held-out evaluation repo (§6.1).
@@ -677,6 +679,7 @@ Papers
 
 Software and services
 
+- **[AeneasDiffTest]** Beneficial AI Foundation. *aeneas_difftest* (differential testing of Charon/Aeneas extraction against Miri). Not public as of 2026-10-23.
 - **[AVD]** Beneficial AI Foundation. *auto_verify_dalek* (agent harness and gates for recovering dalek specs and proofs; MIT). https://github.com/Beneficial-AI-Foundation/auto_verify_dalek, commit `32ed856`.
 - **[FVS]** Beneficial AI Foundation. *Formal Verification Skills* (agent skills for Lean verification). https://github.com/Beneficial-AI-Foundation/formal-verification-skills
 - **[LeanLSPMCP]** *lean-lsp-mcp* (MCP server for the Lean language server; MIT). https://github.com/oOo0oOo/lean-lsp-mcp
