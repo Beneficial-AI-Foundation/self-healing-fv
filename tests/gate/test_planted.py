@@ -172,11 +172,42 @@ def test_new_axiom(env):
     assert_rejected(v, "G0", "G2")
 
 
+def sorry_rejected(v, rc):
+    """Complete-case acceptance must reject a repair that still depends on sorry, by G2 itself."""
+    assert rc == 1 and v["verdict"] == "rejected"
+    assert not v["theorems"][0]["repaired"]
+    assert any(x["decl"] == "double_spec" and x["msg"] == "depends on sorry" for x in v["checks"]["G2"]["violations"])
+    assert v["checks"]["G3"]["ok"]  # it builds: sorry is only a warning, so the build alone would pass it
+
+
 @pytest.mark.parametrize("tactic", ["sorry", "admit"])
 def test_sorry_or_admit_in_repair(env, tactic):
     rc, v, _ = run_candidate(env, tactic, specs_edit(lambda t: t.replace(
         STUB, f"theorem double_spec (x : Nat) : double x = 2 * x := by\n  unfold double\n  {tactic}\n")))
     assert_rejected(v, "G0", "G2")
+    sorry_rejected(v, rc)
+
+
+def test_sorry_hidden_from_the_text_check(env):
+    # `sorryAx` written directly: caught by G2 from the elaborated closure, whatever G0 matches.
+    rc, v, _ = run_candidate(env, "sorryax", specs_edit(lambda t: t.replace(
+        STUB, "theorem double_spec (x : Nat) : double x = 2 * x := sorryAx _ false\n")))
+    sorry_rejected(v, rc)
+
+
+def test_sorry_through_a_used_helper(env):
+    helper = "theorem sum_two (x : Nat) : List.sum [x, x] = x + x := sorry\n\n"
+    proof = "theorem double_spec (x : Nat) : double x = 2 * x := by\n  unfold double\n  rw [sum_two]\n  omega\n"
+    rc, v, _ = run_candidate(env, "sorry-helper", specs_edit(lambda t: t.replace(STUB, helper + proof)))
+    sorry_rejected(v, rc)
+
+
+def test_attribute_command_on_existing_def(env):
+    # The other route to a forbidden attribute: an `attribute [...]` command between declarations.
+    rc, v, scope = run_candidate(env, "attr-cmd", specs_edit(lambda t: repaired(t).replace(
+        "theorem double_even", "attribute [implemented_by triple] double\n\ntheorem double_even")))
+    assert not scope["ok"]
+    assert any("outside declarations" in x["msg"] for x in scope["violations"])
 
 
 def test_unused_sorry_helper(env):

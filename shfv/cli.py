@@ -39,7 +39,18 @@ def main(argv: list[str] | None = None) -> int:
                    help="also gate the human fix as a reference candidate (default: on for escalations)")
     r.add_argument("--keep", action="store_true", help="keep the candidate and gate workspaces")
     r.add_argument("--label", help="suffix for the run directory, e.g. a model name")
+    g = sub.add_parser("render", help="re-render report.md from a run's report.json")
+    g.add_argument("report", type=Path)
+    g.add_argument("--work", type=Path, default=Path(os.environ.get("SHFV_WORK", ROOT / "work")))
     a = ap.parse_args(argv)
+    if a.cmd == "render":
+        import json
+        from .pipeline import refresh_comparison
+        rep = json.loads(a.report.read_text())
+        refresh_comparison(rep, a.work / rep["case_id"].replace("/", "-"))
+        _, m = report_mod.write(rep, a.report.parent)
+        print(m)
+        return 0
 
     repo_name = a.case.split("/")[0]
     config = a.config or ROOT / "targets" / f"{repo_name}.toml"

@@ -35,7 +35,7 @@
 
 Usage (needs the package's LEAN_PATH, so always via `lake env`):
 
-  lake env lean --run gates/StmtCanon.lean --import M1,M2,.. --module M1,M2,..
+  lake env lean --run gates/StmtCanon.lean --import M1,M2,.. --module M1,M2,.. [--reference-closures]
 
 `--import` lists the modules to load (those that built). `--module` lists the modules whose
 user-facing declarations are audited (auxiliaries such as `proof_N`, `match_N`, `eq_N` and
@@ -265,15 +265,36 @@ def bodyCanon (env : Environment) (audited : Std.HashSet Name) (c : Name) : Opti
 def namesJson (s : Std.HashSet Name) : Json :=
   toJson ((s.toArray.map toString).qsort (· < ·))
 
+/-- Reference walk, for testing `closure` only (`--reference-closures`): Lean's own
+    `collectAxioms`, and a plain per-declaration DFS (upstream's algorithm) for sorry
+    sources and uses. No memoization, so it is slow on a full project. -/
+def naiveClosure (audited : Std.HashSet Name) (root : Name) : MetaM Info := do
+  let env ← getEnv
+  let axioms ← collectAxioms root
+  let mut seen : Std.HashSet Name := {}
+  let mut todo : Array Name := #[root]
+  let mut info : Info := { axioms := axioms.foldl (init := {}) fun s a => s.insert a }
+  while todo.size > 0 do
+    let c := todo.back!
+    todo := todo.pop
+    if seen.contains c then continue
+    seen := seen.insert c
+    let (succ, d) := direct env audited c
+    info := { info with sorries := unionSet info.sorries d.sorries, uses := unionSet info.uses d.uses }
+    todo := todo ++ succ
+  return info
+
 def truncate (s : String) (n : Nat := 4000) : String :=
   if s.length ≤ n then s else (s.toList.take n).foldl String.push "" ++ " …"
 
-def auditDecl (audited : Std.HashSet Name) (declName : Name) : StateRefT Tarjan MetaM Json := do
+def auditDecl (audited : Std.HashSet Name) (declName : Name) (reference := false) :
+    StateRefT Tarjan MetaM Json := do
   let env ← getEnv
   match env.find? declName with
   | none => return Json.mkObj [("name", toString declName), ("found", false)]
   | some ci =>
-    let info ← modifyGet fun s => (closure env audited declName).run s
+    let info ← if reference then naiveClosure audited declName
+      else modifyGet fun s => (closure env audited declName).run s
     let pp ← ppExpr ci.type
     let roots (s : Std.HashSet Name) : Std.HashSet Name :=
       s.fold (init := {}) fun acc n => acc.insert (userRoot n)
@@ -300,9 +321,11 @@ unsafe def main (args : List String) : IO Unit := do
   let mut imports : Array Name := #[]
   let mut modules : Array Name := #[]
   let mut rest := args
+  let mut reference := false
   while true do
     match rest with
     | "--import" :: v :: r => imports := imports ++ splitNames v; rest := r
+    | "--reference-closures" :: r => reference := true; rest := r
     | "--module" :: v :: r => modules := modules ++ splitNames v; rest := r
     | [] => break
     | a :: _ => throw <| IO.userError s!"unexpected argument {a}"
@@ -321,7 +344,7 @@ unsafe def main (args : List String) : IO Unit := do
     let tarjan ← IO.mkRef ({} : Tarjan)
     for d in decls do
       let j ← try
-        let (j, s) ← MetaM.run' ((auditDecl audited d).run (← tarjan.get))
+        let (j, s) ← MetaM.run' ((auditDecl audited d reference).run (← tarjan.get))
         tarjan.set s
         pure j
       catch ex =>

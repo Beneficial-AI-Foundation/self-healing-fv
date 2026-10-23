@@ -168,7 +168,8 @@ class Run:
                 continue
             det = details.get(key, {})
             task = RepairTask(case_id=self.case_id, theorem=b["name"], decl=b["key"], file=b["file"],
-                              line=det.get("line", 0), errors=[det.get("msg", "")], cause=self.record["cause"],
+                              line=det.get("line", 0), errors=[det.get("msg", "")],
+                              cause=", ".join(self.record.get("causes") or [self.record["cause"]]) + pin_summary(self.record),
                               trigger=trigger, toolchain=toolchain,
                               other_broken=[o["key"] for o in broken if o is not b], context_dir=ctx)
             budget = Budget(usd=min(budget_cfg["per_theorem_usd"], remaining_usd),
@@ -444,6 +445,14 @@ class Run:
                 "attempts": len(atts)}
 
 
+def pin_summary(record: dict) -> str:
+    """E.g. "; Lean v4.21.0 → v4.24.0, aeneas 0eb6619 → d6ff318" for the agent's prompt."""
+    pins = record.get("pin_changes") or {}
+    parts = [f"Lean {pins['lean'][0].split(':')[-1]} → {pins['lean'][1].split(':')[-1]}"] if "lean" in pins else []
+    parts += [f"{k} {v[0][:7]} → {v[1][:7]}" for k, v in pins.items() if k in ("aeneas", "mathlib")]
+    return f"; {', '.join(parts)}" if parts else ""
+
+
 def edit_similarity(a: str, b: str) -> float:
     """How alike two edits of the same old proof are: compares the changed lines (+/-) only, so two
     small but different edits of a long proof do not look alike (§8.5 memorization flag)."""
@@ -455,9 +464,39 @@ def edit_similarity(a: str, b: str) -> float:
 
 
 def unified(a: str, b: str, path: str) -> str:
+    """Display diff of two proof texts (a proof at the end of a file may lack its final newline)."""
     import difflib
+    a, b = a.rstrip("\n") + "\n", b.rstrip("\n") + "\n"
     return "".join(difflib.unified_diff(a.splitlines(keepends=True), b.splitlines(keepends=True),
                                         f"a/{path}", f"b/{path}", n=2))
+
+
+def refresh_comparison(report: dict, case_dir: Path) -> None:
+    """Recompute the bot-vs-human proof diffs of a finished run from its gate diff and the
+    replay trees (for re-rendering after report changes; the candidate tree is gone by then)."""
+    from gates import patch  # the diff format only
+    diff = report.get("gate", {}).get("diff", "")
+    for h in report.get("human_fix", []):
+        f, key = h["file"], next((e["decl"] for e in report["repairs"] if e["theorem"] == h["theorem"]), None)
+        if not key:
+            continue
+        base = decl_text((case_dir / "base" / f).read_text(), key)
+        broken = (case_dir / "broken" / f).read_text()
+        fixed = case_dir / "fixed" / f
+        human = decl_text(fixed.read_text(), key) if fixed.exists() else None
+        try:
+            new = patch.apply({f: broken}, diff).get(f) if diff else None
+        except patch.PatchError:
+            new = None
+        mine = decl_text(new, key) if new else None
+        if human and base:
+            h["human_diff"] = unified(base["proof"], human["proof"], f)
+        if mine and base and mine["proof"].strip() != STUB:
+            h["bot_proof_lines"] = len(mine["proof"].splitlines())
+            h["bot_diff"] = unified(base["proof"], mine["proof"], f)
+            if human and human["proof"] != base["proof"]:
+                h["similarity_to_human"] = edit_similarity(h["bot_diff"], h["human_diff"])
+                h["possible_memorization"] = h["similarity_to_human"] >= 0.9
 
 
 def summarize_gate(g: dict) -> dict:

@@ -15,7 +15,7 @@ from .snapshot import module_of, protected
 
 STUB = ":= by sorry"
 BANNED = [
-    (r"\bsorry\b", "sorry"), (r"\badmit\b", "admit"), (r"\baxiom\b", "axiom"),
+    (r"\bsorry\b", "sorry"), (r"\bsorryAx\b", "sorryAx"), (r"\badmit\b", "admit"), (r"\baxiom\b", "axiom"),
     (r"\bopaque\b", "opaque"), (r"@\[[^\]]*\bextern\b", "@[extern]"),
     (r"\bimplemented_by\b", "@[implemented_by]"), (r"\bcsimp\b", "@[csimp]"),
     (r"^\s*import\b|\bimport\s+[A-Z]", "import"), (r"\bdebug\.", "debug.* option"),
@@ -25,6 +25,11 @@ BANNED = [
 ]
 HEARTBEATS_RE = re.compile(r"\bmaxHeartbeats\s+(\d+)")
 ADDABLE = ("theorem", "lemma")
+
+
+def spacing_key(s: str) -> str:
+    """Statement text with whitespace next to punctuation dropped (Lean ignores it)."""
+    return re.sub(r" ?([^\w\s.'!?]) ?", r"\1", s)
 
 
 def short(key: str) -> str:
@@ -106,7 +111,9 @@ def check(cfg: dict, base: dict, broken: dict, diff: str) -> dict:
                 v(f"deletes or renames declaration `{k}`", **where)
                 continue
             if (n["kind"], n["statement"]) != (d["kind"], d["statement"]):
-                v(f"changes the statement of `{k}`", before=d["statement"], after=n["statement"], **where)
+                same = n["kind"] == d["kind"] and spacing_key(n["statement"]) == spacing_key(d["statement"])
+                v(f"{'reformats' if same else 'changes'} the statement of `{k}`",
+                  before=d["statement"], after=n["statement"], **where)
             is_broken = (path, k) in broken_keys
             if n["prefix"] != d["prefix"]:
                 hb_only = HEARTBEATS_RE.sub("", n["prefix"]).replace("set_option in", "").strip() == \
