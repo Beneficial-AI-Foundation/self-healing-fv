@@ -664,7 +664,20 @@ Each question is answered by a measurement or an early prototype, not by more de
 
 19. **Dataset release.** Which licenses apply to statement excerpts from each source repo, and do run records need redaction before release (§6.6)?
 
-## 12. References
+## 12. Credits
+
+This project builds directly on teammates' work at BAIF. Vendored code also carries its source and license in each file's header (§4.5). Outside work is credited in §10 and §13.
+
+| Who | Their work | What this project takes from it |
+|---|---|---|
+| Liao (GitHub `@Zhang-Liao`) | The *auto_verify_dalek* harness and gates [AVD] | **Code (vendored, MIT):** the statement fingerprint `StmtCanon.lean` and the trust check `g2_trust_base.py` (§4.5). **Design:** one fresh agent session per theorem, leaves first (§3.3, S4); deterministic gates with statement fingerprints, `sorry` accounting and an axiom whitelist (§4); a `check` tool that wraps `lake build` with timeouts and clear statuses (§7.2); lessons from real agent runs, such as agents raising `maxHeartbeats` (§4.3, G0); and the harness's review of LeanMarathon (§7.3). Also early input on the project's direction. |
+| Alessandro (GitHub `@a-dangelo`) | *Formal Verification Skills* [FVS] (main author); the AutoFV pipeline in auto_verify_dalek [AVD]; a verification-factory prototype (not public) | **Design:** FVS `lean-verify` as an optional repair playbook (§7.3); from AutoFV, a model proxy that holds the API key and a run-level cost cap charged from metered usage (§3.4, §9.5); from the verification-factory prototype, fingerprinting the definitions a statement depends on, not only its type (§4.5), and the goal of one shared checker for "statement unchanged, no new trust" (§4.5, §11). Also input on direction: adoption by teams outside BAIF, and cost. |
+| Lennart Beringer (GitHub `@lennartberinger`) | *aeneas_difftest* [AeneasDiffTest] | **Design:** how S3 is scoped, as old-vs-new Rust comparison rather than extraction-fidelity testing (§10); candidate reuse of its Lean execution harness and panic mapping (§10). No code reused. |
+| Shaowei Lin | Chief Scientist, BAIF | Guidance on project direction and priorities. |
+
+**Design review.** Two adversarial review rounds by Codex (OpenAI), with their triage, are in `docs/reviews/`.
+
+## 13. References
 
 Papers
 
