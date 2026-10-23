@@ -247,7 +247,7 @@ The gate works on snapshots. A snapshot is one JSON record per declaration: name
 
 ### 4.5 Implementation: vendored, then adapted
 
-We vendor (copy, with attribution) the statement check from auto_verify_dalek [AVD] at commit `32ed856` (MIT): `harness/gates/StmtCanon.lean`. The copy lives in `gates/` with the source URL, commit and MIT notice in its header. There is no runtime dependency on that repo. *(proposed, from the prototype)* `harness/gates/g2_trust_base.py` is not vendored: it checks AVD's own frozen files (`harness/frozen/`, `phase0_audit.lean`, `.verilib`), while the facts G2 needs here (each declaration's axiom closure and `sorry` sources) already come from StmtCanon.
+We vendor (copy, with attribution) the statement check from auto_verify_dalek [AVD] at commit `32ed856` (MIT): `harness/gates/StmtCanon.lean`. The copy lives in `gates/` with the source URL, commit and MIT notice in its header. There is no runtime dependency on that repo. `harness/gates/g2_trust_base.py` is not vendored: it checks AVD's own frozen files (`harness/frozen/`, `phase0_audit.lean`, `.verilib`), while the facts G2 needs here (each declaration's axiom closure and `sorry` sources) already come from StmtCanon.
 
 Kept as-is:
 - per-declaration JSON records;
@@ -268,7 +268,7 @@ Interface:
 - `gate snapshot --config T.toml --tree DIR --out S.json [--clean] [--apply D.patch --workdir W]`
 - `gate compare --base B.json --broken K.json --candidate C.json --diff D.patch`
 
-*(proposed, from the prototype)* The candidate diff is relative to the stubbed broken state. With `--apply`, the gate makes its own fresh copy of the stubbed broken state (sources and dependency packages, no project build output), applies the diff strictly (no fuzz), builds and fingerprints it; `compare` checks that the candidate snapshot is exactly that state plus that diff. Snapshots carry the audited source texts, so G0 is a pure function of the snapshots and the diff. Helper subcommands: `gate scope` (G0 alone, before any build), `gate diff`, and `gate version` (a hash of the gate sources, recorded in every snapshot and verdict).
+The candidate diff is relative to the stubbed broken state. With `--apply`, the gate makes its own fresh copy of the stubbed broken state (sources and dependency packages, no project build output), applies the diff strictly (no fuzz), builds and fingerprints it; `compare` checks that the candidate snapshot is exactly that state plus that diff. Snapshots carry the audited source texts, so G0 is a pure function of the snapshots and the diff. Helper subcommands: `gate scope` (G0 alone, before any build), `gate diff`, and `gate version` (a hash of the gate sources, recorded in every snapshot and verdict).
 
 `gate compare` returns a verdict JSON with one entry per theorem and the failing check ids. If a shared BAIF auditor becomes available, it replaces the implementation behind this interface.
 
