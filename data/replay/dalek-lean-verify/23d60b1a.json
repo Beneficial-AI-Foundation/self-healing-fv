@@ -1,0 +1,631 @@
+{
+ "case_id": "dalek-lean-verify/23d60b1a",
+ "change_pr_url": "https://github.com/Beneficial-AI-Foundation/curve25519-dalek-lean-verify/pull/343",
+ "replayed_at": "2026-10-21T13:25:36+00:00",
+ "machine": {
+  "cpus": 18
+ },
+ "timing": {
+  "export_s": 1.6,
+  "base_fixed_wall_s": 19,
+  "broken_setup_s": 13.8,
+  "broken_rounds_s": 789,
+  "total_s": 824
+ },
+ "fixed": {
+  "ok": true,
+  "stage": "build",
+  "timings": {
+   "seed_s": 0.0,
+   "cache_lock_wait_s": 8.2,
+   "cache_get_s": 8,
+   "build_s": 2,
+   "store_s": 0.0
+  },
+  "reuse": {
+   "packages_reused": [],
+   "packages_fetched": [],
+   "project_build_seeded_from": null
+  },
+  "orphaned_pins": [],
+  "jobs": 7851,
+  "errors": [],
+  "tail": ""
+ },
+ "base": {
+  "ok": true,
+  "stage": "build",
+  "timings": {
+   "seed_s": 0.0,
+   "cache_lock_wait_s": 0.0,
+   "cache_get_s": 8,
+   "build_s": 2,
+   "store_s": 0.0
+  },
+  "reuse": {
+   "packages_reused": [],
+   "packages_fetched": [],
+   "project_build_seeded_from": null
+  },
+  "orphaned_pins": [],
+  "jobs": 7851,
+  "errors": [],
+  "tail": ""
+ },
+ "overlay": [
+  "Curve25519Dalek/Funs.lean",
+  "Curve25519Dalek/Types.lean",
+  "functions.json",
+  "lake-manifest.json",
+  "lakefile.toml"
+ ],
+ "external_models_overlaid": [
+  "Curve25519Dalek/FunsExternal.lean"
+ ],
+ "extraction_errors": [],
+ "broken_rounds": [
+  {
+   "round": 1,
+   "ok": false,
+   "errors_n": 29,
+   "build_s": 27,
+   "jobs": 7851
+  },
+  {
+   "round": 2,
+   "ok": false,
+   "errors_n": 63,
+   "build_s": 688,
+   "jobs": 7851
+  },
+  {
+   "round": 3,
+   "ok": false,
+   "errors_n": 59,
+   "build_s": 44,
+   "jobs": 7851
+  },
+  {
+   "round": 4,
+   "ok": false,
+   "errors_n": 57,
+   "build_s": 17,
+   "jobs": 7851
+  },
+  {
+   "round": 5,
+   "ok": false,
+   "errors_n": 56,
+   "build_s": 13,
+   "jobs": 7851
+  }
+ ],
+ "broken_green_after_sorry": false,
+ "broken_proofs": [
+  "Curve25519Dalek/Specs/Backend/Serial/U64/Scalar/Scalar52/Add.lean::add_loop_spec",
+  "Curve25519Dalek/Specs/Backend/Serial/U64/Scalar/Scalar52/ConditionalAddL.lean::conditional_add_l_loop_spec",
+  "Curve25519Dalek/Specs/Backend/Serial/U64/Scalar/Scalar52/FromMontgomery.lean::from_montgomery_loop_spec",
+  "Curve25519Dalek/Specs/Backend/Serial/U64/Scalar/Scalar52/MulInternal.lean::mul_internal_spec",
+  "Curve25519Dalek/Specs/Backend/Serial/U64/Scalar/Scalar52/SquareInternal.lean::square_internal_spec",
+  "Curve25519Dalek/Specs/Backend/Serial/U64/Scalar/Scalar52/Sub.lean::sub_loop_spec",
+  "Curve25519Dalek/Specs/Backend/Serial/U64/Scalar/Scalar52/Sub.lean::sub_spec",
+  "Curve25519Dalek/Specs/Field/FieldElement51/IsNegative.lean::is_negative_spec",
+  "Curve25519Dalek/Specs/Scalar/Scalar/FromBytesModOrder.lean::from_bytes_mod_order_spec"
+ ],
+ "broken_proofs_detail": [
+  {
+   "file": "Curve25519Dalek/Specs/Backend/Serial/U64/Scalar/Scalar52/MulInternal.lean",
+   "line": 40,
+   "decl": "mul_internal_spec",
+   "where": "body",
+   "kind": "unknown-identifier",
+   "msg": "Unknown identifier `backend.serial.u64.scalar.Indexcurve25519_dalekbackendserialu64scalarScalar52UsizeU64.index`",
+   "round": 2,
+   "decl_kind": "theorem"
+  },
+  {
+   "file": "Curve25519Dalek/Specs/Backend/Serial/U64/Scalar/Scalar52/SquareInternal.lean",
+   "line": 71,
+   "decl": "square_internal_spec",
+   "where": "body",
+   "kind": "unknown-identifier",
+   "msg": "Unknown identifier `Indexcurve25519_dalekbackendserialu64scalarScalar52UsizeU64.index`",
+   "round": 2,
+   "decl_kind": "theorem"
+  },
+  {
+   "file": "Curve25519Dalek/Specs/Backend/Serial/U64/Scalar/Scalar52/FromMontgomery.lean",
+   "line": 65,
+   "decl": "from_montgomery_loop_spec",
+   "where": "body",
+   "kind": "unknown-identifier",
+   "msg": "Unknown identifier `Indexcurve25519_dalekbackendserialu64scalarScalar52UsizeU64.index`",
+   "round": 2,
+   "decl_kind": "theorem"
+  },
+  {
+   "file": "Curve25519Dalek/Specs/Backend/Serial/U64/Scalar/Scalar52/ConditionalAddL.lean",
+   "line": 90,
+   "decl": "conditional_add_l_loop_spec",
+   "where": "body",
+   "kind": "unknown-identifier",
+   "msg": "Unknown identifier `Indexcurve25519_dalekbackendserialu64scalarScalar52UsizeU64.index`",
+   "round": 2,
+   "decl_kind": "theorem"
+  },
+  {
+   "file": "Curve25519Dalek/Specs/Field/FieldElement51/IsNegative.lean",
+   "line": 76,
+   "decl": "is_negative_spec",
+   "where": "body",
+   "kind": "unknown-identifier",
+   "msg": "Unknown identifier `subtle.FromsubtleChoiceU8.from`",
+   "round": 2,
+   "decl_kind": "theorem"
+  },
+  {
+   "file": "Curve25519Dalek/Specs/Backend/Serial/U64/Scalar/Scalar52/Sub.lean",
+   "line": 97,
+   "decl": "sub_loop_spec",
+   "where": "body",
+   "kind": "unknown-identifier",
+   "msg": "Unknown identifier `Indexcurve25519_dalekbackendserialu64scalarScalar52UsizeU64.index`",
+   "round": 3,
+   "decl_kind": "theorem"
+  },
+  {
+   "file": "Curve25519Dalek/Specs/Backend/Serial/U64/Scalar/Scalar52/Sub.lean",
+   "line": 315,
+   "decl": "sub_spec",
+   "where": "body",
+   "kind": "unknown-identifier",
+   "msg": "Unknown identifier `subtle.FromsubtleChoiceU8.from`",
+   "round": 3,
+   "decl_kind": "theorem"
+  },
+  {
+   "file": "Curve25519Dalek/Specs/Scalar/Scalar/FromBytesModOrder.lean",
+   "line": 43,
+   "decl": "from_bytes_mod_order_spec",
+   "where": "body",
+   "kind": "unknown-identifier",
+   "msg": "Unknown identifier `scalar.Indexcurve25519_dalekscalarScalarUsizeU8.index`",
+   "round": 3,
+   "decl_kind": "theorem"
+  },
+  {
+   "file": "Curve25519Dalek/Specs/Backend/Serial/U64/Scalar/Scalar52/Add.lean",
+   "line": 66,
+   "decl": "add_loop_spec",
+   "where": "body",
+   "kind": "unknown-identifier",
+   "msg": "Unknown identifier `Indexcurve25519_dalekbackendserialu64scalarScalar52UsizeU64.index`",
+   "round": 4,
+   "decl_kind": "theorem"
+  }
+ ],
+ "statement_errors": [
+  {
+   "file": "Curve25519Dalek/Specs/Backend/Serial/U64/Field/FieldElement51/AddAssign.lean",
+   "line": 34,
+   "decl": "add_assign_loop_spec",
+   "where": "statement",
+   "kind": "other",
+   "msg": "Invalid field notation: Type of\n  a'[j]!\nis not known; cannot resolve field `val`",
+   "round": 2
+  },
+  {
+   "file": "Curve25519Dalek/Specs/Backend/Serial/U64/Field/FieldElement51/AddAssign.lean",
+   "line": 86,
+   "decl": "add_assign_spec",
+   "where": "statement",
+   "kind": "other",
+   "msg": "Invalid field notation: Type of\n  result[i]!\nis not known; cannot resolve field `val`",
+   "round": 2
+  },
+  {
+   "file": "Curve25519Dalek/Specs/Ristretto/RistrettoPoint/Add.lean",
+   "line": 66,
+   "decl": "add_spec",
+   "where": "statement",
+   "kind": "other",
+   "msg": "Invalid field notation: Type of\n  result\nis not known; cannot resolve field `X`",
+   "round": 2
+  },
+  {
+   "file": "Curve25519Dalek/Specs/Ristretto/RistrettoPoint/Add.lean",
+   "line": 67,
+   "decl": "add_spec",
+   "where": "statement",
+   "kind": "other",
+   "msg": "Invalid field notation: Type of\n  result\nis not known; cannot resolve field `Y`",
+   "round": 2
+  },
+  {
+   "file": "Curve25519Dalek/Specs/Ristretto/RistrettoPoint/Add.lean",
+   "line": 68,
+   "decl": "add_spec",
+   "where": "statement",
+   "kind": "other",
+   "msg": "Invalid field notation: Type of\n  result\nis not known; cannot resolve field `Z`",
+   "round": 2
+  },
+  {
+   "file": "Curve25519Dalek/Specs/Ristretto/RistrettoPoint/Add.lean",
+   "line": 69,
+   "decl": "add_spec",
+   "where": "statement",
+   "kind": "other",
+   "msg": "Invalid field notation: Type of\n  result\nis not known; cannot resolve field `T`",
+   "round": 2
+  },
+  {
+   "file": "Curve25519Dalek/Specs/Edwards/EdwardsPoint/Identity.lean",
+   "line": 41,
+   "decl": "identity_spec",
+   "where": "statement",
+   "kind": "other",
+   "msg": "Invalid field notation: Type of\n  q\nis not known; cannot resolve field `X`",
+   "round": 2
+  },
+  {
+   "file": "Curve25519Dalek/Specs/Edwards/EdwardsPoint/Identity.lean",
+   "line": 41,
+   "decl": "identity_spec",
+   "where": "statement",
+   "kind": "other",
+   "msg": "Invalid field notation: Type of\n  q\nis not known; cannot resolve field `Y`",
+   "round": 2
+  },
+  {
+   "file": "Curve25519Dalek/Specs/Edwards/EdwardsPoint/Identity.lean",
+   "line": 41,
+   "decl": "identity_spec",
+   "where": "statement",
+   "kind": "other",
+   "msg": "Invalid field notation: Type of\n  q\nis not known; cannot resolve field `Z`",
+   "round": 2
+  },
+  {
+   "file": "Curve25519Dalek/Specs/Edwards/EdwardsPoint/Identity.lean",
+   "line": 41,
+   "decl": "identity_spec",
+   "where": "statement",
+   "kind": "other",
+   "msg": "Invalid field notation: Type of\n  q\nis not known; cannot resolve field `T`",
+   "round": 2
+  },
+  {
+   "file": "Curve25519Dalek/Specs/Edwards/EdwardsPoint/Identity_Hoare.lean",
+   "line": 42,
+   "decl": "identity_hoare_spec",
+   "where": "statement",
+   "kind": "other",
+   "msg": "Invalid 'spec': target was neither a Hoare triple specification nor a 'simp' lemma",
+   "round": 2
+  },
+  {
+   "file": "Curve25519Dalek/Specs/Edwards/EdwardsPoint/Add.lean",
+   "line": 65,
+   "decl": "add_spec",
+   "where": "statement",
+   "kind": "other",
+   "msg": "Invalid field notation: Type of\n  result\nis not known; cannot resolve field `X`",
+   "round": 2
+  },
+  {
+   "file": "Curve25519Dalek/Specs/Edwards/EdwardsPoint/Add.lean",
+   "line": 66,
+   "decl": "add_spec",
+   "where": "statement",
+   "kind": "other",
+   "msg": "Invalid field notation: Type of\n  result\nis not known; cannot resolve field `Y`",
+   "round": 2
+  },
+  {
+   "file": "Curve25519Dalek/Specs/Edwards/EdwardsPoint/Add.lean",
+   "line": 67,
+   "decl": "add_spec",
+   "where": "statement",
+   "kind": "other",
+   "msg": "Invalid field notation: Type of\n  result\nis not known; cannot resolve field `Z`",
+   "round": 2
+  },
+  {
+   "file": "Curve25519Dalek/Specs/Edwards/EdwardsPoint/Add.lean",
+   "line": 68,
+   "decl": "add_spec",
+   "where": "statement",
+   "kind": "other",
+   "msg": "Invalid field notation: Type of\n  result\nis not known; cannot resolve field `T`",
+   "round": 2
+  },
+  {
+   "file": "Curve25519Dalek/Specs/Backend/Serial/U64/Field/FieldElement51/Mul.lean",
+   "line": 43,
+   "decl": "m_spec",
+   "where": "statement",
+   "kind": "other",
+   "msg": "Invalid field notation: Type of\n  r\nis not known; cannot resolve field `val`",
+   "round": 2
+  },
+  {
+   "file": "Curve25519Dalek/Specs/Scalar/Scalar/CtEq.lean",
+   "line": 39,
+   "decl": "ct_eq_spec",
+   "where": "statement",
+   "kind": "unknown-identifier",
+   "msg": "Unknown identifier `ct_eq`",
+   "round": 2
+  },
+  {
+   "file": "Curve25519Dalek/Specs/Backend/Serial/U64/Field/FieldElement51/AddAssign.lean",
+   "line": 33,
+   "decl": "add_assign_loop_spec",
+   "where": "statement",
+   "kind": "unknown-identifier",
+   "msg": "Unknown identifier `add_assign_loop`",
+   "round": 2
+  },
+  {
+   "file": "Curve25519Dalek/Specs/Backend/Serial/U64/Field/FieldElement51/AddAssign.lean",
+   "line": 85,
+   "decl": "add_assign_spec",
+   "where": "statement",
+   "kind": "unknown-identifier",
+   "msg": "Unknown identifier `add_assign`",
+   "round": 2
+  },
+  {
+   "file": "Curve25519Dalek/Specs/Ristretto/RistrettoPoint/Compress.lean",
+   "line": 83,
+   "decl": "compress_spec",
+   "where": "statement",
+   "kind": "unknown-identifier",
+   "msg": "Unknown identifier `edwards.ConstantTimeEqcurve25519_dalekedwardsEdwardsPoint.ct_eq`",
+   "round": 2
+  },
+  {
+   "file": "Curve25519Dalek/Specs/Ristretto/RistrettoPoint/Add.lean",
+   "line": 63,
+   "decl": "add_spec",
+   "where": "statement",
+   "kind": "unknown-identifier",
+   "msg": "Unknown identifier `add`",
+   "round": 2
+  },
+  {
+   "file": "Curve25519Dalek/Specs/Edwards/EdwardsPoint/MulByPow2.lean",
+   "line": 47,
+   "decl": "mul_by_pow_2_spec",
+   "where": "statement",
+   "kind": "unknown-identifier",
+   "msg": "Unknown identifier `ConstantTimeEqcurve25519_dalekedwardsEdwardsPoint.ct_eq`",
+   "round": 2
+  },
+  {
+   "file": "Curve25519Dalek/Specs/Edwards/EdwardsPoint/Double.lean",
+   "line": 46,
+   "decl": "double_spec",
+   "where": "statement",
+   "kind": "unknown-identifier",
+   "msg": "Unknown identifier `add`",
+   "round": 2
+  },
+  {
+   "file": "Curve25519Dalek/Specs/Edwards/EdwardsPoint/Double.lean",
+   "line": 47,
+   "decl": "double_spec",
+   "where": "statement",
+   "kind": "unknown-identifier",
+   "msg": "Unknown identifier `ConstantTimeEqcurve25519_dalekedwardsEdwardsPoint.ct_eq`",
+   "round": 2
+  },
+  {
+   "file": "Curve25519Dalek/Specs/Edwards/EdwardsPoint/Identity.lean",
+   "line": 40,
+   "decl": "identity_spec",
+   "where": "statement",
+   "kind": "unknown-identifier",
+   "msg": "Unknown identifier `identity`",
+   "round": 2
+  },
+  {
+   "file": "Curve25519Dalek/Specs/Edwards/EdwardsPoint/Identity_Hoare.lean",
+   "line": 45,
+   "decl": "identity_hoare_spec",
+   "where": "statement",
+   "kind": "unknown-identifier",
+   "msg": "Unknown identifier `identity`",
+   "round": 2
+  },
+  {
+   "file": "Curve25519Dalek/Specs/Edwards/EdwardsPoint/IsSmallOrder.lean",
+   "line": 47,
+   "decl": "is_small_order_spec",
+   "where": "statement",
+   "kind": "unknown-identifier",
+   "msg": "Unknown identifier `Identitycurve25519_dalekedwardsEdwardsPoint.identity`",
+   "round": 2
+  },
+  {
+   "file": "Curve25519Dalek/Specs/Edwards/EdwardsPoint/IsSmallOrder.lean",
+   "line": 48,
+   "decl": "is_small_order_spec",
+   "where": "statement",
+   "kind": "unknown-identifier",
+   "msg": "Unknown identifier `ConstantTimeEqcurve25519_dalekedwardsEdwardsPoint.ct_eq`",
+   "round": 2
+  },
+  {
+   "file": "Curve25519Dalek/Specs/Edwards/EdwardsPoint/Add.lean",
+   "line": 62,
+   "decl": "add_spec",
+   "where": "statement",
+   "kind": "unknown-identifier",
+   "msg": "Unknown identifier `add`",
+   "round": 2
+  },
+  {
+   "file": "Curve25519Dalek/Specs/Backend/Serial/U64/Field/FieldElement51/ConditionalSelect.lean",
+   "line": 38,
+   "decl": "conditional_select_spec",
+   "where": "statement",
+   "kind": "unknown-identifier",
+   "msg": "Unknown identifier `backend.serial.u64.field.ConditionallySelectablecurve25519_dalekbackendserialu64fieldFieldElement51.conditional_select`",
+   "round": 2
+  },
+  {
+   "file": "Curve25519Dalek/Specs/Backend/Serial/U64/Field/FieldElement51/Mul.lean",
+   "line": 42,
+   "decl": "m_spec",
+   "where": "statement",
+   "kind": "unknown-identifier",
+   "msg": "Unknown identifier `mul.m`",
+   "round": 2
+  },
+  {
+   "file": "Curve25519Dalek/Specs/Backend/Serial/U64/Field/FieldElement51/Mul.lean",
+   "line": 65,
+   "decl": "LOW_51_BIT_MASK_spec",
+   "where": "statement",
+   "kind": "unknown-identifier",
+   "msg": "Unknown identifier `mul.LOW_51_BIT_MASK.val`",
+   "round": 2
+  },
+  {
+   "file": "Curve25519Dalek/Specs/Backend/Serial/U64/Field/FieldElement51/Mul.lean",
+   "line": 158,
+   "decl": "mul_spec",
+   "where": "statement",
+   "kind": "unknown-identifier",
+   "msg": "Unknown identifier `mul`",
+   "round": 2
+  },
+  {
+   "file": "Curve25519Dalek/Specs/Backend/Serial/U64/Field/FieldElement51/Sub.lean",
+   "line": 63,
+   "decl": "sub_spec",
+   "where": "statement",
+   "kind": "unknown-identifier",
+   "msg": "Unknown identifier `sub`",
+   "round": 2
+  },
+  {
+   "file": "Curve25519Dalek/Specs/Backend/Serial/U64/Field/FieldElement51/Neg.lean",
+   "line": 32,
+   "decl": "neg_spec",
+   "where": "statement",
+   "kind": "unknown-identifier",
+   "msg": "Unknown identifier `neg`",
+   "round": 2
+  },
+  {
+   "file": "Curve25519Dalek/Specs/Backend/Serial/U64/Field/FieldElement51/CtEq.lean",
+   "line": 45,
+   "decl": "ct_eq_spec",
+   "where": "statement",
+   "kind": "unknown-identifier",
+   "msg": "Unknown identifier `ct_eq`",
+   "round": 2
+  }
+ ],
+ "cascades": [],
+ "statement_broken": [
+  "Curve25519Dalek/Specs/Backend/Serial/U64/Field/FieldElement51/AddAssign.lean::add_assign_loop_spec",
+  "Curve25519Dalek/Specs/Backend/Serial/U64/Field/FieldElement51/AddAssign.lean::add_assign_spec",
+  "Curve25519Dalek/Specs/Backend/Serial/U64/Field/FieldElement51/ConditionalSelect.lean::conditional_select_spec",
+  "Curve25519Dalek/Specs/Backend/Serial/U64/Field/FieldElement51/CtEq.lean::ct_eq_spec",
+  "Curve25519Dalek/Specs/Backend/Serial/U64/Field/FieldElement51/Mul.lean::LOW_51_BIT_MASK_spec",
+  "Curve25519Dalek/Specs/Backend/Serial/U64/Field/FieldElement51/Mul.lean::m_spec",
+  "Curve25519Dalek/Specs/Backend/Serial/U64/Field/FieldElement51/Mul.lean::mul_spec",
+  "Curve25519Dalek/Specs/Backend/Serial/U64/Field/FieldElement51/Neg.lean::neg_spec",
+  "Curve25519Dalek/Specs/Backend/Serial/U64/Field/FieldElement51/Sub.lean::sub_spec",
+  "Curve25519Dalek/Specs/Edwards/EdwardsPoint/Add.lean::add_spec",
+  "Curve25519Dalek/Specs/Edwards/EdwardsPoint/Double.lean::double_spec",
+  "Curve25519Dalek/Specs/Edwards/EdwardsPoint/Identity.lean::identity_spec",
+  "Curve25519Dalek/Specs/Edwards/EdwardsPoint/Identity_Hoare.lean::identity_hoare_spec",
+  "Curve25519Dalek/Specs/Edwards/EdwardsPoint/IsSmallOrder.lean::is_small_order_spec",
+  "Curve25519Dalek/Specs/Edwards/EdwardsPoint/MulByPow2.lean::mul_by_pow_2_spec",
+  "Curve25519Dalek/Specs/Ristretto/RistrettoPoint/Add.lean::add_spec",
+  "Curve25519Dalek/Specs/Ristretto/RistrettoPoint/Compress.lean::compress_spec",
+  "Curve25519Dalek/Specs/Scalar/Scalar/CtEq.lean::ct_eq_spec"
+ ],
+ "needs_statement_change": true,
+ "file_errors": [],
+ "blocked_modules": [
+  "Curve25519Dalek",
+  "Curve25519Dalek.Specs.Backend.Serial.CurveModels.CompletedPoint.Add",
+  "Curve25519Dalek.Specs.Backend.Serial.CurveModels.CompletedPoint.AsExtended",
+  "Curve25519Dalek.Specs.Backend.Serial.CurveModels.CompletedPoint.AsProjective",
+  "Curve25519Dalek.Specs.Backend.Serial.CurveModels.ProjectivePoint.AsExtended",
+  "Curve25519Dalek.Specs.Backend.Serial.CurveModels.ProjectivePoint.Double",
+  "Curve25519Dalek.Specs.Backend.Serial.U64.Field.FieldElement51.Add",
+  "Curve25519Dalek.Specs.Backend.Serial.U64.Field.FieldElement51.ConditionalAssign",
+  "Curve25519Dalek.Specs.Backend.Serial.U64.Field.FieldElement51.SubAssign",
+  "Curve25519Dalek.Specs.Edwards.EdwardsPoint.AsProjectiveNiels",
+  "Curve25519Dalek.Specs.Edwards.EdwardsPoint.Compress",
+  "Curve25519Dalek.Specs.Edwards.EdwardsPoint.CtEq",
+  "Curve25519Dalek.Specs.Edwards.EdwardsPoint.MulByCofactor",
+  "Curve25519Dalek.Specs.Edwards.EdwardsPoint.ToAffine",
+  "Curve25519Dalek.Specs.Edwards.EdwardsPoint.ToMontgomery",
+  "Curve25519Dalek.Specs.Field.FieldElement51.Invert",
+  "Curve25519Dalek.Specs.Field.FieldElement51.Pow22501",
+  "Curve25519Dalek.Specs.Field.FieldElement51.PowP58",
+  "Curve25519Dalek.Specs.Scalar.Scalar.FromCanonicalBytes",
+  "Curve25519Dalek.Specs.Scalar.Scalar.IsCanonical"
+ ],
+ "comparison": {
+  "predicted_n": 43,
+  "actual_n": 27,
+  "true_positive": [
+   "Curve25519Dalek/Specs/Backend/Serial/U64/Field/FieldElement51/AddAssign.lean::add_assign_loop_spec",
+   "Curve25519Dalek/Specs/Backend/Serial/U64/Field/FieldElement51/AddAssign.lean::add_assign_spec",
+   "Curve25519Dalek/Specs/Backend/Serial/U64/Field/FieldElement51/ConditionalSelect.lean::conditional_select_spec",
+   "Curve25519Dalek/Specs/Backend/Serial/U64/Field/FieldElement51/CtEq.lean::ct_eq_spec",
+   "Curve25519Dalek/Specs/Backend/Serial/U64/Field/FieldElement51/Mul.lean::LOW_51_BIT_MASK_spec",
+   "Curve25519Dalek/Specs/Backend/Serial/U64/Field/FieldElement51/Mul.lean::m_spec",
+   "Curve25519Dalek/Specs/Backend/Serial/U64/Field/FieldElement51/Mul.lean::mul_spec",
+   "Curve25519Dalek/Specs/Backend/Serial/U64/Field/FieldElement51/Neg.lean::neg_spec",
+   "Curve25519Dalek/Specs/Backend/Serial/U64/Field/FieldElement51/Sub.lean::sub_spec",
+   "Curve25519Dalek/Specs/Backend/Serial/U64/Scalar/Scalar52/Add.lean::add_loop_spec",
+   "Curve25519Dalek/Specs/Backend/Serial/U64/Scalar/Scalar52/ConditionalAddL.lean::conditional_add_l_loop_spec",
+   "Curve25519Dalek/Specs/Backend/Serial/U64/Scalar/Scalar52/FromMontgomery.lean::from_montgomery_loop_spec",
+   "Curve25519Dalek/Specs/Backend/Serial/U64/Scalar/Scalar52/MulInternal.lean::mul_internal_spec",
+   "Curve25519Dalek/Specs/Backend/Serial/U64/Scalar/Scalar52/SquareInternal.lean::square_internal_spec",
+   "Curve25519Dalek/Specs/Backend/Serial/U64/Scalar/Scalar52/Sub.lean::sub_loop_spec",
+   "Curve25519Dalek/Specs/Backend/Serial/U64/Scalar/Scalar52/Sub.lean::sub_spec",
+   "Curve25519Dalek/Specs/Edwards/EdwardsPoint/Add.lean::add_spec",
+   "Curve25519Dalek/Specs/Edwards/EdwardsPoint/Double.lean::double_spec",
+   "Curve25519Dalek/Specs/Edwards/EdwardsPoint/Identity.lean::identity_spec",
+   "Curve25519Dalek/Specs/Edwards/EdwardsPoint/Identity_Hoare.lean::identity_hoare_spec",
+   "Curve25519Dalek/Specs/Edwards/EdwardsPoint/IsSmallOrder.lean::is_small_order_spec",
+   "Curve25519Dalek/Specs/Edwards/EdwardsPoint/MulByPow2.lean::mul_by_pow_2_spec",
+   "Curve25519Dalek/Specs/Field/FieldElement51/IsNegative.lean::is_negative_spec",
+   "Curve25519Dalek/Specs/Ristretto/RistrettoPoint/Add.lean::add_spec",
+   "Curve25519Dalek/Specs/Ristretto/RistrettoPoint/Compress.lean::compress_spec",
+   "Curve25519Dalek/Specs/Scalar/Scalar/CtEq.lean::ct_eq_spec",
+   "Curve25519Dalek/Specs/Scalar/Scalar/FromBytesModOrder.lean::from_bytes_mod_order_spec"
+  ],
+  "false_positive": [
+   "Curve25519Dalek/Specs/Backend/Serial/CurveModels/CompletedPoint/Add.lean::add_assign_spec'",
+   "Curve25519Dalek/Specs/Backend/Serial/CurveModels/CompletedPoint/Add.lean::add_assign_spec_52_52",
+   "Curve25519Dalek/Specs/Backend/Serial/CurveModels/CompletedPoint/Add.lean::add_assign_spec_53_52",
+   "Curve25519Dalek/Specs/Backend/Serial/CurveModels/CompletedPoint/Add.lean::add_spec",
+   "Curve25519Dalek/Specs/Backend/Serial/CurveModels/CompletedPoint/Add.lean::add_spec'",
+   "Curve25519Dalek/Specs/Backend/Serial/CurveModels/CompletedPoint/Add.lean::add_spec_52_52",
+   "Curve25519Dalek/Specs/Backend/Serial/CurveModels/CompletedPoint/Add.lean::add_spec_53_52",
+   "Curve25519Dalek/Specs/Backend/Serial/CurveModels/CompletedPoint/Add.lean::add_spec_aux",
+   "Curve25519Dalek/Specs/Backend/Serial/CurveModels/CompletedPoint/Add.lean::add_spec_bounds",
+   "Curve25519Dalek/Specs/Backend/Serial/CurveModels/ProjectivePoint/Double.lean::double_spec",
+   "Curve25519Dalek/Specs/Backend/Serial/CurveModels/ProjectivePoint/Double.lean::double_spec_aux",
+   "Curve25519Dalek/Specs/Backend/Serial/U64/Field/FieldElement51/Add.lean::add_spec",
+   "Curve25519Dalek/Specs/Backend/Serial/U64/Field/FieldElement51/ConditionalAssign.lean::conditional_assign_spec",
+   "Curve25519Dalek/Specs/Backend/Serial/U64/Field/FieldElement51/Mul.lean::decompose",
+   "Curve25519Dalek/Specs/Backend/Serial/U64/Scalar/Scalar52/Add.lean::add_spec",
+   "Curve25519Dalek/Specs/Edwards/EdwardsPoint/CtEq.lean::ct_eq_spec"
+  ],
+  "false_negative": []
+ },
+ "verdict": "break confirmed"
+}

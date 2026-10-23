@@ -1,0 +1,148 @@
+{
+ "case_id": "dalek-lean-verify/58b02699",
+ "change_pr_url": "https://github.com/Beneficial-AI-Foundation/curve25519-dalek-lean-verify/pull/101",
+ "replayed_at": "2026-10-21T13:22:30+00:00",
+ "machine": {
+  "cpus": 18
+ },
+ "timing": {
+  "export_s": 1.5,
+  "base_fixed_wall_s": 8,
+  "broken_setup_s": 12.9,
+  "broken_rounds_s": 14,
+  "total_s": 37
+ },
+ "fixed": {
+  "ok": true,
+  "stage": "build",
+  "timings": {
+   "seed_s": 0.0,
+   "cache_lock_wait_s": 3.4,
+   "cache_get_s": 3,
+   "build_s": 2,
+   "store_s": 0.0
+  },
+  "reuse": {
+   "packages_reused": [],
+   "packages_fetched": [],
+   "project_build_seeded_from": null
+  },
+  "orphaned_pins": [],
+  "jobs": 7580,
+  "errors": [],
+  "tail": ""
+ },
+ "base": {
+  "ok": true,
+  "stage": "build",
+  "timings": {
+   "seed_s": 0.0,
+   "cache_lock_wait_s": 0.0,
+   "cache_get_s": 3,
+   "build_s": 2,
+   "store_s": 0.0
+  },
+  "reuse": {
+   "packages_reused": [],
+   "packages_fetched": [],
+   "project_build_seeded_from": null
+  },
+  "orphaned_pins": [],
+  "jobs": 7580,
+  "errors": [],
+  "tail": ""
+ },
+ "overlay": [
+  "Curve25519Dalek/Funs.lean",
+  "Curve25519Dalek/Types.lean"
+ ],
+ "external_models_overlaid": [],
+ "extraction_errors": [],
+ "broken_rounds": [
+  {
+   "round": 1,
+   "ok": false,
+   "errors_n": 7,
+   "build_s": 14,
+   "jobs": 7580
+  }
+ ],
+ "broken_green_after_sorry": false,
+ "broken_proofs": [],
+ "broken_proofs_detail": [],
+ "statement_errors": [
+  {
+   "file": "Curve25519Dalek/Specs/Backend/Serial/U64/Field/FieldElement51/AddAssign.lean",
+   "line": 33,
+   "decl": "add_assign_loop_spec",
+   "where": "statement",
+   "kind": "other",
+   "msg": "Invalid field notation: Type of\n  a'[j]!\nis not known; cannot resolve field `val`",
+   "round": 1
+  },
+  {
+   "file": "Curve25519Dalek/Specs/Backend/Serial/U64/Field/FieldElement51/AddAssign.lean",
+   "line": 73,
+   "decl": "add_assign_spec",
+   "where": "statement",
+   "kind": "other",
+   "msg": "Invalid field notation: Type of\n  result[i]!\nis not known; cannot resolve field `val`",
+   "round": 1
+  },
+  {
+   "file": "Curve25519Dalek/Specs/Backend/Serial/U64/Field/FieldElement51/Sub.lean",
+   "line": 50,
+   "decl": "sub_spec",
+   "where": "statement",
+   "kind": "unknown-identifier",
+   "msg": "Unknown identifier `sub`",
+   "round": 1
+  },
+  {
+   "file": "Curve25519Dalek/Specs/Backend/Serial/U64/Field/FieldElement51/AddAssign.lean",
+   "line": 32,
+   "decl": "add_assign_loop_spec",
+   "where": "statement",
+   "kind": "unknown-identifier",
+   "msg": "Unknown identifier `add_assign_loop`",
+   "round": 1
+  },
+  {
+   "file": "Curve25519Dalek/Specs/Backend/Serial/U64/Field/FieldElement51/AddAssign.lean",
+   "line": 72,
+   "decl": "add_assign_spec",
+   "where": "statement",
+   "kind": "unknown-identifier",
+   "msg": "Unknown identifier `add_assign`",
+   "round": 1
+  }
+ ],
+ "cascades": [],
+ "statement_broken": [
+  "Curve25519Dalek/Specs/Backend/Serial/U64/Field/FieldElement51/AddAssign.lean::add_assign_loop_spec",
+  "Curve25519Dalek/Specs/Backend/Serial/U64/Field/FieldElement51/AddAssign.lean::add_assign_spec",
+  "Curve25519Dalek/Specs/Backend/Serial/U64/Field/FieldElement51/Sub.lean::sub_spec"
+ ],
+ "needs_statement_change": true,
+ "file_errors": [],
+ "blocked_modules": [
+  "Curve25519Dalek",
+  "Curve25519Dalek.Specs.Backend.Serial.U64.Field.FieldElement51.Add",
+  "Curve25519Dalek.Specs.Backend.Serial.U64.Field.FieldElement51.SubAssign"
+ ],
+ "comparison": {
+  "predicted_n": 5,
+  "actual_n": 3,
+  "true_positive": [
+   "Curve25519Dalek/Specs/Backend/Serial/U64/Field/FieldElement51/AddAssign.lean::add_assign_loop_spec",
+   "Curve25519Dalek/Specs/Backend/Serial/U64/Field/FieldElement51/AddAssign.lean::add_assign_spec",
+   "Curve25519Dalek/Specs/Backend/Serial/U64/Field/FieldElement51/Sub.lean::sub_spec"
+  ],
+  "false_positive": [
+   "Curve25519Dalek/Specs/Backend/Serial/U64/Field/FieldElement51/Add.lean::add_spec",
+   "Curve25519Dalek/Specs/Backend/Serial/U64/Field/FieldElement51/SubAssign.lean::sub_assign_spec"
+  ],
+  "false_negative": []
+ },
+ "verdict": "break confirmed"
+}

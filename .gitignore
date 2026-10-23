@@ -7,10 +7,13 @@ build/
 work/
 repos/
 
-# Mined case data and run artifacts (large; publish selectively)
+# Working outputs of the miner and replay harness (local paths, build logs).
+# The committed dataset is exported from these into data/mined/ and data/replay/
+# by replay/export_results.py, with local paths stripped.
 data/raw/
 runs/
 *.log
+*.stderr
 
 # Python
 __pycache__/

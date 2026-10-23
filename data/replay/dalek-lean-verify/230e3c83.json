@@ -1,0 +1,97 @@
+{
+ "case_id": "dalek-lean-verify/230e3c83",
+ "change_pr_url": "https://github.com/Beneficial-AI-Foundation/curve25519-dalek-lean-verify/pull/362",
+ "replayed_at": "2026-10-21T13:39:20+00:00",
+ "machine": {
+  "cpus": 18
+ },
+ "timing": {
+  "export_s": 1.6,
+  "base_fixed_wall_s": 18,
+  "broken_setup_s": 14.3,
+  "broken_rounds_s": 759,
+  "total_s": 793
+ },
+ "fixed": {
+  "ok": true,
+  "stage": "build",
+  "timings": {
+   "seed_s": 0.0,
+   "cache_lock_wait_s": 0.0,
+   "cache_get_s": 8,
+   "build_s": 2,
+   "store_s": 0.0
+  },
+  "reuse": {
+   "packages_reused": [],
+   "packages_fetched": [],
+   "project_build_seeded_from": null
+  },
+  "orphaned_pins": [],
+  "jobs": 7851,
+  "errors": [],
+  "tail": ""
+ },
+ "base": {
+  "ok": true,
+  "stage": "build",
+  "timings": {
+   "seed_s": 0.0,
+   "cache_lock_wait_s": 8.4,
+   "cache_get_s": 8,
+   "build_s": 2,
+   "store_s": 0.0
+  },
+  "reuse": {
+   "packages_reused": [],
+   "packages_fetched": [],
+   "project_build_seeded_from": null
+  },
+  "orphaned_pins": [],
+  "jobs": 7851,
+  "errors": [],
+  "tail": ""
+ },
+ "overlay": [
+  "Curve25519Dalek/Funs.lean",
+  "Curve25519Dalek/Types.lean",
+  "functions.json"
+ ],
+ "external_models_overlaid": [
+  "Curve25519Dalek/FunsExternal.lean"
+ ],
+ "extraction_errors": [],
+ "broken_rounds": [
+  {
+   "round": 1,
+   "ok": false,
+   "errors_n": 35,
+   "build_s": 29,
+   "jobs": 7851
+  },
+  {
+   "round": 2,
+   "ok": true,
+   "errors_n": 0,
+   "build_s": 730,
+   "jobs": 7851
+  }
+ ],
+ "broken_green_after_sorry": true,
+ "broken_proofs": [],
+ "broken_proofs_detail": [],
+ "statement_errors": [],
+ "cascades": [],
+ "statement_broken": [],
+ "needs_statement_change": false,
+ "file_errors": [],
+ "blocked_modules": [],
+ "comparison": {
+  "predicted_n": 0,
+  "actual_n": 0,
+  "true_positive": [],
+  "false_positive": [],
+  "false_negative": []
+ },
+ "verdict": "no break: broken state builds green"
+}
