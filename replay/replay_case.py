@@ -39,7 +39,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "mining"))
-from mine_history import REPO_CONFIGS, Git, Miner, parse_decls  # noqa: E402
+from mine_history import (REPO_CONFIGS, Git, Miner, lean_libs, lean_path,  # noqa: E402
+                          module_resolver, parse_decls)
 
 MAX_ROUNDS = 20
 SORRYABLE = ("theorem", "lemma", "def", "abbrev", "instance")
@@ -75,7 +76,8 @@ def overlay_change(git: Git, miner: Miner, base: str, change: str, dest: Path,
     """Copy the change commit's files of the given classes into dest."""
     applied = []
     for f in git.changed_files(base, change):
-        if miner.classify(f["path"]) not in classes:
+        head = git.blob_head(f.get("new_blob")) or git.blob_head(f.get("old_blob"))
+        if miner.classify(f["path"], head) not in classes:
             continue
         target = dest / f["path"]
         content = git.show(change, f["path"])
@@ -200,9 +202,12 @@ def lake(cmd: list[str], cwd: Path, log: Path, orphans: list | None = None) -> t
 
 
 def build_state(name: str, d: Path, logdir: Path, fetch_cache: bool,
-                store: Store | None = None, sha: str | None = None) -> dict:
+                store: Store | None = None, sha: str | None = None, prefix: str = "") -> dict:
+    """Build the Lake project at `d`. `prefix` is d's path inside the repo (the config's
+    lean_root): Lake reports files relative to the project, records use repo-relative paths."""
     log = logdir / f"{name}.log"
     timings, reuse, orphans = {}, None, []
+    fetch_cache = fetch_cache and "mathlib" in {n for n, _ in Store.manifest(d)}  # cache = Mathlib's
     if store is not None:
         t0 = time.time()
         reuse = store.seed(d, sha)
@@ -221,6 +226,9 @@ def build_state(name: str, d: Path, logdir: Path, fetch_cache: bool,
     rc, t, out = lake(["build"], d, log, orphans)
     timings["build_s"] = round(t)
     diags = parse_diags(out)
+    for x in diags:
+        if prefix:
+            x["file"] = f"{prefix}/{x['file']}"
     if rc == 0 and store is not None:
         t0 = time.time()
         store.save(d, sha)
@@ -315,17 +323,26 @@ def sorry_out(src: str, decls: dict, names: set[str]) -> str:
     return src
 
 
-def module_of(path: str) -> str:
-    return path[:-len(".lean")].replace("/", ".")
+def project_modules(project: Path) -> dict[str, str]:
+    """Module name -> path (relative to the Lake project) for every .lean file, resolving
+    modules relative to each lean_lib's srcDir as Lake does."""
+    read = lambda n: (project / n).read_text() if (project / n).exists() else None
+    to_module = module_resolver(lean_libs(read("lakefile.toml"), read("lakefile.lean")))
+    mods = {}
+    for f in project.rglob("*.lean"):
+        rel = f.relative_to(project)
+        if ".lake" not in rel.parts:
+            mods[to_module(str(rel))] = str(rel)
+    return mods
 
 
-def blocked_modules(root: Path, failing: set[str]) -> list[str]:
+def blocked_modules(project: Path, mods: dict[str, str], failing: set[str]) -> list[str]:
+    """Modules that (transitively) import a failing module: their status is unknown."""
     importers: dict[str, set[str]] = {}
-    for f in root.rglob("*.lean"):
-        if ".lake" in f.parts:
-            continue
-        mod = module_of(str(f.relative_to(root)))
-        for m in re.findall(r"^import\s+(\S+)", f.read_text(errors="replace"), re.M):
+    for mod, rel in mods.items():
+        # `public import` / `meta import` are the module-system forms (e.g. SPQR #651).
+        for m in re.findall(r"^(?:public |private |meta )*import\s+(?:all\s+)?(\S+)",
+                            (project / rel).read_text(errors="replace"), re.M):
             importers.setdefault(m, set()).add(mod)
     seen, stack = set(), list(failing)
     while stack:
@@ -351,19 +368,32 @@ def replay(record: dict, repo: Path, work: Path, skip_base: bool) -> dict:
               "replayed_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
               "machine": {"cpus": os.cpu_count()}}
     timing = result["timing"] = {}
+    lean_root = cfg["lean_root"]
+    proj = lambda state_dir: state_dir / lean_root if lean_root else state_dir  # Lake project dir
+
+    # Local path dependencies (e.g. SymCrypt's `require aeneas from "../../../aeneas/..."`)
+    # point outside the repo; replaying them would need that checkout at the pinned rev.
+    manifest = git.show(change, lean_path(cfg, "lake-manifest.json"))
+    path_deps = [f"{p['name']} ({p.get('dir')})" for p in (json.loads(manifest)["packages"] if manifest else [])
+                 if p.get("type") == "path"]
+    if path_deps:
+        result["verdict"] = f"unsupported: path dependencies {path_deps} (needs a local checkout)"
+        return result
 
     # base and fixed in parallel; broken reuses fixed's dependencies.
     t0 = time.time()
     for state, rev in (("base", base), ("fixed", change)):
-        if not (root / state / "lakefile.toml").exists() and not (root / state / "lakefile.lean").exists():
+        if not any((proj(root / state) / f).exists() for f in ("lakefile.toml", "lakefile.lean")):
             export(git, rev, root / state)
         freshen(root / state)
     timing["export_s"] = round(time.time() - t0, 1)
     t0 = time.time()
     with ThreadPoolExecutor(2) as pool:
-        futs = {"fixed": pool.submit(build_state, "fixed", root / "fixed", logdir, True, store, change)}
+        futs = {"fixed": pool.submit(build_state, "fixed", proj(root / "fixed"), logdir, True, store, change,
+                                     lean_root)}
         if not skip_base:
-            futs["base"] = pool.submit(build_state, "base", root / "base", logdir, True, store, base)
+            futs["base"] = pool.submit(build_state, "base", proj(root / "base"), logdir, True, store, base,
+                                       lean_root)
         for k, f in futs.items():
             result[k] = f.result()
     timing["base_fixed_wall_s"] = round(time.time() - t0)
@@ -378,14 +408,16 @@ def replay(record: dict, repo: Path, work: Path, skip_base: bool) -> dict:
         shutil.rmtree(broken)
     export(git, base, broken)
     result["overlay"] = overlay_change(git, miner, base, change, broken)
-    clone_lake_dir(root / "fixed" / ".lake", broken / ".lake")
+    clone_lake_dir(proj(root / "fixed") / ".lake", proj(broken) / ".lake")
     freshen(broken)
+    mods = project_modules(proj(broken))
+    mod_of = {lean_path(cfg, rel): mod for mod, rel in mods.items()}  # repo-relative path -> module
     timing["broken_setup_s"] = round(time.time() - t0, 1)
 
     rounds, sorried, stmt_errors, file_errors, cascades, header_errors = [], {}, [], [], [], []
     extraction_errors, external_overlaid, setup_failed, unparsed = [], [], False, False
     for rnd in range(1, MAX_ROUNDS + 1):
-        st = build_state(f"broken-round{rnd}", broken, logdir, fetch_cache=False)
+        st = build_state(f"broken-round{rnd}", proj(broken), logdir, fetch_cache=False, prefix=lean_root)
         errs = st["errors"]
         rounds.append({"round": rnd, "ok": st["ok"], "errors_n": len(errs), "build_s": st["timings"]["build_s"],
                        "jobs": st["jobs"]})
@@ -396,7 +428,10 @@ def replay(record: dict, repo: Path, work: Path, skip_base: bool) -> dict:
             unparsed = True  # failed, but no diagnostic we could read: never report this as green
             break
         # Never sorry the extracted code or the external models: they are what the proofs are about.
-        extr = [e for e in errs if miner.classify(e["file"]) in ("extraction", "external")]
+        def head_of(rel: str) -> str:
+            p = broken / rel
+            return p.open(errors="replace").read(400) if p.exists() else ""
+        extr = [e for e in errs if miner.classify(e["file"], head_of(e["file"])) in ("extraction", "external")]
         if extr:
             extraction_errors = [{k: e[k] for k in ("file", "line", "kind")} | {"msg": e["msg"][:600], "round": rnd}
                                  for e in extr]
@@ -416,8 +451,7 @@ def replay(record: dict, repo: Path, work: Path, skip_base: bool) -> dict:
         UNKNOWN_RE = r"(?:\(kernel\) )?[Uu]nknown (?:constant|identifier) (?:`([^`]+)`|'(.+)'\s*$)"
         unknown = lambda e: re.match(UNKNOWN_RE, e["msg"].split("\n", 1)[0])
         errs = sorted(errs, key=lambda e: bool(unknown(e)))
-        project_mods = {module_of(str(f.relative_to(broken))) for f in broken.rglob("*.lean")
-                        if ".lake" not in f.parts}
+        project_mods = set(mods)
         for e in errs:
             bi = re.match(r"bad import '([^']+)'", e["msg"])
             if bi and bi.group(1) in project_mods:
@@ -460,7 +494,8 @@ def replay(record: dict, repo: Path, work: Path, skip_base: bool) -> dict:
     # A declaration whose statement fails is statement-broken, not (also) a proof break.
     stmt_broken = {f"{e['file']}::{e['decl']}" for e in stmt_errors}
     sorried = {k: v for k, v in sorried.items() if k not in stmt_broken}
-    failing_modules = {module_of(e["file"]) for e in stmt_errors + file_errors + header_errors}
+    failing_modules = {mod_of.get(e["file"], e["file"]) for e in stmt_errors + file_errors + header_errors}
+    blocked = blocked_modules(proj(broken), mods, failing_modules)
     result.update({
         # The change also edited trusted external models, and the new extraction needs them.
         "external_models_overlaid": external_overlaid,
@@ -476,7 +511,8 @@ def replay(record: dict, repo: Path, work: Path, skip_base: bool) -> dict:
         # Repairable by proof edits alone? If not, the bot must escalate (gates forbid statement changes).
         "needs_statement_change": bool(stmt_broken),
         "file_errors": file_errors,
-        "blocked_modules": blocked_modules(broken, failing_modules),
+        "blocked_modules": blocked,
+        "blocked_files": sorted(lean_path(cfg, mods[m]) for m in blocked if m in mods),  # repo-relative
     })
     result["comparison"] = compare(record, result)
     timing["broken_rounds_s"] = sum(r["build_s"] for r in rounds)
