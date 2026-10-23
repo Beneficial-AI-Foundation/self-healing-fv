@@ -1,51 +1,57 @@
-# Design: self-healing CI for verified Rust (v0)
+# Design: self-healing CI for verified Rust
 
-Status: draft (all sections written; for review). Owner: Dana Mukusheva. Linear: SCI-1706 (sub-issues SCI-1714, SCI-1715, SCI-1717).
+Status: V1 design with a prototype scope (§2), reviewed in two rounds (`docs/reviews/`). Owner: Dana Mukusheva. Linear: SCI-1706 (sub-issues SCI-1714, SCI-1715, SCI-1717).
 
 ## 1. Problem
 
 Verified Rust at BAIF follows Rust → Charon/Aeneas → Lean [Charon, Aeneas], with hand-written specs and proofs about the extracted code. Every Rust change, Aeneas update, or Lean/Mathlib bump can break proofs, and humans repair them by hand. Hand repairs can silently weaken specs (curve25519-dalek-lean-verify issue 873, introduced in the Aeneas update of PR 535).
 
-## 2. Goals and non-goals
+## 2. Scope
 
-Goals (v0):
-- Repair proof bodies after a change, automatically, on real historical cases.
+This document uses three horizons:
+- **Prototype:** the deliverable for 2026-11-03 (what Linear SCI-1706 calls "v0"). It shows the approach works on real history in one repo.
+- **V1:** the full design in this document: a bot that BAIF's repos and outside repos can install in their CI.
+- **Later:** ideas recorded here but not designed in detail.
+
+Sections 3–11 describe V1. §2.3 lists what the prototype builds; where a section's rule differs in the prototype, the section says so.
+
+### 2.1 Goals
+
+Prototype:
+- Repair proof bodies after real historical changes in one repo, automatically, accepted only through the gate (§4).
+- Show that the audit (§4.7) catches the weakened statements of PR 535.
+- Measure repair rate, cost and gate behavior on hand-audited cases, and set budget defaults from pilot runs.
+
+V1:
+- Run in the CI of BAIF's verified-Rust repos and of outside repos, with their own model keys and cost limits (SCI-1717).
 - Never accept a change to a theorem statement or trusted assumption without a human.
-- Measure: auto-fix rate, escalation correctness, cost, time.
+- Measure auto-fix rate, escalation correctness, cost and time across repos.
 
-Non-goals (v0):
+### 2.2 Non-goals (prototype and V1)
+
 - Writing or judging new specs (spec quality is a separate project).
-- Running Charon/Aeneas ourselves for historical replays (the repo history already contains the new extraction).
-- Proof optimization (V2, future exploration).
+- Running Charon/Aeneas ourselves. Replays take the extraction from history; live CI uses the repo's own extraction job (§3.3, S1).
+- Withstanding deliberately crafted false proofs (threat model: §4.1).
+- Proof optimization (Later).
 
-### Prototype (by 2026-11-03)
+### 2.3 Scope by component
 
-This document describes the target design. The prototype is the slice of it that one engineer builds and tests on real history by 2026-11-03. Everything outside the slice keeps its design here and is built afterwards.
+| Component | Prototype (by 2026-11-03) | V1 adds | Later |
+|---|---|---|---|
+| Target repos (§6.1) | curve25519-dalek-lean-verify: a fixed small set of hand-audited cases on one Lean toolchain | curve25519-dalek-u32, SPQR; SymCrypt held out; several toolchains | other Aeneas projects |
+| Input (S1) | historical replay, run locally | live CI: failed verification job, maintainer label, fork rule (§9.2), extraction-consistency binding | |
+| Audit (§4.7) | model-free; demonstrated on PR 535 (may use a different toolchain) | runs on every relevant PR, as a check run | |
+| Context capture (S2) | stubbed broken state, snapshots, coverage, eligibility | goal states captured ahead of time | |
+| Behavior check (S3) | none | differential tests, dalek first | other repos |
+| Repair loop (S4) | one fresh session per theorem; automation sweep, then Claude Code with one model (chosen in the pilot); off-the-shelf Lean LSP MCP (remote search off) and compiler feedback | model cascade, pre-gate, decision adapter (rules first) | retrieval over past repairs |
+| Agents (§7) | Claude Code only; its final message kept as advisory text | Codex CLI and the minimal loop; tool contract and profiles; diagnosis schema; conformance check | no-tools loop |
+| Gate (§4) | G0–G3 and G5 (`lean4checker`); planted-violation tests; **complete-case acceptance** | G4 quality report; component acceptance | sandboxed `lake comparator` (stronger threat model) |
+| Outcomes (§5.1) | `repaired`, `statement-must-change`, `proof-hard`, `blocked-on`, `infrastructure-failure`, `gate-unavailable` | `spec-suspect`, `extraction-setup`, `behavior-difference-observed` | rename map for `rename-only` |
+| Delivery (S6, §5) | run record (S7); partial repairs kept as unaccepted suggestions | check runs, PR comment, PRs via GitHub App, patches for forks, optional Linear | auto-merge; draft statement changes |
+| Deployment (§9) | one manually dispatched GitHub Actions run on a fork, producing the run record as an artifact | reusable workflow, metering proxy, secret-free candidate container, egress filter, cost caps | |
+| Evaluation (§8) | repair rate, cost, gate rejections, PR 535 audit, no-LLM sweep baseline, human-fix comparison, adjudicated labels; newer cases held out from tuning | ungated baseline, repetitions, adapter and tool-profile comparisons, decision models, SymCrypt held out | |
 
-**In the prototype**
-- **One repo, one toolchain:** a fixed, small set of hand-audited cases from curve25519-dalek-lean-verify, all on one Lean toolchain where the snapshot tooling and `lean4checker` are known to work.
-- **Audit** (§4.7): model-free, demonstrated on PR 535. This demonstration may use a different toolchain from the repair cases.
-- **Repair loop** (§3.3, S4): one agent adapter (**Claude Code**, headless), one model, one tool profile. The agent uses the off-the-shelf Lean LSP MCP server [LeanLSPMCP] with its remote search tools turned off, plus compiler feedback. No custom tool layer and no pre-captured goal states: the agent queries goals itself, and out-of-scope edits are caught by G0, not by a restricted `edit` tool.
-- **Gate:** G0–G3 and G5 (kernel replay with `lean4checker`), the planted-violation tests (§4.6), and **complete-case acceptance**: a case is accepted only when every broken theorem is repaired and the unstubbed candidate builds. Repairs from a partly repaired case are kept as unaccepted suggestions in the run record.
-- **Outcomes:** `repaired`, `statement-must-change`, `proof-hard`, `blocked-on`, `infrastructure-failure`, `gate-unavailable` (§5.1).
-- **Pilot runs** to set budget defaults (§8.5).
-- **Evaluation:** repair rate, cost, gate rejections, the PR 535 audit, the no-LLM sweep baseline, and comparison with the human fix. Without a held-out repo, results are reported on newer cases than those used for tuning.
-- **One manually dispatched GitHub Actions run** on a fork of the repo, producing the run record as an artifact.
-
-**First milestone (two days, by 2026-10-24).** On the chosen toolchain: (1) `lean4checker` and the snapshot tooling run; (2) the frozen inventory of one real case is complete (§4.2); (3) one gate fixture accepts a valid repair and rejects the planted violations. If any of these fails, the prototype supports fewer cases; it never weakens acceptance.
-
-**Deferred until after the prototype**
-- Component acceptance (§4.3), multiple toolchains, curve25519-dalek-u32, and broad mining as evaluation input.
-- The custom tool contract (§7.2), goal-state capture in S2, and G4 quality reports.
-- `spec-suspect` (§5.1).
-- Comment delivery (the prototype delivers artifacts only).
-- S3 behavior check (differential tests).
-- Decision models (the prototype uses rules only).
-- The second adapter, the adapter comparison, and the tool-profile ablation.
-- The conformance check for custom adapters.
-- The metering proxy and the secret-free candidate container (§3.4). The prototype replays BAIF's own history, which is trusted input, and runs with a capped key. These are required before live use on PRs.
-- Delivery as PRs through a GitHub App, fork handling, and live triggers (§9).
-- Other repos, including the held-out SymCrypt evaluation.
+**First milestone (by 2026-10-24).** On the chosen toolchain: (1) `lean4checker` and the snapshot tooling run; (2) the frozen inventory of one real case is complete (§4.2); (3) one gate fixture accepts a valid repair and rejects the planted violations. If any of these fails, the prototype supports fewer cases; it never weakens acceptance.
 
 ## 3. Architecture
 
@@ -53,8 +59,8 @@ This document describes the target design. The prototype is the slice of it that
 
 - **A deterministic workflow with one agentic stage.** Only the repair loop (§3.3, S4) writes code. Everything else is a script. A single orchestrator agent with the stages as tools would be less code, but it cannot be replayed deterministically, is hard to debug stage by stage, and needs all permissions at once.
 - **LLMs propose, scripts enforce.** Every hard rule is checked by the gate (§4), never by asking a model. Models may *advise* (routing, labels; §3.5) but never decide acceptance.
-- **Least privilege per job.** No job holds both a model key and a GitHub write token. The agent reads untrusted input (PR text, Rust diffs), so it is treated as possibly prompt-injected.
-- **One pipeline for replay and live CI.** Only the input stage (S1) differs. Every v0 measurement on historical cases therefore exercises the code that will run in production.
+- **Least privilege per job.** No job holds both a model key and a GitHub write token. The agent reads untrusted input (PR text, Rust diffs), so for protecting secrets and write access it is treated as possibly prompt-injected. (This is separate from how far the gate trusts proofs, §4.1.)
+- **One pipeline for replay and live CI.** Only the input stage (S1) differs. Every measurement on historical cases therefore exercises the code that will run in production.
 - **Plug-in boundaries where vendors move fast.** The agent harness, the model, and the decision model are behind interfaces (§3.5) and are chosen by benchmark (§8), not fixed in the design.
 
 ### 3.2 Terms
@@ -96,31 +102,31 @@ This document describes the target design. The prototype is the slice of it that
 
 **S1 Input.** In live CI the trigger is the failure of the repo's existing verification job, via `workflow_run`. A maintainer label (`self-heal`) re-runs it on demand. Building Lean runs arbitrary code, so the bot runs on fork PRs only after a maintainer adds that label to a specific head SHA (§9.2), and never uses `pull_request_target`. A new push to the same PR cancels a running bot run. Runs are keyed by head SHA so the bot never opens duplicate PRs. In replay, the case record (§6) gives base, change and fix commits. The broken state is the base tree with the change commit's extracted code, toolchain files and extraction config laid over it. The replay harness (`replay/replay_case.py`) builds it and records the ground truth (§6.5).
 
-v0 never runs Charon/Aeneas. In replay the extracted code comes from history. In live CI it is the extracted code committed in the PR, which is trustworthy only if it matches the PR's Rust. The bot therefore repairs only when the repo's own extraction-consistency check (which regenerates the Lean code and fails on any difference) **passed on the same head SHA**. Otherwise it escalates as `extraction-setup` before any repair. The run record stores the SHA, the Charon/Aeneas versions and a hash of the extracted files.
+The bot never runs Charon/Aeneas. In replay the extracted code comes from history. In live CI it is the extracted code committed in the PR, which is trustworthy only if it matches the PR's Rust. The bot therefore repairs only when the repo's own extraction-consistency check (which regenerates the Lean code and fails on any difference) **passed on the same head SHA**. Otherwise it escalates as `extraction-setup` before any repair. The run record stores the SHA, the Charon/Aeneas versions and a hash of the extracted files.
 
 **S2 Context capture** (deterministic). Build the broken state and record:
 - broken theorems: those that fail now but were proved at the base commit;
-- error messages and the goal state at each failure point (via the Lean language server);
+- error messages, and (V1) the goal state at each failure point via the Lean language server;
 - the Rust diff, the extraction diff and the toolchain diff;
 - the dependency order among broken theorems;
 - the gate snapshots and their coverage (§4.4).
 
 The broken state does not compile, so S2 builds the **stubbed broken state**: the broken state with each failing *theorem proof* replaced by `sorry`, in rounds, until it builds. Definitions are never stubbed, because replacing a definition changes the meaning of everything that uses it.
 
-Theorems whose *statement* no longer elaborates (e.g. Aeneas renamed a type) cannot be repaired without a statement change. They escalate as `statement-must-change`, with a `rename-only` flag when the only difference is a name. A human-approved rename map is deferred to v1.
+Theorems whose *statement* no longer elaborates (e.g. Aeneas renamed a type) cannot be repaired without a statement change. They escalate as `statement-must-change`, with a `rename-only` flag when the only difference is a name. A human-approved rename map is Later.
 
-**Eligibility.** A case is eligible for automatic acceptance only if the stubbed broken state builds and every frozen declaration in it is observed (§4.4). Otherwise the failing component escalates, and any repairs elsewhere are delivered only as unaccepted suggestions. v0 measures how many cases this excludes.
+**Eligibility.** A case is eligible for automatic acceptance only if the stubbed broken state builds and every frozen declaration in it is observed (§4.4). Otherwise the failing component escalates, and any repairs elsewhere are delivered only as unaccepted suggestions. The prototype measures how many cases this excludes.
 
 **S3 Behavior check** (differential tests). When the Rust source of a function under a broken theorem changed, build the Rust before and after the change and run both on generated inputs (random plus boundary values from the argument types). Outputs are compared through **canonical observations** (e.g. serialized bytes), not raw structures: dalek field elements, for example, have several internal representations of the same value, so raw outputs can differ while both versions are correct.
 
-A disagreement is reported as the annotation `behavior-difference-observed`, independently of the repair outcome. It is **not** a counterexample to the theorem: the change may be intended, or may lie outside the theorem's preconditions. "Counterexample" is reserved for a checked violation of the statement itself (§5.1, `spec-suspect`). S3 is deferred until after the prototype (§2).
+A disagreement is reported as the annotation `behavior-difference-observed`, independently of the repair outcome. It is **not** a counterexample to the theorem: the change may be intended, or may lie outside the theorem's preconditions. "Counterexample" is reserved for a checked violation of the statement itself (§5.1, `spec-suspect`). S3 is V1 (§2.3).
 
 **S4 Repair loop.** One fresh agent session per broken theorem, leaves first. Per theorem, an attempt schedule:
 1. a free automation sweep (re-run the old proof with standard closing tactics; no model);
 2. patch the old proof;
 3. write a fresh proof from the goal state, ignoring the old one.
 
-Steps 2 and 3 start on a cheap model and move to a frontier model if they fail. The decision interface (§3.5) may reorder the schedule or pick the tier. Before the real gate, the agent gets feedback from a *pre-gate*: an incremental build of the file, plus the scope and statement checks run locally. The pre-gate is only for feedback; S5 alone decides.
+Steps 2 and 3 start on a cheap model and move to a frontier model if they fail (the prototype uses one model). The decision interface (§3.5) may reorder the schedule or pick the tier. Before the real gate (V1), the agent gets feedback from a *pre-gate*: an incremental build of the file, plus the scope and statement checks run locally. The pre-gate is only for feedback; S5 alone decides.
 
 Stop rules:
 - two consecutive attempts that die at the same goal state end the current *strategy*; the next strategy or model tier still runs while budget remains;
@@ -138,10 +144,10 @@ A hit cap escalates as `proof-hard`, with the partial state. If a theorem stays 
 - `blocked-on`;
 - `infrastructure-failure` or `gate-unavailable` (§5.1): not a statement about the theorem.
 
-One run produces one delivery. It contains every accepted repair plus an escalation report for the rest (§5). In the target design, repairs are accepted per component (§4.3; the prototype accepts complete cases only): if some theorems stay broken, the delivery says so plainly, and the project still does not build until a human fixes them. The bot never inserts `sorry` into the delivered change to make CI green. Delivery modes, set per repo:
+One run produces one delivery. It contains every accepted repair plus an escalation report for the rest (§5). In V1, repairs are accepted per component (§4.3; the prototype accepts complete cases only): if some theorems stay broken, the delivery says so plainly, and the project still does not build until a human fixes them. The bot never inserts `sorry` into the delivered change to make CI green. Delivery modes, set per repo:
 - **shadow**: a comment with the diff and the report;
 - **propose**: a PR that targets the broken PR's branch (or `main` for toolchain bumps), merged by a human. For fork PRs, whose branches the bot cannot push to, a patch instead (§9.2);
-- **auto-merge**: deferred, opt-in per repo, after a track record in propose mode.
+- **auto-merge** (Later): opt-in per repo, after a track record in propose mode.
 
 On day 1 the thing being trusted is the gate, which is new code, so autonomy is earned.
 
@@ -168,7 +174,7 @@ Runner limits shape the design. A standard hosted runner has 4 cores, 16 GB RAM,
 
 ### 3.5 Plug-in interfaces
 
-- **Agent adapter.** Input: the context bundle for one theorem, the allowed-edit rules and the budget. Output: a candidate diff and attempt records. v0 ships two adapters, **Claude Code** (headless, with the Lean LSP MCP) and **Codex CLI**, and compares them on the mined cases (§8). A third, minimal adapter (a bash-plus-Lean loop calling any model API) is the portable fallback. In CI every adapter runs on API keys supplied by the target repo, never on personal subscriptions.
+- **Agent adapter.** Input: the context bundle for one theorem, the allowed-edit rules and the budget. Output: a candidate diff and attempt records. V1 ships two adapters, **Claude Code** (headless, with the Lean LSP MCP) and **Codex CLI**, and compares them on the mined cases (§8). The prototype uses Claude Code only. A third, minimal adapter (a bash-plus-Lean loop calling any model API) is the portable fallback. In CI every adapter runs on API keys supplied by the target repo, never on personal subscriptions.
 - **Decision adapter.** Used for bounded, advisory choices only:
   - which attempt to try first and which model tier (choice);
   - the escalation label for the reviewer (choice);
@@ -182,7 +188,7 @@ Runner limits shape the design. A standard hosted runner has 4 cores, 16 GB RAM,
 
 ### 3.6 Replay vs live
 
-| | Historical replay (v0) | Live CI (SCI-1717) |
+| | Historical replay (prototype; V1 evaluation) | Live CI (V1, SCI-1717) |
 |---|---|---|
 | Input | case record (§6) | failed verification job (repair); every relevant PR (audit) |
 | Extracted code | from the change commit | committed in the PR; used only if the extraction-consistency check passed on the same SHA (S1) |
@@ -214,7 +220,7 @@ Every inventory entry must be `observed` in the stubbed broken snapshot, which s
 - build config;
 - the target config and the gate itself.
 
-The bot may change proof bodies of broken theorems, and add new lemmas in the same file. This is deliberately strict. v0 measures how often it over-escalates, for example when a human fix changed an internal helper lemma statement, before any relaxation (§8).
+The bot may change proof bodies of broken theorems, and add new lemmas in the same file. This is deliberately strict. The evaluation measures how often it over-escalates, for example when a human fix changed an internal helper lemma statement, before any relaxation (§8).
 
 ### 4.3 Checks
 
@@ -223,13 +229,13 @@ The bot may change proof bodies of broken theorems, and add new lemmas in the sa
 | G0 | Scope | The diff touches only files that contain broken theorems, and within them only proof bodies of broken theorems and added declarations. No new `axiom`, `@[extern]`, `@[implemented_by]`, `opaque`, `import`, `sorry`, `admit`, or `debug.*` option. Raising `maxHeartbeats` is allowed but reported in the delivery, next to the elaboration time (G4): it is a cost issue, not a trust issue, and the target repos already raise it by hand. `maxHeartbeats 0` (no limit) is blocked, because it can hang a CI job. G0 is a textual check, so it runs before anything is built. It is a deterrent and fast feedback; soundness comes from G5. |
 | G1 | Statement identity | For every frozen declaration, the canonical fingerprint (kind, elaborated type, and body for defs) is identical in the stubbed broken state and the candidate, and so is every extracted declaration. A missing declaration counts as a change. This also catches edits that leave a statement's text unchanged but change how it elaborates (e.g. a new local notation or instance placed before it). The fingerprint names extracted constants without unfolding them, so a changed `Funs.lean` does not change the fingerprint of a statement about it. That is intended: the promise is the same, and it is now about the new code. |
 | G2 | Trust base | For each repaired theorem `T`, its transitive axiom closure must be a subset of the three standard Lean axioms (`propext`, `Classical.choice`, `Quot.sound`) plus the closure `T` had at the base commit. In particular there is no `sorryAx`, and `Lean.ofReduceBool` (`native_decide`) is allowed only where `T` already used it. **Added declarations:** every added declaration must be used by an accepted repair; unused additions are rejected. A helper's axiom closure is then bounded by its users' allowances, because each user's closure contains the helper's. **Admissions:** the candidate's source may contain no `sorry` other than the gate's own stubs for still-broken theorems (component acceptance only). Accepted repairs and the helpers they use must have no `sorryAx` in their closure. Existing declarations that reach a stub are reported as `blocked-on`, not as violations. |
-| G3 | Clean build | Build the **required targets** listed in the target config (the audited module inventory; a default `lake build` may exclude some, such as tests) from a fresh checkout with dependency caches only (no project `.lake`). The build is of the stubbed candidate: accepted repairs applied, still-broken theorems stubbed. It must succeed, and no theorem outside the broken set may newly fail. The report states which targets were covered. |
-| G4 | Quality (report only) | Proof size and elaboration time compared with the base proof. These are reported, not blocking, in v0. |
+| G3 | Clean build | Build the **required targets** listed in the target config (the audited module inventory; a default `lake build` may exclude some, such as tests) from a fresh checkout with dependency caches only (no project `.lake`). Under complete-case acceptance the candidate has no stubs; under component acceptance (V1) still-broken theorems stay stubbed. It must succeed, and no theorem outside the broken set may newly fail. The report states which targets were covered. |
+| G4 | Quality (report only) | Proof size and elaboration time compared with the base proof. Reported, never blocking. V1 only. |
 | G5 | Kernel replay | After the build, replay every declaration in the built files through the Lean kernel with `lean4checker` [LeanValidate]. Catches declarations that were added without kernel checking. Mandatory. |
 
-**Complete-case acceptance** (the prototype): a case is accepted when every broken theorem is repaired, G0–G5 pass, and the candidate builds with no stubs at all.
+**Complete-case acceptance** (the prototype): a case is accepted when every broken theorem is repaired, G0–G3 and G5 pass, and the candidate builds with no stubs at all.
 
-**Component acceptance** (target design, after the prototype). A repair of theorem `A` is accepted when G0–G5 pass on the stubbed candidate and `A`'s axiom closure, including its helpers, contains no `sorryAx`. `A` then does not depend on any still-broken theorem, so its proof is valid on its own, even though the project as a whole still fails until the remaining theorems are fixed.
+**Component acceptance** (V1). A repair of theorem `A` is accepted when G0–G5 pass on the stubbed candidate and `A`'s axiom closure, including its helpers, contains no `sorryAx`. `A` then does not depend on any still-broken theorem, so its proof is valid on its own, even though the project as a whole still fails until the remaining theorems are fixed.
 
 ### 4.4 Snapshots
 
@@ -302,8 +308,8 @@ Every run that does not end with all broken theorems repaired escalates. Per the
 | Outcome | Meaning | Main evidence |
 |---|---|---|
 | `statement-must-change` | The old statement no longer elaborates against the new extracted code. The `rename-only` flag is set when the only difference is a name. | The old statement, the elaboration error, the rename |
-| `spec-suspect` | The repair failed, and the agent proved in Lean that the frozen statement is **false**: a proof of its negation (for example, concrete inputs that satisfy its hypotheses but not its conclusion), accepted by the gate like any other proof, with the negated statement matching the frozen fingerprint. Without such a proof the outcome stays `proof-hard`, and the agent's suspicion is shown only as advisory text. Deferred in the prototype. | The checked refutation |
-| `extraction-setup` | The extracted code could not be trusted or built (live: the extraction-consistency check did not pass on this SHA). | The failing check |
+| `spec-suspect` (V1) | The repair failed, and the agent proved in Lean that the frozen statement is **false**: a proof of its negation (for example, concrete inputs that satisfy its hypotheses but not its conclusion), accepted by the gate like any other proof, with the negated statement matching the frozen fingerprint. Without such a proof the outcome stays `proof-hard`, and the agent's suspicion is shown only as advisory text. | The checked refutation |
+| `extraction-setup` (V1, live) | The extracted code could not be trusted or built (live: the extraction-consistency check did not pass on this SHA). | The failing check |
 | `proof-hard` | The budget ran out with no evidence against the statement. | The last goal state, an attempt summary |
 | `blocked-on` | The theorem depends on another theorem that is still broken. | The blocking theorem |
 | `infrastructure-failure` | Setup, build environment, runner, or a timeout outside proof search failed. Says nothing about the theorem. | The failing step and its log |
@@ -317,7 +323,7 @@ Separately, the **audit** (§4.7) reports statement and trust changes **made by 
 
 ### 5.2 Where
 
-Escalations go to GitHub, where every user of the bot already works:
+In V1, escalations go to GitHub, where every user of the bot already works. (The prototype writes the same report into the run record only.)
 - **Two check runs** on the PR (or on the commit, for runs on `main`), each with its report in the summary:
   - the **audit** check: `success` for `no-change`; `failure` for `changed`, and also for `incomplete`, with a title that says the audit could not compare everything;
   - the **repair** check (only after a verification failure): `success` only when every broken theorem was repaired, otherwise `failure`.
@@ -351,14 +357,14 @@ The report has four parts:
    - its name, with a link to `file:line`;
    - its outcome and the evidence from §5.1;
    - the attempts made, with the model and the cost of each.
-4. **Repaired theorems.** For each: name, diff size, and any `maxHeartbeats` raise or elaboration-time increase (G4).
+4. **Repaired theorems.** For each: name, diff size, any `maxHeartbeats` raise, and (V1) the elaboration-time change from G4.
 
 Model-written text in the report (the agent's own diagnosis, and labels from the decision adapter) is marked as model output, shown with its confidence, and never decides the outcome. It is untrusted, so it is rendered as quoted plain text, truncated, with `@` mentions and links neutralized. A prompt-injected agent cannot ping people or plant links through the report.
 
 ### 5.5 What the bot never does
 
 - Approve a statement or trust change, or say that one looks fine.
-- Propose a new statement in v0. Draft statement changes (a separate, clearly labeled run whose output a human merges) are deferred to v1.
+- Propose a new statement. Draft statement changes (a separate, clearly labeled run whose output a human merges) are Later.
 - Hide a broken theorem behind `sorry`, or mark the repo's own verification check as passing.
 
 ## 6. Data: historical breaks (SCI-1714)
@@ -369,10 +375,10 @@ Real proof breaks, mined from the git history of verified-Rust repos. The miner 
 
 | Repo | Role | Notes |
 |---|---|---|
-| [Beneficial-AI-Foundation/curve25519-dalek-lean-verify](https://github.com/Beneficial-AI-Foundation/curve25519-dalek-lean-verify) | dev and test | Includes PR 535 (Aeneas update; issue 873), the showcase case. S3 differential tests in v0. |
-| [Beneficial-AI-Foundation/curve25519-dalek-u32](https://github.com/Beneficial-AI-Foundation/curve25519-dalek-u32) | dev and test | Same crate, 32-bit backend |
-| [Beneficial-AI-Foundation/SparsePostQuantumRatchet-verify](https://github.com/Beneficial-AI-Foundation/SparsePostQuantumRatchet-verify) | dev and test | Nightly toolchain and Aeneas updates; upstream merges bring Rust changes |
-| [microsoft/SymCrypt](https://github.com/microsoft/SymCrypt/tree/feature/verifiedcrypto), branch `feature/verifiedcrypto` | **held out** (§8.5) | Rust in `SymCRust/src/`, extracted Lean in `SymCRust/lean/Symcrust/Code/`, proofs in `SymCRust/lean/Symcrust/Properties/` [SymCrypt] |
+| [Beneficial-AI-Foundation/curve25519-dalek-lean-verify](https://github.com/Beneficial-AI-Foundation/curve25519-dalek-lean-verify) | prototype; V1 dev and test | Includes PR 535 (Aeneas update; issue 873), the showcase case. First repo for S3 differential tests (V1). |
+| [Beneficial-AI-Foundation/curve25519-dalek-u32](https://github.com/Beneficial-AI-Foundation/curve25519-dalek-u32) | V1 dev and test | Same crate, 32-bit backend |
+| [Beneficial-AI-Foundation/SparsePostQuantumRatchet-verify](https://github.com/Beneficial-AI-Foundation/SparsePostQuantumRatchet-verify) | V1 dev and test | Nightly toolchain and Aeneas updates; upstream merges bring Rust changes |
+| [microsoft/SymCrypt](https://github.com/microsoft/SymCrypt/tree/feature/verifiedcrypto), branch `feature/verifiedcrypto` | V1 **held out** (§8.5) | Rust in `SymCRust/src/`, extracted Lean in `SymCRust/lean/Symcrust/Code/`, proofs in `SymCRust/lean/Symcrust/Properties/` [SymCrypt] |
 
 ### 6.2 What counts as a case
 
@@ -418,7 +424,7 @@ Case records hold commit SHAs and derived metadata, plus short statement excerpt
 
 ## 7. Agent
 
-We expect most users to run Claude Code or Codex CLI, so those two are first-class: shipped, tested, and compared in §8. Users with strong preferences for another agent or model can plug it in through the same contract, without changes to the pipeline or the gate. The gate checks the diff the same way whatever produced it, so this flexibility never costs soundness. The risks are only wasted runs and unfair comparisons, and the design addresses those below.
+We expect most users to run Claude Code or Codex CLI, so in V1 those two are first-class: shipped, tested, and compared in §8. The prototype uses Claude Code only, with the off-the-shelf Lean LSP MCP server instead of the tool contract below (§2.3). Users with strong preferences for another agent or model can plug it in through the same contract, without changes to the pipeline or the gate. The gate checks the diff the same way whatever produced it, so this flexibility never costs soundness. The risks are only wasted runs and unfair comparisons, and the design addresses those below.
 
 ### 7.1 Adapters
 
@@ -426,11 +432,11 @@ An agent adapter (§3.5) takes one broken theorem's context bundle, the allowed-
 
 | Adapter | Status | Notes |
 |---|---|---|
-| Claude Code (headless) | v0, first-class; the prototype's adapter (§2) | Native MCP and skills |
-| Codex CLI | v0, first-class | Native MCP; the FVS [FVS] playbook is passed as prompt text |
-| Minimal loop | v0, fallback | Our own loop calling any model API with tool calling. The most portable option, and a baseline (bash-only coding agents are strong baselines in Lean [miniLean]). |
-| No-tools loop | v1 | For models without tool calling (e.g. open Lean provers): the model writes a whole proof; we compile it and send back errors and goal states. |
-| Custom | user-supplied | Any agent that meets the contract and passes the conformance check (§7.5) |
+| Claude Code (headless) | prototype; V1 first-class | Native MCP and skills |
+| Codex CLI | V1 first-class | Native MCP; the FVS [FVS] playbook is passed as prompt text |
+| Minimal loop | V1 fallback | Our own loop calling any model API with tool calling. The most portable option, and a baseline (bash-only coding agents are strong baselines in Lean [miniLean]). |
+| No-tools loop | Later | For models without tool calling (e.g. open Lean provers): the model writes a whole proof; we compile it and send back errors and goal states. |
+| Custom | V1, user-supplied | Any agent that meets the contract and passes the conformance check (§7.5) |
 
 Each adapter declares its **capabilities**: tool calling, MCP, skills, structured output, and context size. Each tool profile states what it requires. An adapter that cannot meet the selected profile refuses to start, rather than silently running with fewer tools.
 
@@ -473,7 +479,7 @@ When an attempt gives up, the agent returns a structured diagnosis, following Ma
 - **approaches tried**, each with the reason it failed;
 - **scope**: `local` (e.g. a missing helper lemma) or `global` (the approach hits a fundamental barrier);
 - **statement doubt**: whether the agent believes the statement is now false, and why;
-- **counterexample**: if it has one, as concrete inputs, ideally checked in Lean with `#eval`;
+- **counterexample**: if it has one, as concrete inputs. Only a Lean proof that the statement is false turns this into `spec-suspect` (§5.1); otherwise it stays advisory;
 - the **last goal state**.
 
 The diagnosis is validated against a JSON schema. An invalid one is recorded as "no diagnosis" and never breaks the run. It is advisory, model-written text (§5.4): it feeds the escalation report and the decision adapter's labels, and never decides an outcome.
@@ -495,8 +501,10 @@ This gives users a quick "does my setup work?" answer, and lets the bot refuse m
 1. **Repair.** How many broken theorems does the bot repair, and at what cost and wall time?
 2. **Soundness.** Does the gate reject every candidate that breaks a rule, and what do agents try that the gate has to stop?
 3. **Escalation.** Are escalations correct and useful? In particular, would the weakened statements of curve25519-dalek-lean-verify PR 535 have reached a reviewer?
-4. **Configuration.** Which agent adapter, model tier and tool profile (§7.3) repair the most per dollar?
-5. **Decision models.** Does a model-backed decision adapter beat the rules?
+4. **Configuration** (V1). Which agent adapter, model tier and tool profile (§7.3) repair the most per dollar?
+5. **Decision models** (V1). Does a model-backed decision adapter beat the rules?
+
+The prototype answers questions 1–3 on its small set of cases (§2.3).
 
 ### 8.2 Unit and ground truth
 
@@ -511,7 +519,7 @@ Results are reported per theorem and per case. A case counts as fully repaired o
 | Question | Metric |
 |---|---|
 | Repair | Repair rate (gate-passed / broken), per repo and per cause. Cost, tokens and wall time per repaired theorem, and per case. Attempts-to-success distribution. |
-| Soundness | Planted-violation tests (§4.6) all rejected (must be 100%). In real runs: candidates rejected per check (G0–G3), with what was attempted (statement edit, `sorry`, new axiom, out-of-scope file). |
+| Soundness | Planted-violation tests (§4.6) all rejected (must be 100%). In real runs: candidates rejected per check (G0–G3, G5), with what was attempted (statement edit, `sorry`, new axiom, out-of-scope file). |
 | Escalation | Against hand-adjudicated labels (below): escalation precision and recall, and **false accepts** (must be 0). Recall of the audit (§4.7) on real commits that edited statements or axioms, including PR 535. |
 | Configuration | Repair rate and cost per repaired theorem for each adapter × model tier. Tool-profile ablation (`minimal` vs `lsp` vs `lsp+fvs`) on the repetition subset. |
 | Decision models | Agreement with hand labels (escalation labels, mining labels). For routing: cost to success vs the rules. Calibration of the reported confidence. |
@@ -529,14 +537,14 @@ As a secondary view, the confusion matrix compares the bot with the human fix:
 ### 8.4 Baselines
 
 - **No-LLM sweep.** Only step 1 of the attempt schedule (§3.3, S4). It shows how many breaks are trivial, and it is the floor every model configuration must beat.
-- **Ungated agent.** The same agent, accepting anything that passes `lake build`. Comparing it with the gated run shows how often an unconstrained agent changes statements, adds `sorry` or axioms, or edits files it should not. That difference is the measured value of the gate.
+- **Ungated agent** (V1). The same agent, accepting anything that passes `lake build`. Comparing it with the gated run shows how often an unconstrained agent changes statements, adds `sorry` or axioms, or edits files it should not. That difference is the measured value of the gate.
 - **Human fix.** The reference for statement changes (§8.3) and for proof size.
 
 ### 8.5 Protocol
 
 - **Pilot first.** Run the full pipeline on a few small cases. The attempts-to-success distribution from the pilot sets the budget defaults (§3.3, S4). Evaluation runs then use fixed budgets.
-- **Dev/test split by time and by repo.** We iterate on prompts, the attempt schedule, budgets and routing rules ("tuning") using only older cases from the dalek repos. Results are reported on newer cases and on one repo held out entirely during development (SymCrypt), so no reported number comes from a case we tuned on.
-- **Repetitions.** Agents are nondeterministic. Each configuration runs once on every case, and three times on a fixed subset, to estimate run-to-run variance. Comparisons between configurations report that variance. The ungated-agent baseline (§8.4) runs on the same subset, since it doubles agent cost.
+- **Dev/test split by time and by repo.** (The prototype has the time split only.) We iterate on prompts, the attempt schedule, budgets and routing rules ("tuning") using only older cases from the dalek repos. Results are reported on newer cases and on one repo held out entirely during development (SymCrypt), so no reported number comes from a case we tuned on.
+- **Repetitions** (V1). Agents are nondeterministic. Each configuration runs once on every case, and three times on a fixed subset, to estimate run-to-run variance. Comparisons between configurations report that variance. The ungated-agent baseline (§8.4) runs on the same subset, since it doubles agent cost.
 - **Leakage.** We train no models. But the target repos are public, so the model vendors' own training data may include the human fix, and a "repair" may partly be recall. Mitigations:
   - The agent sees only `git archive` trees, with no future history, and its network reaches only the model API (§3.4), so it cannot look up the fix.
   - Each case records whether the fix commit predates the model's training-data cutoff, and results are split on that.
@@ -544,13 +552,15 @@ As a secondary view, the confusion matrix compares the bot with the human fix:
 - **Reporting.** `infrastructure-failure` and `gate-unavailable` outcomes are reported separately and excluded from repair and escalation metrics. Results give sample counts, confidence intervals, coverage (§6.5), and case-level as well as theorem-level results. Repetitions are clustered by triggering commit, since theorems from one case are not independent. Passing the planted-violation tests shows only that those tests pass.
 - **Reproducibility.** Every number in the results is computed by a script from run records (S7). Run records stay out of git (see `.gitignore`) and are archived with the results.
 
-### 8.6 Not measured in v0
+### 8.6 Not measured in V1
 
 - Whether specs are adequate (non-goal, §2).
 - Reviewer time and reviewer satisfaction, which need live use.
 - Long-term effects of merged repairs (proof maintainability, build time drift), beyond the G4 report.
 
 ## 9. Deployment (SCI-1717)
+
+This section is V1. The prototype runs replays locally and demonstrates one manually dispatched Actions run on a fork (§2.3).
 
 Model keys: the bot runs in the target repo's own CI with that repo's own API keys, stored as repository or organization secrets. BAIF repos use BAIF's API keys; outside users supply their own. BAIF hosts no service and never holds anyone else's keys or code.
 
@@ -567,7 +577,7 @@ Releases are versioned. Each run record stores the bot version, gate version, ta
 ### 9.2 Triggers and fork PRs
 
 - **Same-repo PRs and `main`:** the bot runs automatically when the repo's verification job fails (`workflow_run`).
-- **Fork PRs:** the bot runs only after a maintainer adds the `self-heal` label. The approval binds to the **head SHA** at labelling time: on any new push the bot removes the label, and a maintainer must review and add it again. Building Lean code runs arbitrary code: `lakefile.lean`, macros and `#eval` all execute at build time. The `repair` job builds the PR's code *and* holds a model key, so it must never build unreviewed code from strangers. The label means "a maintainer has looked at this code". Jobs without secrets (`context`, `falsity`, `gate`) carry no such risk, but they run under the same rule for simplicity.
+- **Fork PRs:** the bot runs only after a maintainer adds the `self-heal` label. The approval binds to the **head SHA** at labelling time: on any new push the bot removes the label, and a maintainer must review and add it again. Building Lean code runs arbitrary code: `lakefile.lean`, macros and `#eval` all execute at build time. The `repair` job builds the PR's code *and* holds a model key, so it must never build unreviewed code from strangers. The label means "a maintainer has looked at this code". Jobs without secrets (`audit`, `context`, `behavior`, `gate`) carry no such risk, but they run under the same rule for simplicity.
 - **Delivery to fork PRs:** the bot cannot push branches to a fork. It posts the repair as a patch (a downloadable artifact, plus GitHub suggested changes for small diffs) that the author applies.
 - **Opt-out:** a `no-self-heal` label skips a PR, and a repository variable turns the bot off entirely.
 
@@ -603,9 +613,9 @@ No default numbers yet: they come from the pilot runs (§8.5).
 
 **Agent harnesses for Lean verification of Rust.** *auto_verify_dalek* [AVD] removes every proof and internal spec from the verified curve25519-dalek, keeps the extracted code and top-level specs, and asks agents to rebuild the rest. Its harness runs a headless coding agent per node of the call graph, leaves first, and accepts work only through deterministic gates: scope, statement fingerprints, `sorry` accounting and an axiom whitelist. We reuse its gates (§4.5) and its per-node, leaves-first structure (§3.3, S4). The difference is the direction of trust: there the code is frozen and the agent writes specs, while here the specs are frozen and the code has changed under them.
 
-**Agent skills.** *Formal Verification Skills* [FVS] packages verification workflows for coding agents, including proof attempts (`lean-verify`), spec review and trust audits. We use `lean-verify` as an optional repair playbook (§7.3). Its spec review is a natural next step for escalations, which v0 only reports (§5.5).
+**Agent skills.** *Formal Verification Skills* [FVS] packages verification workflows for coding agents, including proof attempts (`lean-verify`), spec review and trust audits. We use `lean-verify` as an optional repair playbook (§7.3). Its spec review is a natural next step for escalations, which V1 only reports (§5.5).
 
-**Proof generation and repair for Rust.** *KVerus* [KVerus] generates and repairs Verus proofs for Rust using a knowledge store (code metadata, lemma meanings, toolchain details), dependency-aware analysis and "error-driven self-refinement", and it degrades less than earlier tools under breaking Verus updates. It is the closest prior work on repair after code and toolchain changes. We differ in target (Lean via Aeneas, not Verus), in making the acceptance gate and escalation central, and in evaluating on mined real breaks. Its knowledge store is a precedent for giving our repair agent retrieval over past repairs (v1).
+**Proof generation and repair for Rust.** *KVerus* [KVerus] generates and repairs Verus proofs for Rust using a knowledge store (code metadata, lemma meanings, toolchain details), dependency-aware analysis and "error-driven self-refinement", and it degrades less than earlier tools under breaking Verus updates. It is the closest prior work on repair after code and toolchain changes. We differ in target (Lean via Aeneas, not Verus), in making the acceptance gate and escalation central, and in evaluating on mined real breaks. Its knowledge store is a precedent for giving our repair agent retrieval over past repairs (Later).
 
 **Coordination and diagnosis.** *Maestro* [Maestro] coordinates many prover agents on one large proof, with provers reporting *why* they failed so a coordinator can guide, correct or replan. Our diagnosis format (§7.4) follows this idea. Our setting needs less coordination: the call graph and the statements are fixed, so repairs are independent except for dependency order.
 
@@ -613,7 +623,7 @@ No default numbers yet: they come from the pilot runs (§8.5).
 
 **Verification environments.** *Towards Agentic Proof Harness Engineering* [ProofHarness] has an agent build the verification environment for a C function, checked by a soundness guard and a precision guard. In the Aeneas setting, the analogue is the extraction config and the hand-written models of external code. A future "step 0" of this bot could set up a new repo's config and models under similar guards. Note the term clash: "harness" there means the verification environment, while elsewhere in this doc it means agent scaffolding.
 
-**Proof performance.** *Radar* [Radar] benchmarks Lean projects per commit (build time, memory). Our G4 report (§4.3) covers only the repaired proofs. A later proof-optimization mode, where the bot proposes faster proofs when idle, would use Radar to measure the gains (non-goal for v0, §2).
+**Proof performance.** *Radar* [Radar] benchmarks Lean projects per commit (build time, memory). Our G4 report (§4.3) covers only the repaired proofs. A later proof-optimization mode, where the bot proposes faster proofs when idle, would use Radar to measure the gains (Later, §2.2).
 
 **Verified cryptography at scale.** The SymCrypt verification effort [SymCrypt] verifies post-quantum cryptography in Rust with Aeneas and Lean, and is our held-out evaluation repo (§6.1).
 
@@ -621,24 +631,24 @@ No default numbers yet: they come from the pilot runs (§8.5).
 
 Each question is answered by a measurement or an early prototype, not by more design.
 
-**Feasibility (answer first, week 1)**
-1. **Build time.** How long does a clean build of each target repo take on a hosted runner, and does it fit the job cap with room for repair attempts (§9.4)?
-2. **Gate scale.** Do the statement and trust snapshots (§4.4) run in reasonable time and memory on a full repo such as curve25519-dalek or SymCrypt? Snapshotting every declaration in a large project may need batching.
-3. **Data volume.** How many valid cases does mining yield per repo and per cause (§6)? If there are too few `rust` cases, the evaluation leans on `aeneas` cases.
+**Feasibility (first milestone and prototype)**
+1. **Kernel replay support.** Is a `lean4checker` release available for each target's (sometimes older) Lean toolchain? If a stronger threat model is adopted later, does `lake comparator` work there too?
+2. **Vendored gates.** Do the vendored statement and trust checks compile across the historical Lean versions in the mined cases?
+3. **Build time.** How long does a clean build of each target repo take on a hosted runner, and does it fit the job cap with room for repair attempts (§9.4)?
+4. **Gate scale.** Do the statement and trust snapshots (§4.4) run in reasonable time and memory on a full repo such as curve25519-dalek or SymCrypt? Snapshotting every declaration in a large project may need batching.
+5. **Data volume.** How many valid cases does mining yield per repo and per cause (§6)? If there are too few `rust` cases, the evaluation leans on `aeneas` cases.
 
-**Design choices to revisit with data**
+**Design choices to revisit with data (V1)**
 
-4. **Frozen set.** How often does the strict frozen set (§4.2) over-escalate, for example when humans change internal helper lemma statements? Would freezing only spec theorems be safe enough?
-5. **Renames.** How many `statement-must-change` escalations are `rename-only`? That decides whether a human-approved rename map (v1) is worth building.
-6. **Tools.** Does the `lsp` profile beat `minimal` per dollar (§7.3)?
-7. **Decision models.** Does the Decisions API beat the rules on routing and labels, and is its confidence calibrated (§3.5)? It is in public beta, so its availability is also a risk.
-8. **Differential tests.** For curve25519-dalek: how do we map a broken theorem to its Rust function (through Aeneas names), and generate valid inputs for its types (field elements, scalars, points)?
+6. **Frozen set.** How often does the strict frozen set (§4.2) over-escalate, for example when humans change internal helper lemma statements? Would freezing only spec theorems be safe enough?
+7. **Renames.** How many `statement-must-change` escalations are `rename-only`? That decides whether a human-approved rename map (Later) is worth building.
+8. **Tools.** Does the `lsp` profile beat `minimal` per dollar (§7.3)?
+9. **Decision models.** Does the Decisions API beat the rules on routing and labels, and is its confidence calibrated (§3.5)? It is in public beta, so its availability is also a risk.
+10. **Differential tests.** For curve25519-dalek: how do we map a broken theorem to its Rust function (through Aeneas names), and generate valid inputs for its types (field elements, scalars, points)?
 
-9. **Kernel replay support.** Is a `lean4checker` release available for each target's (sometimes older) Lean toolchain? If a stronger threat model is adopted later, does `lake comparator` work there too?
-10. **Vendored gates.** Do the vendored statement and trust checks compile across the historical Lean versions in the mined cases?
-11. **Frozen-set coverage.** Which declaration kinds does the frozen set include: instances, inductives, constructors, generated auxiliaries, external axioms?
+11. **Frozen-set coverage.** Beyond the rule in §4.2, how are instances, inductives, constructors and external axioms handled?
 
-**Live deployment**
+**Live deployment (V1)**
 
 12. **Extraction in live CI.** The bot requires an extraction-consistency check on the PR's head SHA (S1). Which target repos already have one (dalek does), and what must the others add at install time?
 13. **Escalation usability.** Will reviewers read and act on the report (§5.4)? This needs feedback from first users of the live bot.
