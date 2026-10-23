@@ -426,10 +426,9 @@ class Run:
             if mine and base and mine["proof"].strip() != STUB:
                 entry["bot_proof_lines"] = len(mine["proof"].splitlines())
                 entry["bot_diff"] = unified(base["proof"], mine["proof"], b["file"])
-                if human:
-                    entry["similarity_to_human"] = round(SequenceMatcher(None, mine["proof"], human["proof"]).ratio(), 2)
-                    entry["possible_memorization"] = (entry["similarity_to_human"] >= 0.9
-                                                      and human["proof"] != base["proof"])
+                if human and human["proof"] != base["proof"]:
+                    entry["similarity_to_human"] = edit_similarity(entry["bot_diff"], entry["human_diff"])
+                    entry["possible_memorization"] = entry["similarity_to_human"] >= 0.9
             out.append(entry)
         return out
 
@@ -443,6 +442,16 @@ class Run:
                 "turns": sum(a["turns"] for a in atts), "agent_seconds": round(sum(a["seconds"] for a in atts)),
                 "wall_seconds": round(wall), "stages": {k: round(v) for k, v in self.timing.items()},
                 "attempts": len(atts)}
+
+
+def edit_similarity(a: str, b: str) -> float:
+    """How alike two edits of the same old proof are: compares the changed lines (+/-) only, so two
+    small but different edits of a long proof do not look alike (§8.5 memorization flag)."""
+    def changed(d: str) -> list[str]:
+        return [l[0] + " ".join(l[1:].split()) for l in d.splitlines()
+                if l[:1] in "+-" and not l.startswith(("+++", "---"))]
+    x, y = changed(a), changed(b)
+    return round(SequenceMatcher(None, x, y).ratio(), 2) if x and y else 0.0
 
 
 def unified(a: str, b: str, path: str) -> str:

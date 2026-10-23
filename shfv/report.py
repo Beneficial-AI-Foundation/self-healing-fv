@@ -200,7 +200,7 @@ def render(r: dict) -> str:
     if repaired:
         out.append("#### Repaired")
         out.append("")
-        out.append("| Theorem | Proof change | Agent |")
+        out.append("| Theorem | Edit of the old proof | Agent |")
         out.append("|---|---|---|")
         hf = {h["theorem"]: h for h in r.get("human_fix", [])}
         for e in repaired:
@@ -222,7 +222,7 @@ def render(r: dict) -> str:
     if hf:
         out.append("#### Compared with the human fix (replay only)")
         out.append("")
-        out.append("| Theorem | Human changed the statement? | Human proof change | Bot proof change | Similar to human |")
+        out.append("| Theorem | Human changed the statement? | Human edit of the old proof | Bot edit of the old proof | Edits alike |")
         out.append("|---|---|---|---|---|")
         for h in hf:
             human = "yes" if h.get("human_changed_statement") else "no"
@@ -231,7 +231,7 @@ def render(r: dict) -> str:
             if h.get("human_added_sorry"):
                 human += ", left a `sorry`"
             sim = h.get("similarity_to_human")
-            simtxt = "–" if sim is None else f"{sim:.0%}" + (" (possible recall of the human fix)" if h.get("possible_memorization") else "")
+            simtxt = "–" if sim is None else f"{sim:.0%}" + (" (possible recall of the human fix: review)" if h.get("possible_memorization") else "")
             out.append(f"| `{short_name(h['theorem'])}` | {human} | {diff_size(h.get('human_diff'))} | "
                        f"{diff_size(h.get('bot_diff'))} | {simtxt} |")
         out.append("")
