@@ -297,6 +297,15 @@ The audit compares non-extracted declarations (statements and definition bodies)
 - `changed`: at least one difference, each with before and after;
 - `incomplete`: the head (or base) snapshot does not cover every inventory entry, for example because a statement fails to elaborate on a red head. The report lists what could not be compared. An incomplete audit never reports "no changes".
 
+### 4.8 The gate is the trusted core
+
+The agent, the orchestration and the report generator do not need to be trusted: if they misbehave, the worst outcome is a failed repair or a spurious escalation, because only the gate decides what is accepted, and the Lean kernel (plus `lean4checker`, G5) checks the proofs themselves. The gate is the one component whose bugs could let a weakened statement or a new trust assumption through. So:
+
+- **Prototype:** the gate is a separate module (`gates/`) with no dependency on agent, orchestration or report code, reached only through the interface in §4.5. Its behavior is pinned by the planted-violation tests (§4.6).
+- **V1, verify the gate (option 1):** move the gate logic that is not already in Lean into Lean, and prove key properties of it in the same files, for example that the statement fingerprint is invariant under renaming bound variables but changes when a statement's meaning changes.
+- **Later (option 2):** prove the gate's main guarantee: if `gate compare` accepts, every frozen declaration in the base has the same canonical statement (and definition body) in the candidate. This needs reasoning about Lean's own declaration representation.
+- **Later (option 3):** implement the gate core in Rust and verify it with Aeneas, the same pipeline the bot protects.
+
 ## 5. Escalation
 
 The bot never decides whether a statement or trust change is acceptable. It shows the right person the evidence and stops.
@@ -649,6 +658,8 @@ Each question is answered by a measurement or an early prototype, not by more de
 10. **Differential tests.** For curve25519-dalek: how do we map a broken theorem to its Rust function (through Aeneas names), and generate valid inputs for its types (field elements, scalars, points)?
 
 11. **Frozen-set coverage.** Beyond the rule in §4.2, how are instances, inductives, constructors and external axioms handled?
+
+20. **Verifying the gate.** Which gate properties are worth proving first (§4.8), and how much of the gate can move into Lean without hurting snapshot speed?
 
 **Live deployment (V1)**
 
