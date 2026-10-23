@@ -1,0 +1,106 @@
+{
+ "case_id": "symcrypt/gen-aeneas-6e167c9b",
+ "generated": true,
+ "base_pins": {
+  "lean": "leanprover/lean4:v4.31.0",
+  "aeneas": "d71d2e3f"
+ },
+ "upgraded_pins": {
+  "lean": "leanprover/lean4:v4.31.0",
+  "aeneas": "6e167c9b"
+ },
+ "replayed_at": "2026-10-23T10:37:45+00:00",
+ "machine": {
+  "cpus": 18
+ },
+ "timing": {
+  "base_s": 1,
+  "broken_setup_s": 16.3,
+  "broken_rounds_s": 590,
+  "total_s": 608
+ },
+ "base": {
+  "ok": true,
+  "stage": "build",
+  "timings": {
+   "build_s": 1
+  },
+  "reuse": null,
+  "orphaned_pins": [],
+  "jobs": 1899,
+  "errors": [],
+  "tail": ""
+ },
+ "external_models_overlaid": [],
+ "extraction_errors": [],
+ "broken_rounds": [
+  {
+   "round": 1,
+   "ok": false,
+   "errors_n": 3,
+   "build_s": 545,
+   "jobs": 1902
+  },
+  {
+   "round": 2,
+   "ok": false,
+   "errors_n": 1,
+   "build_s": 31,
+   "jobs": 1901
+  },
+  {
+   "round": 3,
+   "ok": true,
+   "errors_n": 0,
+   "build_s": 14,
+   "jobs": 1901
+  }
+ ],
+ "broken_green_after_sorry": true,
+ "broken_proofs": [
+  "SymCRust/lean/Symcrust/Properties/MLKEM/Encaps/Phases.lean::encapsInt.prelude.spec",
+  "SymCRust/lean/Symcrust/Properties/MLKEM/KeyGen.lean::keyGenerate.body.spec",
+  "SymCRust/lean/Symcrust/Properties/SHA3/Shake4x/Extract.lean::Shake4x.extract_all_loop.some_body.spec"
+ ],
+ "broken_proofs_detail": [
+  {
+   "file": "SymCRust/lean/Symcrust/Properties/SHA3/Shake4x/Extract.lean",
+   "line": 131,
+   "decl": "Shake4x.extract_all_loop.some_body.spec",
+   "where": "body",
+   "kind": "tactic-failed",
+   "msg": "`agrind` failed\ncase grind.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1\nkxh : sha3.keccak4x_hybrid.Keccak4xHybrid\na : Std.Array (Std.Array U8 168#usize) 4#usize\nlane : Usize\nhLane : ↑lane * 8 + 8 ≤ 168\ni : U64\n__1 : [> let i ← kxh.get_lane lane 0#usize <]\ni_post : i = (↑kxh.state[lane])[0]\ni1 : U64\n__2 : [> let i1 ← kxh.get_lane lane 1#usize <]\ni1_post : i1 = (↑kxh.state[lane])[1]\ni2 : U64\n__3 : [> let i2 ← kxh.get_lane lane 2#usize <]\ni2_post : i2 = (↑kxh.state[lane])[2]\ni3 : U64\n__4 : [> let i3 ← kxh.get_lane lane 3#usize <]\ni3_post : i3 = (↑kxh.state[lane])[3]\noff : Usize\n__5 : [> let off ← ",
+   "round": 1,
+   "decl_kind": "theorem"
+  },
+  {
+   "file": "SymCRust/lean/Symcrust/Properties/MLKEM/Encaps/Phases.lean",
+   "line": 244,
+   "decl": "encapsInt.prelude.spec",
+   "where": "body",
+   "kind": "other",
+   "msg": "Case tag `h1` not found.\n\nHint: The only available case tag is `a._@._internal._hyg.0`.\n  h̵1̵a̲.̲_̲@̲.̲_̲i̲n̲t̲e̲r̲n̲a̲l̲.̲_̲h̲y̲g̲.̲0̲",
+   "round": 1,
+   "decl_kind": "theorem"
+  },
+  {
+   "file": "SymCRust/lean/Symcrust/Properties/MLKEM/KeyGen.lean",
+   "line": 193,
+   "decl": "keyGenerate.body.spec",
+   "where": "body",
+   "kind": "other",
+   "msg": "Case tag `h1` not found.\n\nHint: Available tags:\n  • `h`: h1̵\n  • `h`: h1̵",
+   "round": 2,
+   "decl_kind": "theorem"
+  }
+ ],
+ "statement_errors": [],
+ "cascades": [],
+ "header_errors": [],
+ "statement_broken": [],
+ "needs_statement_change": false,
+ "file_errors": [],
+ "blocked_modules": [],
+ "blocked_files": [],
+ "verdict": "break confirmed"
+}
