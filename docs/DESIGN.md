@@ -247,7 +247,7 @@ The gate works on snapshots. A snapshot is one JSON record per declaration: name
 
 ### 4.5 Implementation: vendored, then adapted
 
-We vendor (copy, with attribution) the statement and trust checks from auto_verify_dalek [AVD] at commit `32ed856` (MIT): `harness/gates/StmtCanon.lean` and `harness/gates/g2_trust_base.py`. The copies live in `gates/` with the source URL, commit and MIT notice in their headers. There is no runtime dependency on that repo.
+We vendor (copy, with attribution) the statement check from auto_verify_dalek [AVD] at commit `32ed856` (MIT): `harness/gates/StmtCanon.lean`. The copy lives in `gates/` with the source URL, commit and MIT notice in its header. There is no runtime dependency on that repo. *(proposed, from the prototype)* `harness/gates/g2_trust_base.py` is not vendored: it checks AVD's own frozen files (`harness/frozen/`, `phase0_audit.lean`, `.verilib`), while the facts G2 needs here (each declaration's axiom closure and `sorry` sources) already come from StmtCanon.
 
 Kept as-is:
 - per-declaration JSON records;
@@ -259,12 +259,16 @@ Changed:
 - **Inverted territory.** In the source setting the code is frozen and an agent writes specs, so spec-module definitions are δ-unfolded and only types are fingerprinted. Here every non-extracted declaration is frozen and the extracted code may change. So nothing is unfolded, extracted modules are excluded from the frozen set, and **def bodies are fingerprinted too**. Otherwise a quietly edited spec predicate under an unchanged theorem would pass.
 - **Base-relative trust check.** G2 uses each theorem's own base closure instead of one frozen whitelist file.
 - **Coverage and added declarations.** Snapshots record coverage (§4.4), and G2 audits every added declaration.
+- **One memoized closure walk** *(prototype)*. Upstream walks each declaration's axiom closure afresh; one shared walk (Tarjan's SCC algorithm) gives identical results and cuts a full dalek snapshot from 498 s to 39 s.
+- **Exact auxiliary-name patterns** *(prototype)*. Upstream treats any name with a component starting `eq_`, `inj` or `sizeOf` as compiler-generated, which also dropped user theorems such as `eq_spec` and `injective_fromEdwards` from the frozen set (18 in one dalek commit). Tactic-generated constants (`congr_simp`, `induct`, `fun_cases`) are treated as auxiliary.
 
 The vendored code is unverified against our target toolchains: whether it compiles across the historical Lean versions in the mined cases is an early check (§11). G5 is a separate tool (`lean4checker`), not vendored code.
 
 Interface:
-- `gate snapshot --config T.toml --out S.json`
+- `gate snapshot --config T.toml --tree DIR --out S.json [--clean] [--apply D.patch --workdir W]`
 - `gate compare --base B.json --broken K.json --candidate C.json --diff D.patch`
+
+*(proposed, from the prototype)* The candidate diff is relative to the stubbed broken state. With `--apply`, the gate makes its own fresh copy of the stubbed broken state (sources and dependency packages, no project build output), applies the diff strictly (no fuzz), builds and fingerprints it; `compare` checks that the candidate snapshot is exactly that state plus that diff. Snapshots carry the audited source texts, so G0 is a pure function of the snapshots and the diff. Helper subcommands: `gate scope` (G0 alone, before any build), `gate diff`, and `gate version` (a hash of the gate sources, recorded in every snapshot and verdict).
 
 `gate compare` returns a verdict JSON with one entry per theorem and the failing check ids. If a shared BAIF auditor becomes available, it replaces the implementation behind this interface.
 
@@ -644,9 +648,9 @@ Each question is answered by a measurement or an early prototype, not by more de
 
 **Feasibility (first milestone and prototype)**
 1. **Kernel replay support.** Is a `lean4checker` release available for each target's (sometimes older) Lean toolchain? If a stronger threat model is adopted later, does `lake comparator` work there too?
-2. **Vendored gates.** Do the vendored statement and trust checks compile across the historical Lean versions in the mined cases?
-3. **Build time.** How long does a clean build of each target repo take on a hosted runner, and does it fit the job cap with room for repair attempts (§9.4)?
-4. **Gate scale.** Do the statement and trust snapshots (§4.4) run in reasonable time and memory on a full repo such as curve25519-dalek or SymCrypt? Snapshotting every declaration in a large project may need batching.
+2. **Vendored gates.** Do the vendored statement and trust checks compile across the historical Lean versions in the mined cases? *Prototype:* the adapted StmtCanon runs on Lean v4.21.0, v4.24.0 and v4.28.0-rc1 (dalek PRs 41, 74, 782).
+3. **Build time.** How long does a clean build of each target repo take on a hosted runner, and does it fit the job cap with room for repair attempts (§9.4)? *Prototype (laptop, 18 cores, `LEAN_NUM_THREADS=8`, Mathlib from cache):* a clean project build of curve25519-dalek-lean-verify at PR 782 takes about 3m50s; hosted runners not yet measured.
+4. **Gate scale.** Do the statement and trust snapshots (§4.4) run in reasonable time and memory on a full repo such as curve25519-dalek or SymCrypt? Snapshotting every declaration in a large project may need batching. *Prototype:* about 1 minute for the 1,328 frozen declarations of dalek at PR 782 after memoizing the closure walk (§4.5); SymCrypt not yet measured.
 5. **Data volume.** How many valid cases does mining yield per repo and per cause (§6)? If there are too few `rust` cases, the evaluation leans on `aeneas` cases.
 
 **Design choices to revisit with data (V1)**
@@ -681,7 +685,7 @@ This project builds directly on teammates' work at BAIF. Vendored code also carr
 
 | Who | Their work | What this project takes from it |
 |---|---|---|
-| Liao (GitHub `@Zhang-Liao`) | The *auto_verify_dalek* harness and gates [AVD] | **Code (vendored, MIT):** the statement fingerprint `StmtCanon.lean` and the trust check `g2_trust_base.py` (§4.5). **Design:** one fresh agent session per theorem, leaves first (§3.3, S4); deterministic gates with statement fingerprints, `sorry` accounting and an axiom whitelist (§4); a `check` tool that wraps `lake build` with timeouts and clear statuses (§7.2); lessons from real agent runs, such as agents raising `maxHeartbeats` (§4.3, G0); and the harness's review of LeanMarathon (§7.3). Also early input on the project's direction. |
+| Liao (GitHub `@Zhang-Liao`) | The *auto_verify_dalek* harness and gates [AVD] | **Code (vendored, MIT):** the statement fingerprint `StmtCanon.lean`, including its axiom-closure and `sorry`-source tracking (§4.5); the trust check `g2_trust_base.py` informed G2's design. **Design:** one fresh agent session per theorem, leaves first (§3.3, S4); deterministic gates with statement fingerprints, `sorry` accounting and an axiom whitelist (§4); a `check` tool that wraps `lake build` with timeouts and clear statuses (§7.2); lessons from real agent runs, such as agents raising `maxHeartbeats` (§4.3, G0); and the harness's review of LeanMarathon (§7.3). Also early input on the project's direction. |
 | Alessandro (GitHub `@a-dangelo`) | *Formal Verification Skills* [FVS] (main author); the AutoFV pipeline in auto_verify_dalek [AVD]; a verification-factory prototype (not public) | **Design:** FVS `lean-verify` as an optional repair playbook (§7.3); from AutoFV, a model proxy that holds the API key and a run-level cost cap charged from metered usage (§3.4, §9.5); from the verification-factory prototype, fingerprinting the definitions a statement depends on, not only its type (§4.5), and the goal of one shared checker for "statement unchanged, no new trust" (§4.5, §11). Also input on direction: adoption by teams outside BAIF, and cost. |
 | Lennart Beringer (GitHub `@lennartberinger`) | *aeneas_difftest* [AeneasDiffTest] | **Design:** how S3 is scoped, as old-vs-new Rust comparison rather than extraction-fidelity testing (§10); candidate reuse of its Lean execution harness and panic mapping (§10). No code reused. |
 | Shaowei Lin | Chief Scientist, BAIF | Guidance on project direction and priorities. |
