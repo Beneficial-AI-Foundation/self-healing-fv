@@ -26,7 +26,7 @@ Full guide: [docs/CLI.md](docs/CLI.md).
 uv run shfv repair --case dalek-lean-verify/e65b46d0 --agent claude-code [--model claude-sonnet-5-5]
 ```
 
-This rebuilds the case's broken state (the proofs before the change plus the change's extracted code and pins, via `replay/replay_case.py`), runs a headless Claude Code session per broken proof, runs the gate, and writes `runs/<case>/report.json` (the run record) and `runs/<case>/report.md` (the PR comment the bot would post). Cases whose statement no longer type-checks escalate without an agent call (`--attempt-anyway` runs one anyway). Needs `elan`, `uv`, `claude`, a local clone of the target repo (`--repo`, default `~/baif/<repo>`) and the replay workspaces under `work/` (`SHFV_WORK`).
+This rebuilds the case's broken state (the proofs before the change plus the change's extracted code and pins, via `replay/replay_case.py`), runs a headless Claude Code session per broken proof, runs the gate, and writes `runs/<case>/<run id>/report.json` (the run record, with what produced it) and `report.md` (the PR comment the bot would post). Cases whose statement no longer type-checks escalate without an agent call (`--attempt-anyway` runs one anyway). Needs `elan`, `uv`, `claude`, a local clone of the target repo (`--repo`, default `~/baif/<repo>`) and the replay workspaces under `work/` (`SHFV_WORK`).
 
 The gate is a separate, model-free tool with no dependency on the rest (`gates/`, DESIGN.md §4.5, §4.8):
 

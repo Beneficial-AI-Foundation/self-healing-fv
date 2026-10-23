@@ -106,6 +106,32 @@ def gate_table(r: dict, g: dict) -> list[str]:
     return lines
 
 
+def _code(tool: dict) -> str:
+    c = (tool.get("commit") or "unknown")[:7]
+    return f"`{c}`" + (" **+ uncommitted changes**" if tool.get("dirty") else "")
+
+
+def provenance_lines(r: dict) -> list[str]:
+    """What produced this report: run id and time, tool commit, gate, model and harness, and any
+    later re-render (content comes from the run, presentation from the rendering code)."""
+    p = r.get("provenance")
+    if not p:  # reports from before run ids existed
+        return [f"<sub>Run of {r.get('started_at', 'unknown time')} · gate `{r.get('gate_version')}` · "
+                "tool version not recorded</sub>", ""]
+    a = p["agent"]
+    harness = f" via {a['harness']}" if a.get("harness") else ""
+    line = (f"<sub>Run `{r.get('run_id')}` · {r['started_at'][:16].replace('T', ' ')} UTC · self-healing-fv "
+            f"{_code(p['tool'])} · gate `{p['gate_version']}` · prompt `{p['prompt_sha256'][:7]}` · "
+            f"`{a['model']}`{harness} · target toolchain `{r.get('toolchain')}`")
+    for rr in r.get("renders", []):
+        line += f" · re-rendered {rr['at'][:16].replace('T', ' ')} UTC by {_code(rr['tool'])}"
+    out = [line + "</sub>", ""]
+    if p["tool"].get("dirty") or any(x["tool"].get("dirty") for x in r.get("renders", [])):
+        out = ["> ⚠️ Produced with uncommitted changes to the tool: this report cannot be reproduced from a commit.",
+               ""] + out
+    return out
+
+
 def render(r: dict) -> str:
     inp = r["inputs"]
     subject = re.sub(r"\s*\(#\d+\)\s*$", "", inp["change_subject"])
@@ -274,10 +300,10 @@ def render(r: dict) -> str:
         out.append("</details>")
         out.append("")
     out.append("---")
-    out.append(f"<sub>self-healing-fv prototype · gate `{r.get('gate_version')}` · acceptance needs every check to pass; "
-               "the bot never changes theorem statements or definitions · not run in this prototype: the audit of "
-               "statement changes made by the triggering change itself, and `lean4checker` · full run record: "
-               "`report.json`</sub>")
+    out += provenance_lines(r)
+    out.append("<sub>self-healing-fv prototype · acceptance needs every check to pass; the bot never changes "
+               "theorem statements or definitions · not run in this prototype: the audit of statement changes made "
+               "by the triggering change itself, and `lean4checker` · full run record: `report.json`</sub>")
     md = "\n".join(out) + "\n"
     if len(md) > GITHUB_LIMIT:
         md = md[:GITHUB_LIMIT - 200] + "\n\n… (truncated to fit a GitHub comment; full report in the run record)\n"

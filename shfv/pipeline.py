@@ -28,6 +28,7 @@ from difflib import SequenceMatcher
 from pathlib import Path
 
 from .agents.base import AgentAdapter, Attempt, Budget, RepairTask
+from . import provenance
 from .progress import Progress
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -87,7 +88,8 @@ def leaves_first(broken: list[dict], records: dict) -> list[dict]:
 
 class Run:
     def __init__(self, case_id: str, config: Path, agent: AgentAdapter, repo: Path, work: Path, runs: Path,
-                 attempt_anyway: bool = False, gate_human_fix: bool | None = None, keep: bool = False):
+                 attempt_anyway: bool = False, gate_human_fix: bool | None = None, keep: bool = False,
+                 label: str | None = None):
         self.case_id, self.agent, self.repo = case_id, agent, repo.expanduser()
         with open(config, "rb") as f:
             self.cfg = tomllib.load(f)
@@ -96,10 +98,13 @@ class Run:
         self.gate_human_fix = gate_human_fix
         self.record, self.replay = load_case(case_id)
         self.case_dir = self.work / case_id.replace("/", "-")
-        self.out = runs.resolve() / case_id.replace("/", "-")
-        self.out.mkdir(parents=True, exist_ok=True)
-        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
-        self.scratch = self.case_dir / f"run-{stamp}"
+        # One directory per run, never reused: runs/<case>/<run id>/, plus runs/<case>/latest.
+        self.started = provenance.now()
+        self.run_id = provenance.run_id(self.started, agent.model, label)
+        self.case_runs = runs.resolve() / case_id.replace("/", "-")
+        self.out = self.case_runs / self.run_id
+        self.out.mkdir(parents=True, exist_ok=False)
+        self.scratch = self.case_dir / f"run-{self.run_id}"
         self.p = Progress()
         self.timing: dict[str, float] = {}
 
@@ -269,7 +274,10 @@ class Run:
         self.p.header(f"{self.case_id} · PR {r.get('change_pr')} \"{r['change_subject']}\" · cause: "
                       f"{', '.join(r.get('causes') or [r['cause']])}" + (f" (Lean {lean[0].split(':')[-1]} → "
                                                                           f"{lean[1].split(':')[-1]})" if lean else ""))
-        report: dict = {"format": 1, "case_id": self.case_id, "started_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        gate_version = gate("version").stdout.strip()
+        report: dict = {"format": 2, "case_id": self.case_id, "run_id": self.run_id,
+                        "started_at": self.started.isoformat(timespec="seconds"),
+                        "provenance": provenance.collect(self.agent.model, self.agent.name, gate_version, self.config),
                         "inputs": {"repo": self.cfg["github"], "base_commit": r["base_commit"],
                                    "change_commit": r["change_commit"], "change_pr": r.get("change_pr"),
                                    "change_pr_url": r.get("change_pr_url"), "change_subject": r["change_subject"],
@@ -279,7 +287,7 @@ class Run:
                                    "sha256": hashlib.sha256(self.config.read_bytes()).hexdigest()[:12],
                                    "budget": self.cfg["budget"]},
                         "agent": {"adapter": self.agent.name, "model": self.agent.model},
-                        "gate_version": gate("version").stdout.strip(), "repairs": [], "escalations": []}
+                        "gate_version": gate_version, "repairs": [], "escalations": []}
         try:
             t0 = time.time()
             self.prepare()

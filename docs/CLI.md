@@ -60,7 +60,7 @@ dalek-lean-verify/e65b46d0 · PR 782 "Chore: update Aeneas  (#782)" · cause: ae
 ACCEPTED · 1/1 proofs repaired · 0 escalated · $0.26 · 16m42s → runs/dalek-lean-verify-e65b46d0/report.md
 ```
 
-The first 4 minutes were the two snapshots, which later runs of the case reuse from the cache.
+The first 4 minutes were the two snapshots, which later runs of the case reuse from the cache. (This run predates run ids; today the last line names `runs/dalek-lean-verify-e65b46d0/<run id>/report.md`, see section 5.)
 
 What happens:
 1. **Prepare.** The pipeline rebuilds the case's *broken state*: the proofs from before the change, plus the change's extracted code and toolchain pins. Then it takes two gate snapshots: the base commit, and the *stubbed broken state*, in which each failing proof is replaced by `sorry`. The snapshots are cached, so later runs of the same case skip this step.
@@ -76,7 +76,7 @@ A typical run takes 10–20 minutes. Most of that is building and fingerprinting
 | Option | Effect |
 |---|---|
 | `--model claude-sonnet-5-5` | Use a different model than the target config's default. |
-| `--label NAME` | Write to `runs/NAME/<case>/` instead of `runs/<case>/`, to keep runs apart (for example, one label per model). |
+| `--label NAME` | Add a suffix to the run id, e.g. `demo`. Every run already gets its own directory (section 5), so you need this only to tag a run. |
 | `--gate-human-fix` / `--no-gate-human-fix` | Also run the human's historical fix through the gate, as if the bot had proposed it. This checks the gate against real data. It is on by default for escalations, and costs one more clean rebuild (2–7 minutes). |
 | `--attempt-anyway` | Run the agent even on theorems whose statement no longer type-checks. This is for demos, to show that the bot will not change the statement. |
 | `--keep` | Keep the candidate and gate workspaces under `work/<case>/run-<time>/` for inspection. They are deleted by default. |
@@ -87,8 +87,8 @@ A typical run takes 10–20 minutes. Most of that is building and fingerprinting
 Compare two models on the same case:
 
 ```
-uv run shfv repair --case dalek-lean-verify/9d82afb9 --model claude-sonnet-5-5 --label sonnet-5-5
-uv run shfv repair --case dalek-lean-verify/9d82afb9 --model claude-opus-5-5   --label opus-5-5 --no-gate-human-fix
+uv run shfv repair --case dalek-lean-verify/9d82afb9 --model claude-sonnet-5-5
+uv run shfv repair --case dalek-lean-verify/9d82afb9 --model claude-opus-5-5 --no-gate-human-fix
 ```
 
 Show an escalation (no agent cost):
@@ -100,14 +100,16 @@ uv run shfv repair --case dalek-lean-verify/9c411c6b
 Re-render a report after changing the report code, without re-running anything:
 
 ```
-uv run shfv render runs/dalek-lean-verify-e65b46d0/report.json
+uv run shfv render runs/dalek-lean-verify-e65b46d0/latest/report.json
 ```
+
+The report then names both versions: the code that produced the run, and the code that re-rendered it.
 
 The exit status of `shfv repair` is 0 when the run completed, whether accepted or escalated, and 1 when it failed.
 
 ## 4. Read the report
 
-`runs/<case>/report.md` is exactly the comment the bot would post on the PR. It is written for a reviewer who has not read the design, and it opens with one of three verdicts:
+`report.md` is exactly the comment the bot would post on the PR. It is written for a reviewer who has not read the design, and it opens with one of three verdicts:
 
 | Verdict | Meaning |
 |---|---|
@@ -130,20 +132,44 @@ The **Gate** table lists each check (section 6) with ✅/❌ and the first viola
 ## 5. What is on disk
 
 ```
-runs/[<label>/]<repo>-<sha8>/
-  report.md                  the PR comment
-  report.json                the run record: inputs, every attempt (model, tokens, cost, turns, time),
-                             gate verdict, outcomes, timings
-  attempts/NN-<theorem>/
-    prompt.md                exactly what the agent was told
-    transcript.jsonl         the full agent session (stream-json)
-    suggestion.lean          the file as the agent left it, when the attempt was not used
+runs/<repo>-<sha8>/
+  latest -> <run id>         the newest run of this case
+  <run id>/                  one directory per run, never overwritten, e.g. 20261023T081950Z-claude-opus-5-5
+    report.md                the PR comment
+    report.json              the run record: provenance (below), inputs, every attempt (model, tokens,
+                             cost, turns, time), gate verdict, outcomes, timings
+    attempts/NN-<theorem>/
+      prompt.md              exactly what the agent was told
+      transcript.jsonl       the full agent session (stream-json)
+      suggestion.lean        the file as the agent left it, when the attempt was not used
 work/<repo>-<sha8>/
   base/ broken/ fixed/       replay workspaces (broken = stubbed broken state)
   snapshots/B.json, K.json   cached gate snapshots of base and stubbed broken state
 ```
 
 `runs/` and `work/` are not committed to git. Run records contain model transcripts, so review them before sharing.
+
+### Telling runs apart: provenance
+
+Every `report.json` has a `provenance` block, and the footer of `report.md` repeats it on one line:
+
+- the **run id** and start time (UTC);
+- the **self-healing-fv commit**, and whether the code had uncommitted changes. Such a run is marked *+ uncommitted changes*, and the report warns that it cannot be reproduced from a commit;
+- the **gate version** (`gate version`, a hash of the gate's sources);
+- a hash of the **agent prompt** template;
+- the **model** and the **Claude Code version**;
+- a hash of the **target config**, and the target's **Lean toolchain**;
+- every later **re-render** (`shfv render`), with the code that did it.
+
+So when you re-run a case after changing the tool, compare the two reports' footers: a different tool commit with the same gate version means only the pipeline, prompt or report changed; a different gate version means the acceptance rules changed.
+
+### Publishing example reports
+
+```
+uv run shfv export runs/dalek-lean-verify-e65b46d0/latest runs/dalek-lean-verify-9c411c6b/latest
+```
+
+This copies each run's `report.md`, plus a small metadata file (no transcripts), to `docs/examples/reports/<case>/<run id>.md`, and regenerates `docs/examples/reports/README.md`: one row per run, with case, date, tool commit, gate version, model, verdict and cost. Exporting a newer run of a case adds a row and keeps the old one, so results can be compared across tool versions. Runs made or rendered with uncommitted code are refused unless you pass `--allow-uncommitted`.
 
 ## 6. The gate on its own
 
