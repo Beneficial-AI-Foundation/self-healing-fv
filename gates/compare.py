@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import hashlib
 
-from . import patch, scope
+from . import patch, scope, version
 
 BASE3 = {"propext", "Classical.choice", "Quot.sound"}
 SORRY = "sorryAx"
@@ -146,7 +146,7 @@ def compare(cfg: dict, base: dict, broken: dict, cand: dict, diff: str) -> dict:
                          "repaired": not fails and n not in still_stubbed})
     failed = [cid for cid, c in checks.items() if c["ok"] is False]
     accepted = not failed and eligible and bool(bset) and not still_stubbed
-    return {"format": 1, "verdict": "accepted" if accepted else "rejected",
+    return {"format": 1, "gate_version": version(), "verdict": "accepted" if accepted else "rejected",
             "failed_checks": failed, "eligible": eligible, "theorems": theorems,
             "heartbeats": g0["info"]["heartbeats"], "checks": checks,
             "acceptance": "complete-case (prototype, §4.3)"}

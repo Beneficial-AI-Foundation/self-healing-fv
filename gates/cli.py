@@ -4,6 +4,7 @@
   gate scope    --config T.toml --base B.json --broken K.json --diff D.patch [--out V.json]
   gate compare  --config T.toml --base B.json --broken K.json --candidate C.json --diff D.patch --out V.json
   gate diff     --config T.toml --before DIR --after DIR --out D.patch
+  gate version
 
 Exit status of `scope`/`compare`: 0 pass/accepted, 1 fail/rejected, 2 the gate could not run.
 """
@@ -16,7 +17,7 @@ import sys
 import tomllib
 from pathlib import Path
 
-from . import compare, patch, scope, snapshot
+from . import compare, patch, scope, snapshot, version
 
 SKIP_DIRS = {".lake", ".git", "lake-packages"}
 
@@ -72,12 +73,16 @@ def main(argv: list[str] | None = None) -> int:
         c.add_argument("--out", type=Path)
         if name == "compare":
             c.add_argument("--candidate", type=Path, required=True)
+    sub.add_parser("version")
     d = sub.add_parser("diff")
     d.add_argument("--config", type=Path, required=True)
     d.add_argument("--before", type=Path, required=True)
     d.add_argument("--after", type=Path, required=True)
     d.add_argument("--out", type=Path, required=True)
     a = ap.parse_args(argv)
+    if a.cmd == "version":
+        print(version())
+        return 0
     cfg = load_config(a.config)
     try:
         if a.cmd == "snapshot":

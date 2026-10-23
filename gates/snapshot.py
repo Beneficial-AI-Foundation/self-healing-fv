@@ -24,7 +24,7 @@ import subprocess
 import time
 from pathlib import Path
 
-from . import leandecls, patch
+from . import leandecls, patch, version
 
 STMTCANON = Path(__file__).resolve().parent / "StmtCanon.lean"
 DIAG_RE = re.compile(r"^(error|warning): (?:\./)?(\S+?\.lean)(?::(\d+):(\d+))?: ?(.*)$")
@@ -133,7 +133,7 @@ def fresh_copy(src: Path, dest: Path) -> None:
 def snapshot(cfg: dict, tree: Path, *, clean: bool = False, apply_diff: Path | None = None,
              workdir: Path | None = None, log: Path | None = None) -> dict:
     t0 = time.time()
-    result: dict = {"format": 1, "target": cfg["name"], "clean": clean}
+    result: dict = {"format": 1, "gate_version": version(), "target": cfg["name"], "clean": clean}
     if apply_diff is not None:
         if workdir is None:
             raise ValueError("--apply needs --workdir")
