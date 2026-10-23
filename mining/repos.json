@@ -1,0 +1,109 @@
+{
+  "_doc": "Per-repo layout for mine_history.py and replay_case.py. Paths and globs are relative to the repo root; globs use fnmatch semantics ('*' also matches '/'). Omitted keys take the defaults in mine_history.CONFIG_DEFAULTS. Validate an entry with: python3 mining/mine_history.py --config NAME --repo PATH --check",
+  "dalek-lean-verify": {
+    "github": "Beneficial-AI-Foundation/curve25519-dalek-lean-verify",
+    "rev": "origin/master",
+    "extraction": [
+      "Curve25519Dalek/Funs.lean",
+      "Curve25519Dalek/Types.lean"
+    ],
+    "external": [
+      "Curve25519Dalek/FunsExternal.lean",
+      "Curve25519Dalek/TypesExternal.lean"
+    ],
+    "extraction_config": [
+      "aeneas-config.yml",
+      "functions.json",
+      ".github/workflows/aeneas-extract.yml"
+    ],
+    "rust": [
+      "curve25519-dalek/*.rs",
+      "curve25519-dalek/*Cargo.toml",
+      "src-modifications.diff"
+    ],
+    "proof_roots": [
+      "Curve25519Dalek/"
+    ],
+    "_notes": "Utils/ is the repo's status-sync tooling and is not part of the default build, so it is not a proof root."
+  },
+  "dalek-u32": {
+    "github": "Beneficial-AI-Foundation/curve25519-dalek-u32",
+    "rev": "origin/main",
+    "extraction": [
+      "curve25519-dalek/translated/Funs.lean",
+      "curve25519-dalek/translated/Types.lean"
+    ],
+    "external": [
+      "curve25519-dalek/translated/FunsExternal.lean",
+      "curve25519-dalek/translated/TypesExternal.lean"
+    ],
+    "extraction_config": [
+      "aeneas-config.yml",
+      "curve25519-dalek/translated/*_Template.lean",
+      ".github/workflows/aeneas.yml"
+    ],
+    "rust": [
+      "curve25519-dalek/src/*.rs",
+      "curve25519-dalek/Cargo.toml"
+    ],
+    "proof_roots": [
+      "Dalek32/"
+    ],
+    "_notes": "The extraction is lean_lib 'translated' with srcDir 'curve25519-dalek', so its modules are translated.*, not curve25519-dalek.translated.*."
+  },
+  "spqr": {
+    "github": "Beneficial-AI-Foundation/SparsePostQuantumRatchet-verify",
+    "rev": "origin/main",
+    "extraction": [
+      "SrcTranslated/Funs.lean",
+      "SrcTranslated/Types.lean"
+    ],
+    "external": [
+      "SrcTranslated/FunsExternal.lean",
+      "SrcTranslated/TypesExternal.lean"
+    ],
+    "extraction_config": [
+      "aeneas-config.yml",
+      "translation-patches/*",
+      ".github/workflows/aeneas.yml"
+    ],
+    "rust": [
+      "src/*.rs",
+      "Cargo.toml"
+    ],
+    "proof_roots": [
+      "Spqr/"
+    ],
+    "_notes": "proofs/ holds F* proofs and is ignored. Rust also changes through upstream Signal merges."
+  },
+  "symcrypt": {
+    "github": "microsoft/SymCrypt",
+    "rev": "origin/feature/verifiedcrypto",
+    "lean_root": "SymCRust/lean",
+    "extraction": [
+      "SymCRust/lean/Symcrust/Code/Funs.lean",
+      "SymCRust/lean/Symcrust/Code/Types.lean"
+    ],
+    "external": [
+      "SymCRust/lean/Symcrust/Code/FunsExternal.lean",
+      "SymCRust/lean/Symcrust/Code/TypesExternal.lean"
+    ],
+    "extraction_config": [
+      "SymCRust/lean/Symcrust/Code/*_Template.lean"
+    ],
+    "rust": [
+      "SymCRust/src/*.rs",
+      "SymCRust/Cargo.toml"
+    ],
+    "proof_roots": [
+      "SymCRust/lean/Symcrust/Properties/",
+      "SymCRust/lean/Spec/",
+      "SymCRust/lean/Intrinsics/"
+    ],
+    "aeneas_pin": {
+      "file": "SymCRust/lean/Symcrust/Code/EXTRACTION.md",
+      "regex": "^aeneas\\s*:.*@\\s*([0-9a-f]{7,40})"
+    },
+    "_notes": "Aeneas is a path dependency (../../../aeneas/backends/lean); its commit is recorded in Code/EXTRACTION.md. Replaying needs an Aeneas checkout at that path (not yet supported by replay_case.py)."
+  }
+}

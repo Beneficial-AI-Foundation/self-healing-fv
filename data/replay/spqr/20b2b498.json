@@ -1,0 +1,135 @@
+{
+ "case_id": "spqr/20b2b498",
+ "change_pr_url": "https://github.com/Beneficial-AI-Foundation/SparsePostQuantumRatchet-verify/pull/359",
+ "replayed_at": "2026-10-23T08:18:17+00:00",
+ "machine": {
+  "cpus": 18
+ },
+ "timing": {
+  "export_s": 0.1,
+  "base_fixed_wall_s": 301,
+  "broken_setup_s": 20.7,
+  "broken_rounds_s": 17,
+  "total_s": 338
+ },
+ "fixed": {
+  "ok": true,
+  "stage": "build",
+  "timings": {
+   "seed_s": 82.3,
+   "cache_lock_wait_s": 16.2,
+   "cache_get_s": 13,
+   "build_s": 189,
+   "store_s": 0.1
+  },
+  "reuse": {
+   "packages_reused": [
+    "aeneas",
+    "mathlib",
+    "plausible",
+    "LeanSearchClient",
+    "importGraph",
+    "proofwidgets",
+    "aesop",
+    "Qq",
+    "batteries",
+    "Cli"
+   ],
+   "packages_fetched": [],
+   "project_build_seeded_from": null
+  },
+  "orphaned_pins": [],
+  "jobs": 2430,
+  "errors": [],
+  "tail": ""
+ },
+ "base": {
+  "ok": true,
+  "stage": "build",
+  "timings": {
+   "seed_s": 82.2,
+   "cache_lock_wait_s": 0.0,
+   "cache_get_s": 16,
+   "build_s": 199,
+   "store_s": 0.6
+  },
+  "reuse": {
+   "packages_reused": [
+    "mathlib",
+    "plausible",
+    "LeanSearchClient",
+    "importGraph",
+    "proofwidgets",
+    "aesop",
+    "Qq",
+    "batteries",
+    "Cli"
+   ],
+   "packages_fetched": [
+    "aeneas"
+   ],
+   "project_build_seeded_from": null
+  },
+  "orphaned_pins": [],
+  "jobs": 2429,
+  "errors": [],
+  "tail": ""
+ },
+ "overlay": [
+  "aeneas-config.yml",
+  "lake-manifest.json",
+  "lakefile.toml"
+ ],
+ "external_models_overlaid": [],
+ "extraction_errors": [],
+ "broken_rounds": [
+  {
+   "round": 1,
+   "ok": false,
+   "errors_n": 1,
+   "build_s": 12,
+   "jobs": 2430
+  },
+  {
+   "round": 2,
+   "ok": true,
+   "errors_n": 0,
+   "build_s": 5,
+   "jobs": 2430
+  }
+ ],
+ "broken_green_after_sorry": true,
+ "broken_proofs": [
+  "Spqr/Specs/Authenticator/Serialize/Authenticator/FromPb.lean::from_pb_spec"
+ ],
+ "broken_proofs_detail": [
+  {
+   "file": "Spqr/Specs/Authenticator/Serialize/Authenticator/FromPb.lean",
+   "line": 35,
+   "decl": "from_pb_spec",
+   "where": "body",
+   "kind": "unsolved-goals",
+   "msg": "unsolved goals\npb : proto.pq_ratchet.Authenticator\n⊢ (do\n      let v ← Slice.clone (liftFun1 core.clone.impls.CloneU8.clone) pb.root_key\n      let v1 ← Slice.clone (liftFun1 core.clone.impls.CloneU8.clone) pb.mac_key\n      Result.ok { root_key := v, mac_key := v1 }) ⦃\n    result => result.root_key = pb.root_key ∧ result.mac_key = pb.mac_key ⦄",
+   "round": 1,
+   "decl_kind": "theorem"
+  }
+ ],
+ "statement_errors": [],
+ "cascades": [],
+ "header_errors": [],
+ "statement_broken": [],
+ "needs_statement_change": false,
+ "file_errors": [],
+ "blocked_modules": [],
+ "blocked_files": [],
+ "comparison": {
+  "predicted_n": 1,
+  "actual_n": 1,
+  "true_positive": [
+   "Spqr/Specs/Authenticator/Serialize/Authenticator/FromPb.lean::from_pb_spec"
+  ],
+  "false_positive": [],
+  "false_negative": []
+ },
+ "verdict": "break confirmed"
+}

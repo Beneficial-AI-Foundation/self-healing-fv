@@ -1,0 +1,10 @@
+{
+ "case_id": "symcrypt/c2e575ac",
+ "change_pr_url": null,
+ "replayed_at": "2026-10-23T08:18:07+00:00",
+ "machine": {
+  "cpus": 18
+ },
+ "timing": {},
+ "verdict": "unsupported: path dependencies ['aeneas (../../../aeneas/backends/lean)'] (needs a local checkout)"
+}

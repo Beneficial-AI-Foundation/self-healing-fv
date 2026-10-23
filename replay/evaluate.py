@@ -59,17 +59,19 @@ def main() -> int:
             continue
         pred = set(rec["broken_theorems_heuristic"])
         act = actual_broken(res)
-        # Status unknown: modules that import a failing module, and failing modules themselves.
-        blocked = set(res["blocked_modules"]) | {e["file"][:-len(".lean")].replace("/", ".")
-                                                 for e in res["file_errors"] + res.get("header_errors", [])}
-        mod = lambda k: k.split("::")[0][:-len(".lean")].replace("/", ".")
+        # Status unknown: files that import a failing module, and failing files themselves.
+        # Compare by repo-relative file. Results before `blocked_files` existed used modules
+        # equal to file paths (true for dalek-lean-verify), so convert those back.
+        mod = lambda k: k.split("::")[0]
+        blocked = set(res.get("blocked_files") or [m.replace(".", "/") + ".lean" for m in res["blocked_modules"]])
+        blocked |= {e["file"] for e in res["file_errors"] + res.get("header_errors", [])}
         unknown = {p for p in pred - act if mod(p) in blocked}
         # Edited by the human only because a statement they changed (in the same module) forced it.
         stmt_mods = {mod(k) for k in statement_broken(res)}
         conseq = {p for p in pred - act - unknown if mod(p) in stmt_mods}
         # Proof breaks the human never touched, in a module with a file-level error (e.g. an
         # unknown attribute): the human fixed the file-level cause and these followed.
-        file_err_mods = {e["file"][:-len(".lean")].replace("/", ".") for e in res["file_errors"]}
+        file_err_mods = {e["file"] for e in res["file_errors"]}
         # Same for breaks in a module with a statement-broken declaration they depend on (#764).
         cascade = {a for a in act - pred if mod(a) in file_err_mods | stmt_mods and a not in statement_broken(res)}
         tp, fp, fn = pred & act, pred - act - unknown - conseq, act - pred - cascade
