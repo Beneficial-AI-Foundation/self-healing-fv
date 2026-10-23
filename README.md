@@ -20,6 +20,8 @@ Design: [docs/DESIGN.md](docs/DESIGN.md).
 
 ## Prototype: replay a historical case
 
+Full guide: [docs/CLI.md](docs/CLI.md).
+
 ```
 uv run shfv repair --case dalek-lean-verify/e65b46d0 --agent claude-code [--model claude-sonnet-5-5]
 ```
