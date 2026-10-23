@@ -131,9 +131,11 @@ class Store:
     @staticmethod
     def manifest(d: Path) -> list[tuple[str, str]]:
         try:
-            return [(p["name"], p["rev"]) for p in json.loads((d / "lake-manifest.json").read_text())["packages"]]
+            packages = json.loads((d / "lake-manifest.json").read_text())["packages"]
         except (OSError, KeyError, json.JSONDecodeError):
             return []
+        # Path dependencies (e.g. SymCrypt's Aeneas) have no rev and cannot be stored by rev.
+        return [(p["name"], p["rev"]) for p in packages if p.get("rev")]
 
     def nearest_build(self, sha: str) -> str | None:
         best = None

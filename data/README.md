@@ -24,5 +24,8 @@ python3 replay/evaluate.py --cases data/mined/dalek-lean-verify.jsonl --results 
 ## Sources
 
 - [curve25519-dalek-lean-verify](https://github.com/Beneficial-AI-Foundation/curve25519-dalek-lean-verify) (public), `master` as of 2026-09-29: 39 mined commits, 17 replayed (15 confirmed breaks).
+- [SparsePostQuantumRatchet-verify](https://github.com/Beneficial-AI-Foundation/SparsePostQuantumRatchet-verify), `main` as of 2026-10-22: 22 mined commits (10 likely breaks), 1 replayed (#359, confirmed).
+- [curve25519-dalek-u32](https://github.com/Beneficial-AI-Foundation/curve25519-dalek-u32), `main`: 3 mined commits, no likely breaks yet (41 commits of history).
+- [SymCrypt](https://github.com/microsoft/SymCrypt) `feature/verifiedcrypto`: 3 mined commits; the Lean project was published in one commit, so there is no break history. Replay reports "unsupported" (Aeneas is a path dependency). Held-out cases are generated instead: see `docs/experiments/symcrypt-aeneas-upgrade.md`.
 
 Records quote theorem statements, error messages, and commit subjects from the source repo.
