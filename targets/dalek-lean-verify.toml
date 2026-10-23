@@ -1,0 +1,32 @@
+# Target config for curve25519-dalek-lean-verify (DESIGN.md §3.5).
+# The [lean] and [protected] sections are read by the gate; [agent] and [budget] by the pipeline.
+
+name = "dalek-lean-verify"
+github = "Beneficial-AI-Foundation/curve25519-dalek-lean-verify"
+
+[lean]
+# Modules `lake build` must build (the required targets, G3), and the roots of the audited
+# module inventory: every project module they import, except extracted code, is frozen (§4.2).
+build_targets = ["Curve25519Dalek"]
+root_modules = ["Curve25519Dalek"]
+source_roots = ["Curve25519Dalek/"]
+lean_num_threads = 8
+
+[protected]
+# Files the candidate diff may not touch at all (§4.2).
+extracted = ["Curve25519Dalek/Funs.lean", "Curve25519Dalek/Types.lean"]
+trusted_models = ["Curve25519Dalek/FunsExternal.lean", "Curve25519Dalek/TypesExternal.lean"]
+build_config = ["lakefile.toml", "lakefile.lean", "lean-toolchain", "lake-manifest.json",
+                "aeneas-config.yml", "functions.json", ".github/"]
+
+[agent]
+adapter = "claude-code"
+model = "claude-opus-5-5"
+
+[budget]
+# Prototype caps. Defaults are to be set from pilot runs (§3.3 S4, §8.5); these are guesses.
+per_theorem_usd = 5.0
+per_theorem_minutes = 25
+per_theorem_turns = 80
+per_run_usd = 20.0
+per_run_minutes = 120
