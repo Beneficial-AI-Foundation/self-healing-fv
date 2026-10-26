@@ -42,7 +42,8 @@ user-facing declarations are audited (auxiliaries such as `proof_N`, `match_N`, 
 instance helpers are dropped; `_private` names are kept). Emits one JSON line per declaration:
 
   { "name", "kind", "module",
-    "canon":      canonical α-invariant dump of the elaborated type (authoritative),
+    "written":    whether the declaration has a source range (false: added by a tactic),
+    "canon":     canonical α-invariant dump of the elaborated type (authoritative),
     "body_canon": definitions only: canonical dump of the value and of its auxiliary definitions,
     "pp", "pp_body": pretty-printed type / value (display only),
     "axioms":     axiom closure,
@@ -315,6 +316,9 @@ def auditDecl (audited : Std.HashSet Name) (declName : Name) (reference := false
     let mut fields : List (String × Json) := [
       ("name", toString declName), ("found", true),
       ("kind", kindOf ci), ("module", moduleOf env declName),
+      -- false for declarations a tactic adds while a proof elaborates (e.g. `bv_decide`'s
+      -- `PUnit.enumToBitVec`): they have no source range, and vanish when that proof is stubbed
+      ("written", Json.bool (declRangeExt.find? env declName).isSome),
       ("canon", canonDump ci.type), ("pp", truncate (toString pp)),
       ("axioms", namesJson info.axioms),
       ("sorry_sources", namesJson (roots info.sorries)),

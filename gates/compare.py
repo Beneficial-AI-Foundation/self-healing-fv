@@ -99,7 +99,11 @@ def compare(cfg: dict, base: dict, broken: dict, cand: dict, diff: str) -> dict:
             unavailable.append(f"broken theorem {b['key']} ({b['file']}) has no base record")
 
     # --- eligibility (§3.3 S2): every frozen declaration observed in the stubbed broken state.
-    inventory_ = {n: r for n, r in base["records"].items() if "error" not in r}
+    # A declaration a tactic added while a base proof elaborated (no source range, e.g. bv_decide's
+    # `PUnit.enumToBitVec`) disappears when that proof is stubbed; it was never written, so it is
+    # not frozen. Anything written stays frozen, and a missing one still makes the case ineligible.
+    generated = sorted(n for n, r in base["records"].items() if r.get("written") is False and n not in broken["records"])
+    inventory_ = {n: r for n, r in base["records"].items() if "error" not in r and n not in generated}
     unobserved = []
     for name, r in inventory_.items():
         status = broken["modules"].get(r["module"], "missing")
@@ -130,7 +134,7 @@ def compare(cfg: dict, base: dict, broken: dict, cand: dict, diff: str) -> dict:
             v1.append(e)
     checks["G1"] = {"id": "G1", "ok": not v1 and eligible, "violations": v1,
                     "info": {"inventory": len(inventory_), "unobserved": unobserved[:200],
-                             "unobserved_n": len(unobserved)}}
+                             "unobserved_n": len(unobserved), "generated_not_frozen": generated[:200]}}
 
     # --- G2 trust base.
     v2, inherited = [], {}

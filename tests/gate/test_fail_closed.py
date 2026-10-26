@@ -61,6 +61,24 @@ def test_no_kernel_replay_means_no_decision():
     assert v["verdict"] == "gate-unavailable" and any("could not run" in u for u in v["unavailable"])
 
 
+def test_tactic_generated_declaration_gone_from_the_stub_is_not_frozen():
+    """dalek PR 734: `bv_decide` in the base proof of a broken theorem adds `PUnit.enumToBitVec`
+    (no source range); stubbing that proof removes it, which must not make the case ineligible."""
+    base, broken, cand, diff = case()
+    base["records"]["PUnit.enumToBitVec"] = {**rec(BASE3), "kind": "def", "written": False}
+    v = verdict(base, broken, cand, diff)
+    assert v["verdict"] == "accepted" and v["eligible"], v
+    assert v["checks"]["G1"]["info"]["generated_not_frozen"] == ["PUnit.enumToBitVec"]
+
+
+def test_written_declaration_gone_from_the_stub_is_still_ineligible():
+    base, broken, cand, diff = case()
+    base["records"]["U"] = {**rec(BASE3), "written": True}
+    base["sources"]["M.lean"] += "theorem U : True := trivial\n"
+    v = verdict(base, broken, cand, diff)
+    assert v["verdict"] != "accepted" and not v["eligible"]
+
+
 def test_definite_failure_without_kernel_replay_is_a_rejection():
     base, broken, cand, diff = case(cand_axioms=BASE3 + ["sorryAx"])
     cand["kernel_replay"] = {"ran": False, "error": "no checker for this toolchain", "modules": {}}

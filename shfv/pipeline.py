@@ -537,7 +537,12 @@ class Run:
             gate("scope", "--config", str(self.config), "--base", str(B), "--broken", str(K), "--diff", str(empty),
                  "--out", str(self.scratch / "broken-set.json"), check=True)
             broken = json.loads((self.scratch / "broken-set.json").read_text())["info"]["broken_set"]
-            observed = sum(1 for n, rec in Bj["records"].items() if n in Kj["records"])
+            # Mirrors the gate's eligibility rule (gates/compare.py), which decides: tactic-added
+            # declarations a stub removed are not frozen; any other missing one makes the case ineligible.
+            frozen = {n: r for n, r in Bj["records"].items() if "error" not in r
+                      and not (r.get("written") is False and n not in Kj["records"])}
+            observed = sum(1 for n in frozen if n in Kj["records"] and "error" not in Kj["records"][n])
+            missing_frozen = sorted(n for n in frozen if n not in Kj["records"] or "error" in Kj["records"][n])
             stmt_broken = []
             for key in self.replay.get("statement_broken", []):
                 f, name = key.split("::", 1)
@@ -555,10 +560,11 @@ class Run:
             sb = {(x["file"], x["key"]) for x in stmt_broken}
             broken = [b for b in broken if (b["file"], b["key"]) not in sb]
             report["broken"] = {"proofs": [b["name"] for b in broken], "statements": [s["name"] for s in stmt_broken],
-                                "frozen_inventory": len(Bj["records"]), "observed_in_broken": observed,
-                                "unobserved_modules": [m for m, s in Kj["modules"].items() if s != "observed"]}
+                                "frozen_inventory": len(frozen), "observed_in_broken": observed,
+                                "unobserved_modules": [m for m, s in Kj["modules"].items() if s != "observed"],
+                                "missing_frozen": missing_frozen[:200]}
             self.p.step(f"{len(broken)} proof(s) broken, {len(stmt_broken)} statement(s) no longer type-check · "
-                        f"frozen declarations observed in broken state: {observed}/{len(Bj['records'])}",
+                        f"frozen declarations observed in broken state: {observed}/{len(frozen)}",
                         took=self.timing["snapshots_s"] + self.timing["prepare_s"])
             ordered = leaves_first(broken, Bj["records"])
             targets = ordered
@@ -577,18 +583,19 @@ class Run:
                         report["repairs"].append({"theorem": b["name"], "file": b["file"], "decl": b["key"],
                                                   "attempts": [], "outcome": "blocked-on",
                                                   "reason": "case is ineligible: a statement must change first"})
-            elif report["broken"]["unobserved_modules"] and not self.attempt_anyway:
+            elif (report["broken"]["unobserved_modules"] or missing_frozen) and not self.attempt_anyway:
                 # Ineligible (§3.3 S2): modules of the broken state cannot be checked (file-level errors,
-                # e.g. a removed import), so under complete-case acceptance nothing could be accepted.
-                # Spend nothing on repairs; the report shows which modules and why.
+                # e.g. a removed import) or frozen declarations are missing from it, so under complete-case
+                # acceptance nothing could be accepted. Spend nothing on repairs; the report says why.
                 bad = report["broken"]["unobserved_modules"]
-                self.p.step(f"ineligible: {len(bad)} module(s) of the broken state cannot be checked, e.g. {bad[0]}; "
-                            "no repair attempted")
+                why = (f"{len(bad)} module(s) of the broken state cannot be checked (e.g. {bad[0]})" if bad else
+                       f"{len(missing_frozen)} frozen declaration(s) are missing from the broken state "
+                       f"(e.g. {missing_frozen[0]})")
+                self.p.step(f"ineligible: {why}; no repair attempted")
                 for b in ordered:
                     report["repairs"].append({"theorem": b["name"], "file": b["file"], "decl": b["key"],
                                               "attempts": [], "outcome": "blocked-on",
-                                              "reason": f"case is ineligible: {len(bad)} module(s) of the broken state "
-                                                        f"cannot be checked (e.g. {bad[0]})"})
+                                              "reason": f"case is ineligible: {why}"})
                 targets = []
             t0 = time.time()
             if targets:
