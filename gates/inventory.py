@@ -33,14 +33,24 @@ def source_theorems(text: str) -> list[tuple[str, bool]]:
 
 
 def missing(snapshot: dict) -> tuple[int, list[str]]:
-    """(number of source theorems, those without a record in the snapshot's own module)."""
+    """(number of source theorems, those without a record in their own module).
+
+    A name written in more than one source file (seen in dalek PR 535: the same lemma in
+    FromBytes.lean and Pow2K.lean) resolves to one constant when both modules load into one
+    environment, and its record carries only one of the modules. Such a name counts as recorded
+    if its record belongs to any of the files that declare it."""
     records = snapshot.get("records", {})
-    n, out = 0, []
+    found: list[tuple[str, str, bool]] = []
+    declared_in: dict[str, set[str]] = {}
     for path, text in snapshot.get("sources", {}).items():
         mod = path[:-len(".lean")].replace("/", ".")
         for full, private in source_theorems(text):
-            n += 1
-            names = [full] + ([f"_private.{mod}.0.{full}"] if private else [])
-            if not any(c in records and records[c].get("module") == mod for c in names):
-                out.append(f"{mod}: {full}")
-    return n, out
+            found.append((mod, full, private))
+            declared_in.setdefault(full, set()).add(mod)
+    out = []
+    for mod, full, private in found:
+        names = [full] + ([f"_private.{mod}.0.{full}"] if private else [])
+        ok_mods = declared_in[full] if len(declared_in[full]) > 1 else {mod}
+        if not any(c in records and records[c].get("module") in ok_mods for c in names):
+            out.append(f"{mod}: {full}")
+    return len(found), out

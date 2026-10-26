@@ -26,6 +26,13 @@ def test_every_source_theorem_is_frozen_toy(toy_tree):
     assert n == 7 and not missing, missing  # includes a private theorem and one in a namespace
 
 
+def test_name_declared_in_two_files_counts_once_recorded():
+    snap = {"records": {"A.t": {"module": "M"}},
+            "sources": {"M.lean": "namespace A\ntheorem t : True := trivial\nend A\n",
+                        "N.lean": "namespace A\ntheorem t : True := trivial\nend A\n"}}
+    assert inventory.missing(snap) == (2, [])
+
+
 def test_missing_record_is_reported():
     snap = {"records": {"A.t": {"module": "M"}},
             "sources": {"M.lean": "namespace A\ntheorem t : True := trivial\ntheorem u : True := trivial\nend A\n"}}
