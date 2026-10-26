@@ -157,8 +157,11 @@ def fresh_copy(src: Path, dest: Path, project: str = "") -> None:
     if r.returncode != 0:
         shutil.copytree(src, dest, symlinks=True, ignore=shutil.ignore_patterns(".git"))
     shutil.rmtree(dest / project / ".lake" / "build", ignore_errors=True)
-    for g in dest.rglob(".git"):
-        if g.is_dir():
+    # Drop the workspace's own git metadata, but keep the dependency packages' (.lake/packages/*):
+    # Lake checks each package's checked-out revision against the manifest, and without .git it
+    # re-fetches and rebuilds every dependency (Mathlib from source).
+    for g in list(dest.rglob(".git")):
+        if g.is_dir() and ".lake" not in g.relative_to(dest).parts:
             shutil.rmtree(g, ignore_errors=True)
 
 
