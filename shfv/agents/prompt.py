@@ -5,6 +5,42 @@ from .base import RepairTask
 
 GIVE_UP = "GIVE UP:"
 
+# The agent's final report (Dana's review note 1; DESIGN.md §7.4, after Maestro's "report why you
+# failed"). Advisory model output: it explains escalations and detects give-ups, never decides.
+DIAGNOSIS_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "outcome": {"type": "string", "enum": ["repaired", "gave-up"]},
+        "summary": {"type": "string", "description": "What broke and what you changed, in two or three sentences."},
+        "failure_scope": {"type": "string", "enum": ["none", "local", "global"],
+                          "description": "none if repaired; local: a missing lemma or step; global: a fundamental barrier."},
+        "suspects_statement": {"type": "boolean",
+                               "description": "true if you believe the statement is no longer true as written."},
+        "statement_doubt": {"type": "string", "description": "Why you suspect the statement, or an empty string."},
+        "helpers_added": {"type": "array", "items": {"type": "string"}},
+    },
+    "required": ["outcome", "summary", "failure_scope", "suspects_statement", "statement_doubt", "helpers_added"],
+    "additionalProperties": False,
+}
+
+
+def validate_diagnosis(d) -> dict | None:
+    """The diagnosis if it matches DIAGNOSIS_SCHEMA, else None ("no diagnosis"; never breaks a run)."""
+    if not isinstance(d, dict) or set(d) != set(DIAGNOSIS_SCHEMA["required"]):
+        return None
+    props = DIAGNOSIS_SCHEMA["properties"]
+    for k, spec in props.items():
+        v = d[k]
+        if spec["type"] == "string" and not isinstance(v, str):
+            return None
+        if spec["type"] == "boolean" and not isinstance(v, bool):
+            return None
+        if spec["type"] == "array" and not (isinstance(v, list) and all(isinstance(x, str) for x in v)):
+            return None
+        if "enum" in spec and v not in spec["enum"]:
+            return None
+    return d
+
 
 def build_prompt(task: RepairTask) -> str:
     errors = "\n\n".join(e.strip() for e in task.errors) or "(no error text recorded)"
@@ -24,6 +60,11 @@ def build_prompt(task: RepairTask) -> str:
         context = (f"\nRead-only context for this change is in `{task.context_dir}` "
                    "(for example `extraction.diff`: how the extracted Lean code changed).\n")
     module = task.file[:-len(".lean")].replace("/", ".")
+    ending = ("Then report the outcome in the structured output: whether you repaired it or gave up, what "
+              "broke and what you changed, whether a failure is local or global, whether you suspect the "
+              "statement itself, and any helper lemmas you added." if task.structured else
+              f"End your reply with two or three sentences: what broke and what you changed. If you gave up, "
+              f"end with a line starting `{GIVE_UP}` and the reason.")
     return f"""You are repairing a Lean 4 proof in a verified-Rust project (Rust → Charon/Aeneas → Lean).
 The upstream change {task.trigger} (cause: {task.cause}) broke the proof of one theorem.
 The working directory is the project, on toolchain {task.toolchain}, with Mathlib and Aeneas.
@@ -49,8 +90,7 @@ Rules. They are checked mechanically afterwards, and any violation rejects the w
 - Do not edit any other file: not the extracted code (`Funs.lean`, `Types.lean`), the external
   models, the lakefile, the toolchain or the manifest.
 - If you conclude that the statement can no longer be proved as written, do not change it.
-  Stop, and end your reply with a line starting `{GIVE_UP}` and the reason.
+  Stop and report that you gave up, and why.
 
-When you are done, make sure `{task.file}` builds with no errors. End your reply with two or
-three sentences: what broke and what you changed.
+When you are done, make sure `{task.file}` builds with no errors. {ending}
 """

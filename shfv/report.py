@@ -301,6 +301,13 @@ def render(r: dict) -> str:
         for a in e.get("attempts", []):
             out.append(f"- attempt: {a['adapter']} `{a['model']}`, stopped: {a['stop']}, {a['turns']} turns, "
                        f"{usd(a.get('cost_usd'))}, {fmt_s(a['seconds'])}")
+            d = a.get("diagnosis")
+            if d and d.get("outcome") == "gave-up":
+                out.append(f"  - the agent's diagnosis (model output, advisory): failure `{d['failure_scope']}`"
+                           + (", **suspects the statement itself**" if d.get("suspects_statement") else ""))
+                if d.get("suspects_statement") and d.get("statement_doubt"):
+                    out.append("")
+                    out.append(untrusted(d["statement_doubt"], limit=800))
         out.append("")
 
     g = r.get("gate")

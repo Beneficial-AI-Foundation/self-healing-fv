@@ -26,6 +26,7 @@ class RepairTask:
     repaired_before: list[str] = field(default_factory=list)  # broken theorems already repaired in this run
     context_dir: Path | None = None  # read-only extra context (e.g. extraction diff)
     lsp_tools: bool = True    # whether the adapter gives the agent Lean language-server tools
+    structured: bool = False  # whether the adapter returns the structured diagnosis (prompt.DIAGNOSIS_SCHEMA)
 
 
 @dataclass
@@ -50,6 +51,7 @@ class Attempt:
     turns: int = 0
     seconds: float = 0.0
     final_message: str = ""   # model output: advisory only, never decides anything (§5.4)
+    diagnosis: dict | None = None  # validated structured report (§7.4), advisory; None if absent or invalid
     transcript: str | None = None
     error: str | None = None
 

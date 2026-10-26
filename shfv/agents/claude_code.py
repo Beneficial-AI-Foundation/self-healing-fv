@@ -18,7 +18,7 @@ from pathlib import Path
 
 from .. import costs
 from .base import Attempt, Budget, Progress, RepairTask
-from .prompt import GIVE_UP, build_prompt
+from .prompt import DIAGNOSIS_SCHEMA, GIVE_UP, build_prompt, validate_diagnosis
 
 LEAN_LSP_MCP = "lean-lsp-mcp@0.31.0"  # pinned (review finding 16); `shfv doctor` checks it starts
 LSP_TOOLS = [  # local tools only: remote search (leansearch, loogle, leanfinder, hammer) stays off (§7.3)
@@ -26,7 +26,7 @@ LSP_TOOLS = [  # local tools only: remote search (leansearch, loogle, leanfinder
     "lean_local_search", "lean_file_outline", "lean_declaration_file", "lean_completions",
     "lean_code_actions", "lean_references", "lean_run_code",
 ]
-ALLOWED = ["Read", "Edit", "MultiEdit", "Grep", "Glob", "TodoWrite",
+ALLOWED = ["Read", "Edit", "MultiEdit", "Grep", "Glob", "TodoWrite", "StructuredOutput",
            "Bash(lake build:*)", "Bash(lake env lean:*)"] + [f"mcp__lean-lsp__{t}" for t in LSP_TOOLS]
 DISALLOWED = ["WebFetch", "WebSearch", "Task", "Agent", "Write", "NotebookEdit",
               "mcp__lean-lsp__lean_build", "mcp__lean-lsp__lean_leansearch", "mcp__lean-lsp__lean_loogle",
@@ -80,6 +80,8 @@ class ClaudeCode:
             cmd += ["--max-budget-usd", f"{budget.usd:.2f}"]
         if task.context_dir:
             cmd += ["--add-dir", str(task.context_dir)]
+        if task.structured:
+            cmd += ["--json-schema", json.dumps(DIAGNOSIS_SCHEMA)]
         transcript = log_dir / "transcript.jsonl"
         att = Attempt(adapter=self.name, model=self.model, theorem=task.theorem, transcript=str(transcript))
         t0 = time.time()
@@ -131,10 +133,12 @@ class ClaudeCode:
                 att.reported_cost_usd = float(result["total_cost_usd"])
             att.resolved_model = att.resolved_model or next(iter(result.get("modelUsage") or {}), None)
             att.turns = int(result.get("num_turns") or turns)
-            att.final_message = (result.get("result") or "").strip()
+            att.diagnosis = validate_diagnosis(result.get("structured_output"))
+            att.final_message = (att.diagnosis or {}).get("summary") or (result.get("result") or "").strip()
             att.stop = STOPS.get(result.get("subtype"), "error")
-            if att.stop == "done" and GIVE_UP in att.final_message:
-                att.stop = "gave-up"
+            if att.stop == "done":
+                gave_up = att.diagnosis["outcome"] == "gave-up" if att.diagnosis else GIVE_UP in att.final_message
+                att.stop = "gave-up" if gave_up else "done"
         elif per_call:
             # Killed before the final usage report: sum what each API call reported. Input and cache
             # counts are exact per call; output counts are not final, so this is a lower bound.

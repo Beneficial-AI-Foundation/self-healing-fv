@@ -194,6 +194,7 @@ class Run:
         deps = broken_deps([b for b in broken if b.get("name")], base_records)
         repaired: list[str] = []
         lsp = bool(getattr(self.agent, "capabilities", {}).get("lsp_tools"))
+        structured = bool(getattr(self.agent, "capabilities", {}).get("structured_output"))
         for i, b in enumerate(broken, 1):
             key = f"{b['file']}::{b['key']}"
             src = (cand / b["file"]).read_text()
@@ -224,7 +225,8 @@ class Run:
                               cause=", ".join(self.record.get("causes") or [self.record["cause"]]) + pin_summary(self.record),
                               trigger=trigger, toolchain=toolchain,
                               still_stubbed=[o["key"] for o in broken[i:]],
-                              repaired_before=[short(r) for r in repaired], context_dir=ctx, lsp_tools=lsp)
+                              repaired_before=[short(r) for r in repaired], context_dir=ctx, lsp_tools=lsp,
+                              structured=structured)
             budget = Budget(usd=None if remaining_usd is None else min(bud["per_theorem_usd"], remaining_usd),
                             minutes=min(bud["per_theorem_minutes"], remaining_min), turns=bud["per_theorem_turns"])
             self.p.step(f"[{i}/{len(broken)}] {b['key']} → agent attempt 1 ({self.agent.name}, {self.agent.model})")
