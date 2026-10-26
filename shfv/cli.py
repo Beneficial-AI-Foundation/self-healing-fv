@@ -86,7 +86,7 @@ def write_index(to: Path) -> None:
                      f"| [PR {inp.get('change_pr')}]({inp.get('change_pr_url')}) `{m['case_id'].split('/')[1]}` "
                      f"| [{m['started_at'][:16].replace('T', ' ')} UTC]({f.parent.name}/{f.stem}.md) "
                      f"| `{provenance.short(p['tool'])}` | `{p['gate_version'][:7]}` | `{p['agent']['model']}` "
-                     f"| {m['verdict']} | {n_ok}/{len(m['outcomes'])} | ${t.get('cost_usd', 0):.2f} |"))
+                     f"| {m['verdict']} | {n_ok}/{len(m['outcomes'])} | {report_mod.usd(t.get('cost_usd'))} |"))
     lines = ["# Example reports", "",
              "PR comments the bot produced on historical cases (`shfv repair`), exported with `shfv export`. "
              "Each row is one run; re-running a case with a newer tool adds a row, so results can be compared "
@@ -151,10 +151,12 @@ def main(argv: list[str] | None = None) -> int:
     for e in rep["repairs"] + rep["escalations"]:
         counts[e.get("outcome")] = counts.get(e.get("outcome"), 0) + 1
     by_outcome = " · ".join(f"{k} {v}" for k, v in sorted(counts.items())) or "nothing to repair"
-    run.p.final(f"{rep['verdict'].upper()} · {by_outcome} · ${t['cost_usd']:.2f} · {fmt_s(t['wall_seconds'])} → "
+    run.p.final(f"{rep['verdict'].upper()} · {by_outcome} · {report_mod.usd(t['cost_usd'])} · {fmt_s(t['wall_seconds'])} → "
                 f"{m.relative_to(ROOT) if m.is_relative_to(ROOT) else m}")
     if "error" in rep:
         print(f"  {rep['error']['outcome']}: {rep['error']['detail'][:500]}", file=sys.stderr)
+    if rep.get("error", {}).get("detail") == "interrupted":
+        return 130
     return 0 if rep["verdict"] != "failed" else 1
 
 

@@ -11,6 +11,8 @@ import json
 import re
 from pathlib import Path
 
+from . import costs
+
 MARKER = "<!-- self-healing-fv:report case={case} -->"
 GITHUB_LIMIT = 60000  # GitHub allows ~65,000 characters per comment (§5.2)
 CHECK_ROWS = [
@@ -38,6 +40,10 @@ def untrusted(text: str, limit: int = 1500) -> str:
     text = text.replace("@", "@​").replace("](", "]​(")
     text = re.sub(r"https?://", lambda m: m.group(0).replace("//", "/​/"), text)
     return "\n".join("> " + line for line in text.splitlines()) or "> (empty)"
+
+
+def usd(x) -> str:
+    return "cost unknown" if x is None else f"${x:.2f}"
 
 
 def fmt_s(s) -> str:
@@ -190,7 +196,8 @@ def render(r: dict) -> str:
     if t.get("attempts"):
         out.append(f"| **Agent** | {r['agent']['adapter']}, `{r['agent']['model']}` · {t['attempts']} attempt"
                    f"{'s' * (t['attempts'] != 1)} · {t['turns']} turns |")
-        out.append(f"| **Cost** | ${t['cost_usd']:.2f} (API-equivalent) · agent {fmt_s(t['agent_seconds'])} · "
+        out.append(f"| **Cost** | {costs.describe(t.get('cost_status', 'computed'), t.get('cost_usd'), r['agent']['model'])}"
+                   f" · agent {fmt_s(t['agent_seconds'])} · "
                    f"whole run {fmt_s(t['wall_seconds'])} |")
     else:
         out.append(f"| **Cost** | $0.00: no agent was run · whole run {fmt_s(t.get('wall_seconds'))} |")
@@ -226,7 +233,7 @@ def render(r: dict) -> str:
         out.append(f"**Why:** {e.get('reason') or OUTCOME_TEXT.get(e['outcome'], '')}.")
         for a in e.get("attempts", []):
             out.append(f"- attempt: {a['adapter']} `{a['model']}`, stopped: {a['stop']}, {a['turns']} turns, "
-                       f"${a['cost_usd']:.2f}, {fmt_s(a['seconds'])}")
+                       f"{usd(a.get('cost_usd'))}, {fmt_s(a['seconds'])}")
         out.append("")
 
     g = r.get("gate")
@@ -256,7 +263,7 @@ def render(r: dict) -> str:
             a = e["attempts"][-1] if e["attempts"] else {}
             out.append(f"| {link(r, e['file'], e.get('line'), short_name(e['theorem']))} | "
                        f"{diff_size(hf.get(e['theorem'], {}).get('bot_diff'))} | "
-                       f"{a.get('turns', 0)} turns · ${a.get('cost_usd', 0):.2f} · {fmt_s(a.get('seconds'))} |")
+                       f"{a.get('turns', 0)} turns · {usd(a.get('cost_usd'))} · {fmt_s(a.get('seconds'))} |")
         out.append("")
     if g and g.get("diff"):
         out.append("<details><summary>The candidate diff (gate input: relative to the stubbed broken state, "
@@ -292,9 +299,12 @@ def render(r: dict) -> str:
                 out.append(fence(f"- {h['statement_before']}\n+ {h['statement_after']}", "diff"))
                 out.append("")
         if hg:
-            mark = "✅ accepted" if hg["verdict"] == "accepted" else "❌ rejected"
+            mark = {"accepted": "✅ accepted", "passed-without-kernel-replay": "🟡 passed every check that ran",
+                    "gate-unavailable": "⚪ could not be checked"}.get(hg["verdict"], "❌ rejected")
             out.append(f"**The gate on the human fix**, as if the bot had proposed it: {mark}"
                        + (f" ({', '.join(hg['failed_checks'])})." if hg["failed_checks"] else "."))
+            for u in hg.get("unavailable", [])[:3]:
+                out.append(f"- {u}")
             out.append("")
             for cid in ("G0", "G1", "G2", "G3"):
                 c = hg["checks"].get(cid)

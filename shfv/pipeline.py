@@ -27,8 +27,10 @@ from datetime import datetime, timezone
 from difflib import SequenceMatcher
 from pathlib import Path
 
+from gates import patch, proc  # the diff format and the bounded-subprocess helper, not gate logic
+
+from . import costs, provenance
 from .agents.base import AgentAdapter, Attempt, Budget, RepairTask
-from . import provenance
 from .progress import Progress
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -43,8 +45,14 @@ class GateUnavailable(Exception):
     pass
 
 
-def gate(*args: str, check: bool = True) -> subprocess.CompletedProcess:
-    p = subprocess.run([sys.executable, "-m", "gates.cli", *args], cwd=ROOT, capture_output=True, text=True)
+GATE_TIMEOUT_S = 4 * 3600  # far above any gate step; the gate bounds its own builds
+
+
+def gate(*args: str, check: bool = True) -> proc.Result:
+    """Call the gate CLI (the only way the pipeline reaches the gate, §4.8), bounded in time."""
+    p = proc.run([sys.executable, "-m", "gates.cli", *args], ROOT, timeout=GATE_TIMEOUT_S)
+    if p.timed_out:
+        raise GateUnavailable(f"gate {args[0]} timed out")
     if check and p.returncode == 2:
         raise GateUnavailable(f"gate {args[0]}: {p.stderr.strip()[-1500:]}")
     return p
@@ -74,10 +82,16 @@ def replace_body(src: str, name: str, body: str) -> str:
     return src[:d["body_start"]] + body + src[d["end"]:]
 
 
-def leaves_first(broken: list[dict], records: dict) -> list[dict]:
-    """Order broken theorems so that each comes after the broken theorems it uses (§3.3 S4)."""
+def broken_deps(broken: list[dict], base_records: dict) -> dict[str, set[str]]:
+    """For each broken theorem, the other broken theorems its *base* proof uses. The base snapshot
+    is used because in the stubbed broken state those proofs are `sorry` and use nothing."""
     names = {b["name"] for b in broken}
-    deps = {b["name"]: set(records.get(b["name"], {}).get("uses", [])) & names for b in broken}
+    return {b["name"]: (set(base_records.get(b["name"], {}).get("uses", [])) & names) - {b["name"]} for b in broken}
+
+
+def leaves_first(broken: list[dict], base_records: dict) -> list[dict]:
+    """Order broken theorems so that each comes after the broken theorems it uses (§3.3 S4)."""
+    deps = broken_deps(broken, base_records)
     out, done = [], set()
     while len(out) < len(broken):
         ready = [b for b in broken if b["name"] not in done and deps[b["name"]] <= done] or \
@@ -107,6 +121,7 @@ class Run:
         self.scratch = self.case_dir / f"run-{self.run_id}"
         self.p = Progress()
         self.timing: dict[str, float] = {}
+        self.deadline = time.monotonic() + 60 * self.cfg["budget"]["per_run_minutes"]
 
     # ------------------------------------------------------------------ S1/S2
     def prepare(self) -> None:
@@ -142,7 +157,11 @@ class Run:
         return out
 
     # ------------------------------------------------------------------ S4
-    def repair(self, broken: list[dict], records: dict, report: dict) -> Path:
+    def repair(self, broken: list[dict], base_records: dict, report: dict) -> Path:
+        """One fresh agent session per broken theorem, leaves first (§3.3 S4). Each attempt is a
+        transaction on the candidate tree: kept if the agent finished and the file builds, otherwise
+        rolled back completely (review finding 6), with its diff kept as an unaccepted suggestion.
+        A theorem whose broken dependency was not repaired is not attempted (`blocked-on`)."""
         cand = self.scratch / "candidate"
         cand.parent.mkdir(parents=True, exist_ok=True)
         replay_case.clone_lake_dir(self.broken, cand)  # copy-on-write, includes .lake
@@ -151,76 +170,100 @@ class Run:
         extracted = self.cfg["protected"]["extracted"]
         (ctx / "extraction.diff").write_text(self.git.run("diff", self.record["base_commit"],
                                                           self.record["change_commit"], "--", *extracted))
-        budget_cfg = self.cfg["budget"]
-        spent_usd, spent_min = 0.0, 0.0
+        bud = self.cfg["budget"]
+        prices = self.cfg.get("prices", {}).get(self.agent.model)
+        spent_usd = 0.0
+        unaccounted = False  # an attempt whose cost could not be bounded: no further paid attempts
         details = {f"{d['file']}::{d['decl']}": d for d in self.replay.get("broken_proofs_detail", [])}
         details.update({f"{d['file']}::{d['decl']}": d for d in self.replay.get("statement_errors", [])})
         trigger = f"PR {self.record.get('change_pr')} (\"{self.record['change_subject']}\")"
         toolchain = (self.broken / "lean-toolchain").read_text().strip()
+        deps = broken_deps([b for b in broken if b.get("name")], base_records)
+        repaired: list[str] = []
+        lsp = bool(getattr(self.agent, "capabilities", {}).get("lsp_tools"))
         for i, b in enumerate(broken, 1):
             key = f"{b['file']}::{b['key']}"
             src = (cand / b["file"]).read_text()
-            line = (decl_text(src, b["key"]) or {}).get("line")
+            entry = {"theorem": b["name"], "file": b["file"], "decl": b["key"],
+                     "line": (decl_text(src, b["key"]) or {}).get("line"), "attempts": []}
+            report["repairs"].append(entry)
+            failed_deps = sorted(d for d in deps.get(b["name"], ()) if d not in repaired)
+            if failed_deps:
+                entry.update(outcome="blocked-on", blocked_by=failed_deps,
+                             reason=f"uses {', '.join(short(d) for d in failed_deps)}, which was not repaired")
+                self.p.step(f"[{i}/{len(broken)}] {b['key']} → blocked on {', '.join(short(d) for d in failed_deps)}")
+                continue
+            remaining_min = (self.deadline - time.monotonic()) / 60
+            remaining_usd = None if prices is None else bud["per_run_usd"] - spent_usd
+            stop = ("run time budget exhausted" if remaining_min <= 1 else
+                    "run cost budget exhausted" if remaining_usd is not None and remaining_usd <= 0.05 else
+                    "a previous attempt's cost could not be bounded" if unaccounted else None)
+            if stop:
+                entry.update(outcome="proof-hard", reason=f"not attempted: {stop}")
+                continue
             if b.get("stubbed", True):  # restore the original (now failing) proof for the agent
                 orig = decl_text((self.base / b["file"]).read_text(), b["key"])
                 (cand / b["file"]).write_text(replace_body(src, b["key"], orig["proof"]))
-            remaining_usd = budget_cfg["per_run_usd"] - spent_usd
-            remaining_min = budget_cfg["per_run_minutes"] - spent_min
-            entry = {"theorem": b["name"], "file": b["file"], "decl": b["key"], "line": line, "attempts": []}
-            report["repairs"].append(entry)
-            if remaining_usd <= 0.05 or remaining_min <= 1:
-                entry["outcome"] = "proof-hard"
-                entry["reason"] = "per-run budget exhausted before this theorem"
-                self._restub(cand, b)
-                continue
+            checkpoint = tree_sources(cand)
             det = details.get(key, {})
             task = RepairTask(case_id=self.case_id, theorem=b["name"], decl=b["key"], file=b["file"],
                               line=det.get("line", 0), errors=[det.get("msg", "")],
                               cause=", ".join(self.record.get("causes") or [self.record["cause"]]) + pin_summary(self.record),
                               trigger=trigger, toolchain=toolchain,
-                              other_broken=[o["key"] for o in broken if o is not b], context_dir=ctx)
-            budget = Budget(usd=min(budget_cfg["per_theorem_usd"], remaining_usd),
-                            minutes=min(budget_cfg["per_theorem_minutes"], remaining_min),
-                            turns=budget_cfg["per_theorem_turns"])
+                              still_stubbed=[o["key"] for o in broken[i:]],
+                              repaired_before=[short(r) for r in repaired], context_dir=ctx, lsp_tools=lsp)
+            budget = Budget(usd=None if remaining_usd is None else min(bud["per_theorem_usd"], remaining_usd),
+                            minutes=min(bud["per_theorem_minutes"], remaining_min), turns=bud["per_theorem_turns"])
             self.p.step(f"[{i}/{len(broken)}] {b['key']} → agent attempt 1 ({self.agent.name}, {self.agent.model})")
-            att = self.agent.run(task, cand, budget, self.out / "attempts" / f"{i:02d}-{b['key'][:60]}",
-                                 self.p.live)
+            log_dir = self.out / "attempts" / f"{i:02d}-{b['key'][:60]}"
+            att = self.agent.run(task, cand, budget, log_dir, self.p.live)
             self.p.done_live()
-            spent_usd += att.cost_usd
-            spent_min += att.seconds / 60
+            price_attempt(att, prices, budget)
+            if att.cost_usd is not None:
+                spent_usd += att.cost_usd
+            if prices is not None and att.cost_status != "computed":
+                # Killed before reporting usage: count the whole per-theorem cap (Claude Code enforces
+                # it itself), so the run cap stays an upper bound, and stop further paid attempts if
+                # even that is unknown.
+                spent_usd = spent_usd - (att.cost_usd or 0) + (budget.usd or 0)
+                unaccounted = budget.usd is None
             entry["attempts"].append(att.to_json())
             # Pre-gate (feedback only; the gate alone decides): does the file build now?
             mod = b["file"][:-len(".lean")].replace("/", ".")
-            pre = subprocess.run(["lake", "build", mod], cwd=cand, capture_output=True, text=True,
-                                 env={**os.environ, "LEAN_NUM_THREADS": str(self.cfg["lean"]["lean_num_threads"])})
+            pre = proc.run(["lake", "build", mod], cand,
+                           {**os.environ, "LEAN_NUM_THREADS": str(self.cfg["lean"]["lean_num_threads"])},
+                           timeout=60 * self.cfg["lean"].get("build_timeout_minutes", 90))
             builds = pre.returncode == 0
             entry["prebuild_ok"] = builds
-            self.p.result(f"{att.stop}, {att.turns} turns, ${att.cost_usd:.2f}, {fmt_s(att.seconds)}"
-                          f" · file builds: {'yes' if builds else 'no'}")
-            if not (att.stop == "done" and builds):
-                entry["outcome"] = "proof-hard"
-                entry["reason"] = {"gave-up": "the agent gave up", "max-turns": "turn cap reached",
-                                   "budget": "cost cap reached", "timeout": "time cap reached",
-                                   "error": f"agent error: {att.error or ''}"[:300]}.get(att.stop, att.stop) \
-                    if att.stop != "done" else "the file does not build after the attempt"
-                if att.stop == "error" and not att.turns:
-                    entry["outcome"] = "infrastructure-failure"
-                (self.out / "attempts" / f"{i:02d}-{b['key'][:60]}" / "suggestion.lean").write_text(
-                    (cand / b["file"]).read_text())
-                if b.get("stubbed", True):
-                    self._restub(cand, b)
-            else:
+            self.p.result(f"{att.stop}, {att.turns} turns, {costs.describe(att.cost_status, att.cost_usd, att.model)}, "
+                          f"{fmt_s(att.seconds)} · file builds: {'yes' if builds else 'no (timed out)' if pre.timed_out else 'no'}")
+            if att.stop == "done" and builds:
                 entry["outcome"] = "candidate"
+                repaired.append(b["name"])
+                continue
+            entry["outcome"] = "proof-hard"
+            entry["reason"] = {"gave-up": "the agent gave up", "max-turns": "turn cap reached",
+                               "budget": "cost cap reached", "timeout": "time cap reached",
+                               "error": f"agent error: {att.error or ''}"[:300]}.get(att.stop, att.stop) \
+                if att.stop != "done" else "the file does not build after the attempt"
+            if att.stop == "error" and not att.turns:
+                entry["outcome"] = "infrastructure-failure"
+            # Roll the whole attempt back, keeping what it did as an unaccepted suggestion.
+            after = tree_sources(cand)
+            (log_dir / "suggestion.patch").write_text(patch.make_diff(checkpoint, after))
+            restore_sources(cand, checkpoint, after)
+            if b.get("stubbed", True):
+                self._restub(cand, b)
         return cand
 
     def _restub(self, cand: Path, b: dict) -> None:
-        if not b.get("stubbed", True):
-            return
+        """Put the stub back on a theorem whose attempt failed, so later theorems and the gate see
+        the stubbed broken state for it, as before the attempt."""
         f = cand / b["file"]
-        orig_k = decl_text((self.broken / b["file"]).read_text(), b["key"])
+        stub = decl_text((self.broken / b["file"]).read_text(), b["key"])
         cur = f.read_text()
-        if parse_decls(cur).get(b["key"]):
-            f.write_text(replace_body(cur, b["key"], orig_k["proof"]))
+        if stub and parse_decls(cur).get(b["key"]):
+            f.write_text(replace_body(cur, b["key"], stub["proof"]))
 
     # ------------------------------------------------------------------ S5
     def run_gate(self, label: str, B: Path, K: Path, after: Path, past_scope: bool = False) -> dict:
@@ -281,7 +324,8 @@ class Run:
         gate_version = gate("version").stdout.strip()
         report: dict = {"format": 2, "case_id": self.case_id, "run_id": self.run_id,
                         "started_at": self.started.isoformat(timespec="seconds"),
-                        "provenance": provenance.collect(self.agent.model, self.agent.name, gate_version, self.config),
+                        "provenance": provenance.collect(self.agent.model, self.agent.name, gate_version, self.config,
+                                                          harness=self.agent.version()),
                         "inputs": {"repo": self.cfg["github"], "base_commit": r["base_commit"],
                                    "change_commit": r["change_commit"], "change_pr": r.get("change_pr"),
                                    "change_pr_url": r.get("change_pr_url"), "change_subject": r["change_subject"],
@@ -331,7 +375,7 @@ class Run:
             self.p.step(f"{len(broken)} proof(s) broken, {len(stmt_broken)} statement(s) no longer type-check · "
                         f"frozen declarations observed in broken state: {observed}/{len(Bj['records'])}",
                         took=self.timing["snapshots_s"] + self.timing["prepare_s"])
-            ordered = leaves_first(broken, Kj["records"])
+            ordered = leaves_first(broken, Bj["records"])
             targets = ordered
             if stmt_broken:
                 for s in stmt_broken:
@@ -350,7 +394,7 @@ class Run:
                                                   "reason": "case is ineligible: a statement must change first"})
             t0 = time.time()
             if targets:
-                cand = self.repair(targets, Kj["records"], report)
+                cand = self.repair(targets, Bj["records"], report)
                 self.timing["agent_s"] = time.time() - t0
                 t0 = time.time()
                 self.p.step("gate: scope → clean rebuild → statements → trust base")
@@ -363,13 +407,20 @@ class Run:
             if human:
                 t0 = time.time()
                 self.p.step("gate the human fix as a reference candidate (replay only)")
-                g = self.run_gate("human-fix", B, K, self.human_fix_tree(), past_scope=True)
-                report["human_fix_gate"] = summarize_gate(g)
-                self.p.gate_line(report["human_fix_gate"])
+                try:
+                    g = self.run_gate("human-fix", B, K, self.human_fix_tree(), past_scope=True)
+                    report["human_fix_gate"] = summarize_gate(g)
+                    self.p.gate_line(report["human_fix_gate"])
+                except GateUnavailable as e:  # reference evidence only: never fails the run
+                    report["human_fix_gate"] = {"verdict": "gate-unavailable", "unavailable": [str(e)[:500]],
+                                                "failed_checks": [], "checks": {}}
+                    self.p.result(f"the gate could not check the human fix: {str(e)[:200]}")
                 self.timing["human_fix_gate_s"] = time.time() - t0
             report["human_fix"] = self.compare_human(broken + stmt_broken, report)
         except GateUnavailable as e:
             report["error"] = {"outcome": "gate-unavailable", "detail": str(e)}
+        except KeyboardInterrupt:  # keep the partial run record (review finding 9)
+            report["error"] = {"outcome": "infrastructure-failure", "detail": "interrupted"}
         except Exception as e:  # noqa: BLE001  an infrastructure failure says nothing about the theorems
             report["error"] = {"outcome": "infrastructure-failure", "detail": f"{type(e).__name__}: {e}"}
         self.close_open_outcomes(report)
@@ -472,10 +523,62 @@ class Run:
         for a in atts:
             for k, v in a.get("tokens", {}).items():
                 tok[k] = tok.get(k, 0) + v
-        return {"cost_usd": round(sum(a["cost_usd"] for a in atts), 4), "tokens": tok,
+        statuses = {a.get("cost_status", "unknown") for a in atts}
+        status = ("computed" if statuses == {"computed"} else "no-price" if "no-price" in statuses
+                  else "partial" if "partial" in statuses else "unknown") if atts else "computed"
+        usd = round(sum(a.get("cost_usd") or 0 for a in atts), 4) if status in ("computed", "partial") else None
+        reported = [a.get("reported_cost_usd") for a in atts]
+        return {"cost_usd": usd, "cost_status": status, "tokens": tok,
+                "reported_cost_usd": round(sum(reported), 4) if reported and None not in reported else None,
+                "resolved_models": sorted({a.get("resolved_model") for a in atts if a.get("resolved_model")}),
                 "turns": sum(a["turns"] for a in atts), "agent_seconds": round(sum(a["seconds"] for a in atts)),
                 "wall_seconds": round(wall), "stages": {k: round(v) for k, v in self.timing.items()},
                 "attempts": len(atts)}
+
+
+SKIP_DIRS = {".lake", ".git", "lake-packages"}
+
+
+def tree_sources(root: Path) -> dict[str, str]:
+    """Every text file of a tree outside build output, for checkpoints and suggestion diffs."""
+    out = {}
+    for p in sorted(root.rglob("*")):
+        rel = p.relative_to(root)
+        if any(part in SKIP_DIRS for part in rel.parts) or not p.is_file():
+            continue
+        try:
+            out[str(rel)] = p.read_text()
+        except (UnicodeDecodeError, OSError):
+            continue
+    return out
+
+
+def restore_sources(root: Path, checkpoint: dict[str, str], now: dict[str, str]) -> None:
+    """Put the tree's text files back exactly as in `checkpoint` (changed, added and deleted files)."""
+    for rel, text in now.items():
+        if rel not in checkpoint:
+            (root / rel).unlink(missing_ok=True)
+        elif checkpoint[rel] != text:
+            (root / rel).write_text(checkpoint[rel])
+    for rel, text in checkpoint.items():
+        if rel not in now:
+            (root / rel).parent.mkdir(parents=True, exist_ok=True)
+            (root / rel).write_text(text)
+
+
+def price_attempt(att: Attempt, prices: dict | None, budget: Budget) -> None:
+    """Cost from the attempt's tokens (adapter-independent); the harness's own figure is a cross-check."""
+    if prices is None:
+        att.cost_status, att.cost_usd = "no-price", None
+    elif not att.tokens:
+        att.cost_status, att.cost_usd = "unknown", None
+    else:
+        att.cost_usd = costs.price(att.tokens, prices)
+        att.cost_status = "computed" if att.tokens_complete else "partial"
+
+
+def short(name: str) -> str:
+    return name.rsplit(".", 1)[-1] if name else name
 
 
 def pin_summary(record: dict) -> str:

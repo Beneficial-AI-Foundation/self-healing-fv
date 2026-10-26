@@ -11,9 +11,14 @@ def build_prompt(task: RepairTask) -> str:
     if len(errors) > 6000:
         errors = errors[:6000] + "\n… (truncated)"
     others = ""
-    if task.other_broken:
-        others = ("\nOther theorems broken by the same change are temporarily replaced by `sorry`; they are "
-                  "not your task and you must not touch them: " + ", ".join(f"`{t}`" for t in task.other_broken) + "\n")
+    if task.repaired_before:
+        others += ("\nOther theorems broken by the same change have already been repaired in this run; you may "
+                   "use them but must not change them: " + ", ".join(f"`{t}`" for t in task.repaired_before) + "\n")
+    if task.still_stubbed:
+        others += ("\nOther theorems broken by the same change are temporarily replaced by `sorry`; they are "
+                   "not your task and you must not touch them: " + ", ".join(f"`{t}`" for t in task.still_stubbed) + "\n")
+    tools = ("The Lean LSP tools (goal states, diagnostics, trying tactics) are available too."
+             if task.lsp_tools else "Read the compiler's error messages for goal states.")
     context = ""
     if task.context_dir:
         context = (f"\nRead-only context for this change is in `{task.context_dir}` "
@@ -30,8 +35,7 @@ Its proof worked before the change. Now it fails with:
 {errors}
 ```
 {others}{context}
-Check your work with `lake build {module}` (or `lake env lean {task.file}`). The Lean LSP tools
-(goal states, diagnostics, trying tactics) are available too.
+Check your work with `lake build {module}` (or `lake env lean {task.file}`). {tools}
 
 Rules. They are checked mechanically afterwards, and any violation rejects the whole repair:
 - Change only the proof of `{task.decl}`: the text after its `:=`. Do not change its statement,

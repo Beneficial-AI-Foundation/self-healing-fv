@@ -1,7 +1,8 @@
 """Agent adapter interface (DESIGN.md §3.5, §7.1).
 
 An adapter repairs one broken theorem in a workspace, within a budget, and reports what it
-spent. It is untrusted: whatever it leaves in the workspace goes through the gate (§4).
+spent as token counts (the pipeline prices them, shfv/costs.py). It is untrusted: whatever it
+leaves in the workspace goes through the gate (§4).
 """
 from __future__ import annotations
 
@@ -21,13 +22,15 @@ class RepairTask:
     cause: str                # aeneas / lean-mathlib / rust ...
     trigger: str              # e.g. "PR 41: chore: Update aeneas"
     toolchain: str
-    other_broken: list[str]   # other broken theorems in this case (stubbed, not this task)
+    still_stubbed: list[str] = field(default_factory=list)   # other broken theorems, still `sorry`
+    repaired_before: list[str] = field(default_factory=list)  # broken theorems already repaired in this run
     context_dir: Path | None = None  # read-only extra context (e.g. extraction diff)
+    lsp_tools: bool = True    # whether the adapter gives the agent Lean language-server tools
 
 
 @dataclass
 class Budget:
-    usd: float
+    usd: float | None         # None: not enforced (no price for the model)
     minutes: float
     turns: int
 
@@ -35,11 +38,15 @@ class Budget:
 @dataclass
 class Attempt:
     adapter: str
-    model: str
+    model: str                # as requested
     theorem: str
+    resolved_model: str | None = None  # what the harness actually ran (aliases resolve to a version)
     stop: str = "error"       # done | gave-up | max-turns | budget | timeout | error
-    cost_usd: float = 0.0     # as reported by the agent harness (API-equivalent on a subscription)
-    tokens: dict = field(default_factory=dict)
+    tokens: dict = field(default_factory=dict)  # input, output, cache_read, cache_write_5m, cache_write_1h
+    tokens_complete: bool = False  # False: the session ended before reporting final usage (lower bound)
+    reported_cost_usd: float | None = None  # the harness's own figure, a cross-check only
+    cost_usd: float | None = None  # computed by the pipeline from tokens and the price table
+    cost_status: str = "unknown"   # computed | partial | no-price | unknown
     turns: int = 0
     seconds: float = 0.0
     final_message: str = ""   # model output: advisory only, never decides anything (§5.4)
@@ -55,8 +62,12 @@ Progress = Callable[[str], None]
 
 class AgentAdapter(Protocol):
     name: str
+    model: str
     # Declared capabilities (§7.1); an adapter that cannot meet a tool profile refuses to start.
     capabilities: dict
+
+    def version(self) -> str | None:
+        """The harness's own version, for provenance."""
 
     def run(self, task: RepairTask, workspace: Path, budget: Budget, log_dir: Path,
             progress: Progress) -> Attempt: ...
