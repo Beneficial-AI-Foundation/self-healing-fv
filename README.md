@@ -1,41 +1,39 @@
 # self-healing-fv
 
-Self-healing CI for verified Rust.
+Self-healing CI for verified Rust (Rust → Charon/Aeneas → Lean).
 
 When Rust code, the Aeneas extractor, or the Lean toolchain changes, Lean proofs about the extracted code break. This project builds a CI bot that:
 
-1. replays the change (re-extracted Lean code + the existing proofs),
-2. has an AI agent repair the broken proofs,
-3. accepts a repair only if mechanical checks pass: no theorem statement changed, no new axioms or `sorry`, and a clean rebuild succeeds,
-4. otherwise escalates to a human with a reviewer-ready report (for example, when a fix would need to change a statement or a trusted assumption),
-5. opens a PR with the result.
+1. rebuilds the broken state (the existing proofs on the new extracted code);
+2. tries cheap fixed edits first (the *sweep*, no model), then has an AI agent repair the remaining broken proofs, within cost and time budgets;
+3. accepts a repair only if a model-free gate passes: no theorem statement changed, no new axioms or `sorry`, a clean rebuild, and a kernel re-check;
+4. otherwise escalates to a human with the evidence, for example when a statement would have to change.
 
-Status: early prototype. Tracked in Linear as SCI-1706, with sub-issues:
+LLMs propose, scripts enforce: the bot never edits a statement and never decides whether a spec change is acceptable.
 
-- SCI-1714: mine historical proof breaks from verified Rust repos
-- SCI-1715: design and build the proof-repair loop (v0)
-- SCI-1717: deploy on GitHub Actions with bring-your-own-model and cost limits
+**Status:** early prototype. It replays historical breaks on your machine and writes the report it would post on the PR. It does not open PRs or run in GitHub Actions yet. Each target repo is described by one config file (`targets/<repo>.toml`: build targets, protected files, agent, model, budgets, prices). Tracked in Linear as SCI-1706 (sub-issues SCI-1714 data, SCI-1715 repair loop, SCI-1717 GitHub Actions).
 
-Design: [docs/DESIGN.md](docs/DESIGN.md).
+**Which doc?** Visitors: [docs/OVERVIEW.md](docs/OVERVIEW.md). Users: [docs/CLI.md](docs/CLI.md). Contributors: [docs/DESIGN.md](docs/DESIGN.md). Tools and agents reading the output: [docs/REPORT.md](docs/REPORT.md). Coding agents: [AGENTS.md](AGENTS.md).
 
-## Prototype: replay a historical case
+## Quick start
 
-Full guide: [docs/CLI.md](docs/CLI.md).
+Needs `elan`, `uv`, `claude` (Claude Code, logged in) and a local clone of the target repo. Full guide: [docs/CLI.md](docs/CLI.md).
 
 ```
-uv run shfv repair --case dalek-lean-verify/e65b46d0 --agent claude-code [--model claude-sonnet-5-5]
+uv sync
+uv run shfv doctor                                       # check the setup
+uv run shfv repair --case dalek-lean-verify/e65b46d0     # replay PR 782 end to end
 ```
 
-This rebuilds the case's broken state (the proofs before the change plus the change's extracted code and pins, via `replay/replay_case.py`), runs a headless Claude Code session per broken proof, runs the gate, and writes `runs/<case>/<run id>/report.json` (the run record, with what produced it) and `report.md` (the PR comment the bot would post). Cases whose statement no longer type-checks escalate without an agent call (`--attempt-anyway` runs one anyway). Needs `elan`, `uv`, `claude`, a local clone of the target repo (`--repo`, default `~/baif/<repo>`) and the replay workspaces under `work/` (`SHFV_WORK`).
+The run writes `runs/<case>/<run id>/report.md` (the PR comment) and `report.json` (the run record).
 
-The gate is a separate, model-free tool with no dependency on the rest (`gates/`, DESIGN.md §4.5, §4.8):
+The gate is a separate, model-free tool with no dependency on the rest:
 
 ```
-uv run gate snapshot --config targets/dalek-lean-verify.toml --tree DIR --out S.json [--clean] [--apply D.patch --workdir W]
-uv run gate compare  --config targets/dalek-lean-verify.toml --base B.json --broken K.json --candidate C.json --diff D.patch --out V.json
+uv run gate compare --config targets/dalek-lean-verify.toml --base B.json --broken K.json --candidate C.json --diff D.patch --out V.json
 ```
 
-Tests, including the planted-violation tests for the gate (DESIGN.md §4.6): `uv run pytest` (toy Lean project, about 40 s).
+Tests, including the planted-violation tests for the gate: `uv run pytest` (builds a small Lean project).
 
 ## License
 
