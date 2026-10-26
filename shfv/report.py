@@ -115,6 +115,11 @@ def gate_table(r: dict, g: dict) -> list[str]:
             if cid == "G5" and (checker := (c.get("info") or {}).get("checker")):
                 text = re.sub(r"\s*\((cached build|built)\)$", "", checker)
                 text = text.replace("lean4checker", "`lean4checker`", 1).replace("bundled leanchecker", "`leanchecker` (bundled with Lean)")
+            if cid == "G5" and c["ok"] and (inc := (c.get("info") or {}).get("incomplete")):
+                mark = "✅🏷️"
+                text += "; **incomplete** in " + ", ".join(
+                    f"`{x['module'].split('.')[-1]}` (stopped at `{short_name(x['stopped_at'])}`, native code as at the base)"
+                    for x in inc[:3])
             if not c["ok"]:
                 v = c.get("violations", [])
                 first = "; ".join(f"`{short_name(x['decl'])}`: {x['msg']}" if x.get("decl") else x["msg"] for x in v[:3])
@@ -245,6 +250,15 @@ def render(r: dict) -> str:
                        "already unproved (`sorry`) at the base commit, exactly as "
                        f"{'it' if len(inherited) == 1 else 'they'} did there; the repair adds none: "
                        + ", ".join(f"`{short_name(s)}`" for s in lemmas[:8]) + (" …" if len(lemmas) > 8 else ""))
+        incomplete = (r.get("gate") or {}).get("kernel_replay_incomplete") or []
+        if incomplete:
+            out.append("")
+            out.append(f"🏷️ **Kernel replay incomplete.** The independent re-check by the Lean kernel (G5) cannot run "
+                       "proofs by native code (`native_decide`, `bv_decide`), so it stopped early in "
+                       + ", ".join(f"`{x['module']}` (at `{short_name(x['stopped_at'])}`)" for x in incomplete[:3])
+                       + ". That declaration is unchanged by the repair and was already proved this way at the base "
+                       "commit; the rest of that module was checked by the kernel during the clean rebuild, but "
+                       "not re-checked independently.")
     elif v == "passed-without-kernel-replay":
         out.append(f"### 🟡 Repair passed every check that ran, not accepted yet: {len(repaired)} of {n_proofs} broken "
                    f"proof{'s' * (n_proofs != 1)} fixed")

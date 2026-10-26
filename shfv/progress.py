@@ -56,7 +56,8 @@ class Progress:
             elif c.get("ok") is None:
                 parts.append(f"{label} – not run")
             else:
-                parts.append(f"{label} {'✓' if c['ok'] else '✗'}")
+                partial = c["ok"] and (c.get("info") or {}).get("incomplete")
+                parts.append(f"{label} {'✓' if c['ok'] else '✗'}" + (" (incomplete: native code)" if partial else ""))
         self.result(" · ".join(parts) + f" → {g['verdict'].upper()}")
 
     def final(self, text: str) -> None:

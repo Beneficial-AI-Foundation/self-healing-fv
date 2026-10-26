@@ -125,7 +125,7 @@ The exit status of `shfv repair` is 0 when the run completed, whatever its verdi
 
 | Verdict | Meaning |
 |---|---|
-| ✅ **accepted** | Every broken proof was repaired and the gate accepted the whole change, kernel replay included. |
+| ✅ **accepted** | Every broken proof was repaired and the gate accepted the whole change, kernel replay included. It may carry a 🏷️ flag (below). |
 | ⚠️ **needs a human** (`escalated`) | At least one theorem was not repaired. The report says why for each one. |
 | ⛔ **failed** | The run itself failed (setup, build environment, or gate unavailable). It says nothing about the proofs. |
 
@@ -139,6 +139,22 @@ Per theorem, the outcome is one of:
 | `blocked-on` | Waits on another theorem that must be fixed first. |
 | `infrastructure-failure` | The agent or build environment failed before saying anything about the theorem. |
 | `gate-unavailable` | The gate could not decide (see section 6). Nothing is accepted, and nothing is held against the repair. |
+
+### Flagged acceptances (🏷️)
+
+The target repos already carry some trust that predates any change: lemmas still proved by `sorry`, and proofs by native code (`native_decide`, `bv_decide`). The gate accepts a repair near them only if it adds nothing to that trust, and then marks the acceptance with a flag. Each flag shows up in three places:
+- a 🏷️ paragraph under the report's verdict;
+- the CLI's last line, e.g. `ACCEPTED · repaired 6 (inherited sorry 5)`;
+- `report.json`, under `gate.inherited_sorry` and `gate.kernel_replay_incomplete`.
+
+Count results both ways: all accepted, and accepted with no flag. DESIGN.md §4.3 (*Flagged acceptances*) has the precise rules.
+
+| Flag | What it means | What stays guaranteed | What a reviewer may want to do |
+|---|---|---|---|
+| **Inherited sorry** | A repaired theorem still depends on lemmas that were unproved (`sorry`) at the base commit, the same ones its base version used. The report names them. | The repair adds no `sorry` and no dependence on any further unproved lemma; a dependence on a still-broken theorem is rejected. | Nothing new to review: these gaps existed before the change. They remain open proof obligations of the repo. |
+| **Kernel replay incomplete** | The independent kernel re-check (G5) stopped early in a module, at a declaration proved by native code. The re-check cannot run compiled code, so it cannot get past such a proof; the base commit fails the same way. The report names the module and the declaration. | That declaration is unchanged and was already proved this way at the base. The whole module was kernel-checked once during the clean rebuild (G3). Statements (G1), axioms (G2) and the text check (G0, which bans `debug.*` options and metaprogramming) are unaffected. | If the repaired theorem is in that module, read its diff: it had no independent second kernel check. A complete re-check is planned for V1 (DESIGN.md §11, question 21). |
+
+If the native-code stop is in a repaired or added declaration, or in one that did not use native code at the base, the repair is not accepted: the verdict is `gate-unavailable`, because the repair itself would go unchecked.
 
 Right after the summary, **Changes made by the triggering change itself (audit)** says whether the human change altered any frozen statement, definition or trust assumption: `no-change`, `changed` (trust changes first: theorems that newly depend on `sorry`, new axioms, changed trusted models; then the statements, collapsed, with before and after), or `incomplete` (something could not be compared; never read as "no change"). The bot does not judge these changes; it shows them to a spec owner.
 
@@ -229,7 +245,7 @@ The checks:
 | **G1 statements** | Every frozen declaration has the same fingerprint (kind, elaborated type, and body for definitions) in the stubbed broken state and in the candidate. The fingerprints ignore binder names, so renaming a bound variable does not count as a change, but any change of meaning does. |
 | **G2 trust base** | Each declaration's axioms stay within the three standard Lean axioms plus what it had at the base. So no new `sorry`, no new axioms, and no `native_decide` where the base had none. A repaired theorem may still reach lemmas that were already unproved (`sorry`) at the base, the same ones it reached there and no others: the repair is then accepted but **flagged** ("inherited sorry" in the summary line, 🏷️ in the report, `gate.inherited_sorry` in report.json), so results can be counted with and without such repairs. Every added lemma is used by a repaired theorem. |
 | **G3 clean build** | The fresh copy builds green and covers every audited module. |
-| **G5 kernel replay** | Every module the diff changed is re-checked by the Lean kernel: the toolchain's own `leanchecker` (Lean v4.28 and later), else `lean4checker` built once at the toolchain's tag (or, when lean4checker skipped that patch release, the latest earlier one built with the tree's toolchain) and cached in `~/.cache/self-healing-fv`. This catches declarations added with kernel checking switched off. No checker means `gate-unavailable`. |
+| **G5 kernel replay** | Every module the diff changed is re-checked by the Lean kernel: the toolchain's own `leanchecker` (Lean v4.28 and later), else `lean4checker` built once at the toolchain's tag (or, when lean4checker skipped that patch release, the latest earlier one built with the tree's toolchain) and cached in `~/.cache/self-healing-fv`. This catches declarations added with kernel checking switched off. No checker means `gate-unavailable`. The re-check cannot run proofs by native code (`native_decide`, `bv_decide`) and stops at the first one in a module. If that declaration is unchanged and already used native code at the base, the module passes and the acceptance is flagged **kernel replay incomplete** (section 4); otherwise the gate cannot decide. |
 
 Exit status of `scope` and `compare`: 0 passed or accepted; 1 not accepted; 2 the gate could not run or could not decide (never counted as a pass).
 
@@ -237,11 +253,10 @@ The audit is also a gate command: `gate audit --config T.toml --base B.json --he
 
 ## 7. Configuration and budgets
 
-A target repo is described by `targets/<repo>.toml`. Only `dalek-lean-verify` exists so far.
+A target repo is described by `targets/<repo>.toml`: `dalek-lean-verify` and `symcrypt` so far.
 
 - `[lean]`: the build targets, the root modules (every project module they import is audited), and `lean_num_threads`, which defaults to 8 so the machine stays usable.
 - `[protected]`: files the bot may never touch.
-- `[agent]`: the default adapter and model.
 - `[agent]`: the adapter, the default model, and the tool profile (`minimal` or `lsp`). An adapter that cannot meet the profile refuses to start.
 - `[budget]`: caps per theorem (cost in USD, minutes, turns), per run (cost, minutes; one deadline for the whole run), and `attempts_per_theorem`. Turns and minutes mean the same for every model. They are prototype guesses, to be set from pilot data.
 - `[prices."<model>"]`: USD per million tokens (input, output, cache read, 5-minute and 1-hour cache writes). Cost is computed from these for every adapter; the agent harness's own figure is only a cross-check. A model without an entry has cost "unknown" and no dollar cap.
@@ -260,7 +275,8 @@ A target repo is described by `targets/<repo>.toml`. Only `dalek-lean-verify` ex
 
 ## 9. Limits of this prototype
 
-- **Replays only, one target repo.** It covers curve25519-dalek-lean-verify, on the toolchains of the replayed cases. GitHub Actions deployment and live CI are V1 (DESIGN.md §9).
+- **Replays only.** Target configs exist for curve25519-dalek-lean-verify and SymCrypt, on the toolchains of the replayed cases.
+- **Kernel replay stops at native code.** Modules with `native_decide` or `bv_decide` proofs are only partly re-checked by G5, and such acceptances are flagged (section 4). A complete re-check is V1 (DESIGN.md §11, question 21). GitHub Actions deployment and live CI are V1 (DESIGN.md §9).
 - **Claude Code only.** The adapter interface is ready for others (Codex is next), but only one adapter exists (DESIGN.md §7).
 - **Complete-case acceptance.** A change is accepted only if every broken theorem is repaired (DESIGN.md §4.3).
 - **Not built yet:** the sandbox and metering proxy for the agent (DESIGN.md §3.4, §9.5). Until then the cost caps are Claude Code's own enforcement plus the pipeline's accounting, not a hard limit.

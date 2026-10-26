@@ -61,6 +61,39 @@ def test_no_kernel_replay_means_no_decision():
     assert v["verdict"] == "gate-unavailable" and any("could not run" in u for u in v["unavailable"])
 
 
+NATIVE_STOP = ("leanchecker found a problem in M\nuncaught exception: (kernel) (interpreter) unknown declaration "
+               "'{}._reflection_def_1_1'")
+
+
+def native_case(stop_at, base_native=True):
+    """The replay of M stops at `stop_at`, proved by bv_decide (dalek PR 734: the replay cannot run
+    the module's compiled helper `recompose_decomposed_limb._reflection_def_1_1`)."""
+    base, broken, cand, diff = case()
+    n = rec(BASE3 + (["Lean.ofReduceBool"] if base_native else []))
+    for s in (base, broken, cand):
+        s["records"]["N"] = n
+    cand["kernel_replay"]["modules"]["M"] = {"ok": False, "output": NATIVE_STOP.format(stop_at)}
+    return verdict(base, broken, cand, diff)
+
+
+def test_replay_stopped_by_native_code_at_the_base_is_accepted_and_flagged():
+    v = native_case("N")
+    assert v["verdict"] == "accepted", v
+    assert v["kernel_replay_incomplete"] == [{"module": "M", "stopped_at": "N", "native": "N._reflection_def_1_1"}]
+    assert v["checks"]["G5"]["ok"] and v["checks"]["G5"]["info"]["incomplete"]
+
+
+def test_replay_stopped_by_native_code_in_the_repair_is_no_decision():
+    v = native_case("T")
+    assert v["verdict"] == "gate-unavailable" and any("native code" in u for u in v["unavailable"])
+    assert v["kernel_replay_incomplete"] == []
+
+
+def test_replay_stopped_by_native_code_the_base_did_not_use_is_no_decision():
+    v = native_case("N", base_native=False)
+    assert v["verdict"] == "gate-unavailable"
+
+
 def test_tactic_generated_declaration_gone_from_the_stub_is_not_frozen():
     """dalek PR 734: `bv_decide` in the base proof of a broken theorem adds `PUnit.enumToBitVec`
     (no source range); stubbing that proof removes it, which must not make the case ineligible."""

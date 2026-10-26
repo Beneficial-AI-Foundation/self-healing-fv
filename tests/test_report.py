@@ -38,6 +38,16 @@ def test_inherited_sorry_is_flagged_on_an_accepted_repair():
     assert "Rests on unproved lemmas, as before the change" in md and "`pow2k_spec`" in md
 
 
+def test_incomplete_kernel_replay_is_flagged_on_an_accepted_repair():
+    rep = {"theorem": "T", "file": "A.lean", "decl": "T", "outcome": "repaired", "attempts": []}
+    inc = [{"module": "Pkg.ToBytes", "stopped_at": "Ns.recompose_decomposed_limb", "native": "x"}]
+    g5 = {"ok": True, "status": "ran", "violations": [], "info": {"checker": "bundled leanchecker", "incomplete": inc}}
+    md = render(minimal_report(verdict="accepted", broken={"proofs": ["T"], "statements": []}, repairs=[rep],
+                               gate={"verdict": "accepted", "checks": {"G5": g5}, "kernel_replay_incomplete": inc}))
+    assert "Kernel replay incomplete" in md and "`recompose_decomposed_limb`" in md
+    assert "**incomplete** in `ToBytes`" in md
+
+
 def test_failed_run_without_error_record_gives_the_gate_reason():
     rep = {"theorem": "T", "file": "A.lean", "decl": "T", "outcome": "gate-unavailable", "attempts": [],
            "reason": "kernel replay (G5) could not run: no checker"}

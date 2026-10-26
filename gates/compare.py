@@ -13,7 +13,9 @@
                     built from a fresh copy without project build output, green, fully covered
   G5 kernel replay  every module the diff changed was replayed through the Lean kernel
                     (gates/kernel.py) and accepted; no checker for the toolchain means the gate
-                    cannot decide
+                    cannot decide. A replay that stops at native code (`native_decide`,
+                    `bv_decide`) counts as passed but incomplete, and is flagged, only when the
+                    declaration it stopped at is unchanged and already used native code at the base
 
 The gate fails closed. Before any check counts, the inputs must be trustworthy: the base snapshot
 built green, covers every audited module and every theorem written in its sources, and has a
@@ -24,8 +26,11 @@ target config; the candidate's build and fingerprinting completed. Otherwise the
 Verdicts:
   accepted                       every check passed, G5 included, and the case is complete
                                  (non-empty `inherited_sorry`: accepted, flagged; some repaired
-                                 theorem rests on lemmas that were already unproved at the base)
-  passed-without-kernel-replay   every check that ran passed, but G5 did not run: not accepted
+                                 theorem rests on lemmas that were already unproved at the base;
+                                 non-empty `kernel_replay_incomplete`: accepted, flagged; the
+                                 replay of a module stopped at an unchanged declaration that was
+                                 already proved by native code at the base)
+  passed-without-kernel-replay  every check that ran passed, but G5 did not run: not accepted
   rejected                       a check failed, the case is ineligible, or a theorem is unrepaired
   gate-unavailable               the gate could not decide (see `unavailable`); a check that
                                  failed outright while only G5 could not run is `rejected`
@@ -35,12 +40,32 @@ Complete-case acceptance (the prototype): every broken theorem must be repaired 
 from __future__ import annotations
 
 import hashlib
+import re
 
 from . import inventory, patch, scope, version
 from .snapshot import config_hash
 
 BASE3 = {"propext", "Classical.choice", "Quot.sound"}
 SORRY = "sorryAx"
+NATIVE = "Lean.ofReduceBool"
+# How the kernel replay reports a declaration it cannot check because checking it means running
+# compiled code that the replayed environment does not contain (the module's own helper functions).
+NATIVE_STOP_RE = re.compile(r"\(kernel\) \(interpreter\) unknown declaration '([^']+)'")
+
+
+def native_stop(output: str) -> str | None:
+    """The auxiliary the replay could not run, if it stopped on native code, else None."""
+    m = NATIVE_STOP_RE.search(output)
+    return m.group(1) if m else None
+
+
+def owning_record(name: str, records: dict) -> str | None:
+    """The frozen declaration an auxiliary belongs to (`T._reflection_def_1_1` → `T`)."""
+    parts = name.split(".")
+    for i in range(len(parts), 0, -1):
+        if (cand := ".".join(parts[:i])) in records:
+            return cand
+    return None
 
 
 def _fp(r: dict) -> tuple:
@@ -205,7 +230,7 @@ def compare(cfg: dict, base: dict, broken: dict, cand: dict, diff: str) -> dict:
                     "info": {"build_seconds": b.get("seconds"), "targets": cfg["lean"]["build_targets"]}}
 
     kr = cand.get("kernel_replay") or {}
-    v5 = []
+    v5, incomplete = [], []
     if cand.get("build", {}).get("ok") and not kr.get("ran"):
         unavailable.append(f"kernel replay (G5) could not run: {kr.get('error', 'no record of it')}")
     elif kr.get("ran"):
@@ -215,13 +240,30 @@ def compare(cfg: dict, base: dict, broken: dict, cand: dict, diff: str) -> dict:
         for m, r in sorted(kr.get("modules", {}).items()):
             if r.get("timeout"):
                 unavailable.append(f"kernel replay (G5) timed out on {m}")
+            elif not r.get("ok") and (stop := native_stop(r.get("output", ""))):
+                # The replay cannot run compiled code, so it stops at the first declaration proved by
+                # native evaluation (`native_decide`, `bv_decide`: Lean.ofReduceBool). Owner decision
+                # 2026-10-26 (DESIGN.md §4.3 G5): if that declaration is untouched by the repair and
+                # already used native code at the base, accept with the module flagged as incompletely
+                # replayed. If the repair itself is what cannot be replayed, the gate cannot decide.
+                owner = owning_record(stop, base["records"])
+                b_rec, k_rec, c_rec = (s["records"].get(owner) if owner else None for s in (base, broken, cand))
+                untouched = (owner is not None and owner not in repaired and owner not in added
+                             and k_rec is not None and c_rec is not None and _fp(k_rec) == _fp(c_rec)
+                             and NATIVE in b_rec.get("axioms", []))
+                if untouched:
+                    incomplete.append({"module": m, "stopped_at": owner, "native": stop})
+                else:
+                    unavailable.append(f"kernel replay (G5) could not check {m}: it stops at {owner or stop}, "
+                                       "which is proved by native code (Lean.ofReduceBool) and is not an "
+                                       "unchanged declaration that already did so at the base")
             elif not r.get("ok"):
                 v5.append({"check": "G5", "msg": f"the Lean kernel rejects a declaration in {m}",
                            "file": m.replace(".", "/") + ".lean", "output": r.get("output", "")[-600:]})
     checks["G5"] = {"id": "G5", "ok": not v5 if kr.get("ran") else None, "status": "ran" if kr.get("ran") else "not run",
                     "required": True, "violations": v5,
                     "info": {"checker": kr.get("checker"), "modules": sorted(kr.get("modules", {})),
-                             "seconds": kr.get("seconds")}}
+                             "seconds": kr.get("seconds"), "incomplete": incomplete}}
 
     # --- per broken theorem, and the verdict.
     still_stubbed = [b["name"] for b in bset if b["name"] and b["name"] in cand_sorry]
@@ -247,5 +289,6 @@ def compare(cfg: dict, base: dict, broken: dict, cand: dict, diff: str) -> dict:
     return {"format": 2, "gate_version": version(), "verdict": verdict, "failed_checks": failed,
             "unavailable": unavailable, "eligible": eligible, "theorems": theorems,
             "inherited_sorry": inherited if verdict == "accepted" else {},
+            "kernel_replay_incomplete": incomplete if verdict == "accepted" else [],
             "heartbeats": g0["info"]["heartbeats"], "checks": checks,
             "acceptance": "complete-case (prototype, §4.3); G5 required"}
