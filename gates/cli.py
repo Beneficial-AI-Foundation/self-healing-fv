@@ -4,6 +4,7 @@
   gate scope    --config T.toml --base B.json --broken K.json --diff D.patch [--out V.json]
   gate compare  --config T.toml --base B.json --broken K.json --candidate C.json --diff D.patch --out V.json
   gate diff     --config T.toml --before DIR --after DIR --out D.patch
+  gate audit    --config T.toml --base B.json --head H.json [--out A.json]   (exit 0 no-change, 1 changed, 2 incomplete)
   gate version
   gate tree-hash --config T.toml --tree DIR       (hash of a tree's snapshot inputs, for caching)
 
@@ -19,7 +20,7 @@ import sys
 import tomllib
 from pathlib import Path
 
-from . import compare, patch, scope, snapshot, version
+from . import audit, compare, patch, scope, snapshot, version
 
 SKIP_DIRS = {".lake", ".git", "lake-packages"}
 
@@ -79,6 +80,11 @@ def main(argv: list[str] | None = None) -> int:
     th = sub.add_parser("tree-hash")
     th.add_argument("--config", type=Path, required=True)
     th.add_argument("--tree", type=Path, required=True)
+    au = sub.add_parser("audit")
+    au.add_argument("--config", type=Path, required=True)
+    au.add_argument("--base", type=Path, required=True)
+    au.add_argument("--head", type=Path, required=True)
+    au.add_argument("--out", type=Path)
     d = sub.add_parser("diff")
     d.add_argument("--config", type=Path, required=True)
     d.add_argument("--before", type=Path, required=True)
@@ -108,6 +114,10 @@ def main(argv: list[str] | None = None) -> int:
                                      workdir=a.workdir.resolve() if a.workdir else None, log=a.log)
             write_json(snap, a.out)
             return 0
+        if a.cmd == "audit":
+            res = audit.audit(cfg, read_json(a.base), read_json(a.head))
+            write_json(res, a.out)
+            return {"no-change": 0, "changed": 1}.get(res["outcome"], 2)
         if a.cmd == "diff":
             text = patch.make_diff(tree_texts(a.before), tree_texts(a.after))
             a.out.parent.mkdir(parents=True, exist_ok=True)
