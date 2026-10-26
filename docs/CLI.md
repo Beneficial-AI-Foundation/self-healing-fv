@@ -79,7 +79,7 @@ A typical run takes 10–20 minutes. Most of that is building and fingerprinting
 | `--label NAME` | Add a suffix to the run id, e.g. `demo`. Every run already gets its own directory (section 5), so you need this only to tag a run. |
 | `--gate-human-fix` / `--no-gate-human-fix` | Also run the human's historical fix through the gate, as if the bot had proposed it. This checks the gate against real data. It is on by default for escalations, and costs one more clean rebuild (2–7 minutes). |
 | `--attempt-anyway` | Run the agent even on theorems whose statement no longer type-checks. This is for demos, to show that the bot will not change the statement. |
-| `--keep` | Keep the candidate and gate workspaces under `work/<case>/run-<time>/` for inspection. They are deleted by default. |
+| `--keep` | Keep the candidate and gate workspaces under `work/<case>/run-<run id>/` for inspection. They are deleted by default. |
 | `--repo PATH`, `--config PATH`, `--work PATH`, `--runs PATH` | Locations of the target clone, the target config, the workspaces and the output. |
 
 ### Recipes
