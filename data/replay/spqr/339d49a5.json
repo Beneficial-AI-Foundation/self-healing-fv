@@ -1,0 +1,331 @@
+{
+ "case_id": "spqr/339d49a5",
+ "change_pr_url": "https://github.com/Beneficial-AI-Foundation/SparsePostQuantumRatchet-verify/pull/658",
+ "replayed_at": "2026-10-26T06:16:41+00:00",
+ "machine": {
+  "cpus": 18
+ },
+ "timing": {
+  "export_s": 0.1,
+  "base_fixed_wall_s": 197,
+  "broken_setup_s": 28.3,
+  "broken_rounds_s": 108,
+  "total_s": 334
+ },
+ "fixed": {
+  "ok": true,
+  "stage": "build",
+  "timings": {
+   "seed_s": 74.4,
+   "cache_lock_wait_s": 0.0,
+   "cache_get_s": 8,
+   "build_s": 114,
+   "store_s": 0.5
+  },
+  "reuse": {
+   "packages_reused": [
+    "aeneas",
+    "mathlib",
+    "plausible",
+    "LeanSearchClient",
+    "importGraph",
+    "proofwidgets",
+    "aesop",
+    "Qq",
+    "batteries",
+    "Cli"
+   ],
+   "packages_fetched": [],
+   "project_build_seeded_from": "74780b4e451713e68bcbc4b4c6544b442311bd9c"
+  },
+  "orphaned_pins": [],
+  "jobs": 2582,
+  "errors": [],
+  "tail": ""
+ },
+ "base": {
+  "ok": true,
+  "stage": "build",
+  "timings": {
+   "seed_s": 74.5,
+   "cache_lock_wait_s": 8.2,
+   "cache_get_s": 8,
+   "build_s": 2,
+   "store_s": 0.0
+  },
+  "reuse": {
+   "packages_reused": [
+    "aeneas",
+    "mathlib",
+    "plausible",
+    "LeanSearchClient",
+    "importGraph",
+    "proofwidgets",
+    "aesop",
+    "Qq",
+    "batteries",
+    "Cli"
+   ],
+   "packages_fetched": [],
+   "project_build_seeded_from": "74780b4e451713e68bcbc4b4c6544b442311bd9c"
+  },
+  "orphaned_pins": [],
+  "jobs": 2590,
+  "errors": [],
+  "tail": ""
+ },
+ "overlay": [
+  "SrcTranslated/Funs.lean",
+  "SrcTranslated/Types.lean",
+  "aeneas-config.yml",
+  "translation-patches/chain-Chain-from_pb.patch",
+  "translation-patches/chain-Chain-into_pb.patch",
+  "translation-patches/lib-decode_state.patch",
+  "translation-patches/lib-initial_state.patch",
+  "translation-patches/lib-recv.patch",
+  "translation-patches/lib-send.patch",
+  "translation-patches/lib-state_pb.patch",
+  "translation-patches/polynomial-PolyDecoder-decoded_message.patch",
+  "translation-patches/polynomial-from_complete_points.patch",
+  "translation-patches/polynomial-point_at.patch",
+  "translation-patches/send_ct_serialize-Ct1Acknowledged-from_pb.patch",
+  "translation-patches/send_ct_serialize-Ct1Sampled-from_pb.patch",
+  "translation-patches/send_ct_serialize-HeaderReceived-from_pb.patch",
+  "translation-patches/send_ct_serialize-NoHeaderReceived-from_pb.patch",
+  "translation-patches/send_ek_serialize-EkSentCt1Received-from_pb.patch",
+  "translation-patches/send_ek_serialize-HeaderSent-from_pb.patch"
+ ],
+ "external_support_overlaid": [],
+ "external_models_overlaid": [
+  "SrcTranslated/FunsExternal.lean",
+  "SrcTranslated/TypesExternal.lean"
+ ],
+ "extraction_errors": [],
+ "broken_rounds": [
+  {
+   "round": 1,
+   "ok": false,
+   "errors_n": 101,
+   "build_s": 20,
+   "jobs": 2590
+  },
+  {
+   "round": 2,
+   "ok": false,
+   "errors_n": 23,
+   "build_s": 84,
+   "jobs": 2590
+  },
+  {
+   "round": 3,
+   "ok": false,
+   "errors_n": 18,
+   "build_s": 4,
+   "jobs": 2590
+  }
+ ],
+ "broken_green_after_sorry": false,
+ "broken_proofs": [],
+ "broken_proofs_detail": [],
+ "statement_errors": [
+  {
+   "file": "Spqr/Specs/Encoding/Polynomial/PolyEncoder/PointAt/SliceIterEnumMapCollect.lean",
+   "line": 41,
+   "decl": "enumerate_map_spec",
+   "where": "statement",
+   "kind": "unknown-identifier",
+   "msg": "Unknown constant `spqr.encoding.polynomial.PolyEncoder.point_at.closure_1`",
+   "round": 2
+  },
+  {
+   "file": "Spqr/Specs/Encoding/Polynomial/PolyEncoder/PointAt/SliceIterEnumMapCollect.lean",
+   "line": 44,
+   "decl": "enumerate_map_spec",
+   "where": "statement",
+   "kind": "unknown-identifier",
+   "msg": "Unknown constant `spqr.encoding.polynomial.PolyEncoder.point_at.closure_1.Insts.CoreOpsFunctionFnMutTuplePairUsizeShared0GF16Pt`",
+   "round": 2
+  },
+  {
+   "file": "Spqr/Specs/Lib/DecodeState.lean",
+   "line": 44,
+   "decl": "decode_state_spec",
+   "where": "statement",
+   "kind": "unknown-identifier",
+   "msg": "Unknown constant `spqr.proto.pq_ratchet.PqRatchetState.Insts.ProstMessageMessage.encode_to_vec`",
+   "round": 2
+  },
+  {
+   "file": "Spqr/Specs/Encoding/Polynomial/PolyEncoder/PointAt/CallMut.lean",
+   "line": 40,
+   "decl": "call_mut_spec",
+   "where": "statement",
+   "kind": "unknown-identifier",
+   "msg": "Unknown constant `spqr.encoding.polynomial.PolyEncoder.point_at.closure_1`",
+   "round": 2
+  },
+  {
+   "file": "Spqr/Specs/Encoding/Polynomial/PolyEncoder/PointAt/CallMut.lean",
+   "line": 43,
+   "decl": "call_mut_spec",
+   "where": "statement",
+   "kind": "unknown-identifier",
+   "msg": "Unknown identifier `call_mut`\n\nNote: It is not possible to treat `call_mut` as an implicitly bound variable here because the `autoImplicit` option is set to `false`.",
+   "round": 2
+  },
+  {
+   "file": "Spqr/Specs/Chain/Chain/Epoch/CallMut.lean",
+   "line": 33,
+   "decl": "call_mut_spec",
+   "where": "statement",
+   "kind": "unknown-identifier",
+   "msg": "Unknown constant `spqr.chain.Chain.from_pb.closure_1`",
+   "round": 2
+  },
+  {
+   "file": "Spqr/Specs/Chain/Chain/Epoch/CallMut.lean",
+   "line": 35,
+   "decl": "call_mut_spec",
+   "where": "statement",
+   "kind": "unknown-identifier",
+   "msg": "Unknown identifier `call_mut`\n\nNote: It is not possible to treat `call_mut` as an implicitly bound variable here because the `autoImplicit` option is set to `false`.",
+   "round": 2
+  },
+  {
+   "file": "Spqr/Specs/Chain/Chain/ChainEpoch/CallMut.lean",
+   "line": 32,
+   "decl": "call_mut_spec",
+   "where": "statement",
+   "kind": "unknown-identifier",
+   "msg": "Unknown constant `spqr.chain.Chain.into_pb.closure`",
+   "round": 2
+  },
+  {
+   "file": "Spqr/Specs/Chain/Chain/ChainEpoch/CallMut.lean",
+   "line": 33,
+   "decl": "call_mut_spec",
+   "where": "statement",
+   "kind": "unknown-identifier",
+   "msg": "Unknown identifier `call_mut`\n\nNote: It is not possible to treat `call_mut` as an implicitly bound variable here because the `autoImplicit` option is set to `false`.",
+   "round": 2
+  },
+  {
+   "file": "Spqr/Specs/Aeneas/MapCollectBridge.lean",
+   "line": 67,
+   "decl": "collect_default_bridge",
+   "where": "statement",
+   "kind": "unknown-identifier",
+   "msg": "Unknown identifier `spqr.core.iter.adapters.map.Map.Insts.CoreIterTraitsIteratorIterator`",
+   "round": 2
+  },
+  {
+   "file": "Spqr/Specs/Authenticator/Authenticator/VerifyCt.lean",
+   "line": 45,
+   "decl": "verify_ct_spec",
+   "where": "statement",
+   "kind": "unknown-identifier",
+   "msg": "Unknown identifier `Ok`\n\nNote: It is not possible to treat `Ok` as an implicitly bound variable here because the `autoImplicit` option is set to `false`.",
+   "round": 2
+  },
+  {
+   "file": "Spqr/Specs/Authenticator/Authenticator/VerifyHdr.lean",
+   "line": 44,
+   "decl": "verify_hdr_spec",
+   "where": "statement",
+   "kind": "unknown-identifier",
+   "msg": "Unknown identifier `Ok`\n\nNote: It is not possible to treat `Ok` as an implicitly bound variable here because the `autoImplicit` option is set to `false`.",
+   "round": 2
+  }
+ ],
+ "cascades": [],
+ "header_errors": [],
+ "statement_broken": [
+  "Spqr/Specs/Aeneas/MapCollectBridge.lean::collect_default_bridge",
+  "Spqr/Specs/Authenticator/Authenticator/VerifyCt.lean::verify_ct_spec",
+  "Spqr/Specs/Authenticator/Authenticator/VerifyHdr.lean::verify_hdr_spec",
+  "Spqr/Specs/Chain/Chain/ChainEpoch/CallMut.lean::call_mut_spec",
+  "Spqr/Specs/Chain/Chain/Epoch/CallMut.lean::call_mut_spec",
+  "Spqr/Specs/Encoding/Polynomial/PolyEncoder/PointAt/CallMut.lean::call_mut_spec",
+  "Spqr/Specs/Encoding/Polynomial/PolyEncoder/PointAt/SliceIterEnumMapCollect.lean::enumerate_map_spec",
+  "Spqr/Specs/Lib/DecodeState.lean::decode_state_spec"
+ ],
+ "needs_statement_change": true,
+ "file_errors": [
+  {
+   "file": "Spqr/Specs/Authenticator/Authenticator/VerifyCt.lean",
+   "line": 26,
+   "decl": null,
+   "where": "file",
+   "kind": "other",
+   "msg": "ambiguous identifier `Ok`, possible interpretations: [core.result.Result.Ok, core.result.Result.Ok]",
+   "round": 2
+  },
+  {
+   "file": "Spqr/Specs/Authenticator/Authenticator/VerifyHdr.lean",
+   "line": 26,
+   "decl": null,
+   "where": "file",
+   "kind": "other",
+   "msg": "ambiguous identifier `Ok`, possible interpretations: [core.result.Result.Ok, core.result.Result.Ok]",
+   "round": 2
+  }
+ ],
+ "blocked_modules": [
+  "Spqr",
+  "Spqr.Specs.Chain.Chain.ChainEpoch.CallOnce",
+  "Spqr.Specs.Chain.Chain.Epoch.CallOnce",
+  "Spqr.Specs.Chain.Chain.IntoPb",
+  "Spqr.Specs.Encoding.Encoder.NextChunk",
+  "Spqr.Specs.Encoding.Polynomial.PolyEncoder.ChunkAt",
+  "Spqr.Specs.Encoding.Polynomial.PolyEncoder.NextChunk",
+  "Spqr.Specs.Encoding.Polynomial.PolyEncoder.PointAt",
+  "Spqr.Specs.Encoding.Polynomial.PolyEncoder.PointAt.CallOnce",
+  "Spqr.Specs.Lib.CurrentVersion",
+  "Spqr.Specs.Lib.StateVersion",
+  "scripts.Audit"
+ ],
+ "blocked_files": [
+  "Spqr.lean",
+  "Spqr/Specs/Chain/Chain/ChainEpoch/CallOnce.lean",
+  "Spqr/Specs/Chain/Chain/Epoch/CallOnce.lean",
+  "Spqr/Specs/Chain/Chain/IntoPb.lean",
+  "Spqr/Specs/Encoding/Encoder/NextChunk.lean",
+  "Spqr/Specs/Encoding/Polynomial/PolyEncoder/ChunkAt.lean",
+  "Spqr/Specs/Encoding/Polynomial/PolyEncoder/NextChunk.lean",
+  "Spqr/Specs/Encoding/Polynomial/PolyEncoder/PointAt.lean",
+  "Spqr/Specs/Encoding/Polynomial/PolyEncoder/PointAt/CallOnce.lean",
+  "Spqr/Specs/Lib/CurrentVersion.lean",
+  "Spqr/Specs/Lib/StateVersion.lean",
+  "scripts/Audit.lean"
+ ],
+ "verdict": "break confirmed",
+ "comparison": {
+  "predicted_n": 17,
+  "actual_n": 8,
+  "true_positive": [
+   "Spqr/Specs/Aeneas/MapCollectBridge.lean::collect_default_bridge",
+   "Spqr/Specs/Chain/Chain/ChainEpoch/CallMut.lean::call_mut_spec",
+   "Spqr/Specs/Chain/Chain/Epoch/CallMut.lean::call_mut_spec",
+   "Spqr/Specs/Encoding/Polynomial/PolyEncoder/PointAt/CallMut.lean::call_mut_spec",
+   "Spqr/Specs/Encoding/Polynomial/PolyEncoder/PointAt/SliceIterEnumMapCollect.lean::enumerate_map_spec",
+   "Spqr/Specs/Lib/DecodeState.lean::decode_state_spec"
+  ],
+  "false_positive": [
+   "Spqr/Specs/Chain/Chain/ChainEpoch/CallOnce.lean::call_once_spec",
+   "Spqr/Specs/Chain/Chain/Epoch/CallOnce.lean::call_once_spec",
+   "Spqr/Specs/Chain/Chain/FromPb.lean::from_pb_spec",
+   "Spqr/Specs/Chain/Chain/IntoPb.lean::into_pb_spec",
+   "Spqr/Specs/Encoding/Polynomial/ConstPolysToPolys/MapCollect.lean::collect_spec",
+   "Spqr/Specs/Encoding/Polynomial/PolyEncoder/PointAt.lean::body_spec",
+   "Spqr/Specs/Encoding/Polynomial/PolyEncoder/PointAt.lean::from_iter_point_at_spec",
+   "Spqr/Specs/Encoding/Polynomial/PolyEncoder/PointAt.lean::iterToList_enum_map_acc",
+   "Spqr/Specs/Encoding/Polynomial/PolyEncoder/PointAt.lean::loop_spec",
+   "Spqr/Specs/Encoding/Polynomial/PolyEncoder/PointAt.lean::point_at_spec",
+   "Spqr/Specs/Encoding/Polynomial/PolyEncoder/PointAt/CallOnce.lean::call_once_spec"
+  ],
+  "false_negative": [
+   "Spqr/Specs/Authenticator/Authenticator/VerifyCt.lean::verify_ct_spec",
+   "Spqr/Specs/Authenticator/Authenticator/VerifyHdr.lean::verify_hdr_spec"
+  ]
+ }
+}

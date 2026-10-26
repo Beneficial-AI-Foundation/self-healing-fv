@@ -1,0 +1,412 @@
+{
+ "case_id": "spqr/e0e5b392",
+ "change_pr_url": "https://github.com/Beneficial-AI-Foundation/SparsePostQuantumRatchet-verify/pull/679",
+ "replayed_at": "2026-10-26T06:22:15+00:00",
+ "machine": {
+  "cpus": 18
+ },
+ "timing": {
+  "export_s": 0.1,
+  "base_fixed_wall_s": 331,
+  "broken_setup_s": 19.5,
+  "broken_rounds_s": 135,
+  "total_s": 485
+ },
+ "fixed": {
+  "ok": true,
+  "stage": "build",
+  "timings": {
+   "seed_s": 48.0,
+   "cache_lock_wait_s": 0.0,
+   "cache_get_s": 82,
+   "build_s": 182,
+   "store_s": 19.6
+  },
+  "reuse": {
+   "packages_reused": [],
+   "packages_fetched": [
+    "aeneas",
+    "mathlib",
+    "plausible",
+    "LeanSearchClient",
+    "importGraph",
+    "proofwidgets",
+    "aesop",
+    "Qq",
+    "batteries",
+    "Cli"
+   ],
+   "project_build_seeded_from": "339d49a5f09bc7c6a8f24a8835ae59ec577602cc"
+  },
+  "orphaned_pins": [],
+  "jobs": 2715,
+  "errors": [],
+  "tail": ""
+ },
+ "base": {
+  "ok": true,
+  "stage": "build",
+  "timings": {
+   "seed_s": 66.0,
+   "cache_lock_wait_s": 63.7,
+   "cache_get_s": 10,
+   "build_s": 156,
+   "store_s": 0.7
+  },
+  "reuse": {
+   "packages_reused": [
+    "aeneas",
+    "mathlib",
+    "plausible",
+    "LeanSearchClient",
+    "importGraph",
+    "proofwidgets",
+    "aesop",
+    "Qq",
+    "batteries",
+    "Cli"
+   ],
+   "packages_fetched": [],
+   "project_build_seeded_from": "339d49a5f09bc7c6a8f24a8835ae59ec577602cc"
+  },
+  "orphaned_pins": [],
+  "jobs": 2593,
+  "errors": [],
+  "tail": ""
+ },
+ "overlay": [
+  "SrcTranslated/Funs.lean",
+  "SrcTranslated/Types.lean",
+  "lake-manifest.json",
+  "lakefile.toml",
+  "lean-toolchain"
+ ],
+ "external_support_overlaid": [],
+ "external_models_overlaid": [
+  "SrcTranslated/FunsExternal.lean"
+ ],
+ "extraction_errors": [],
+ "broken_rounds": [
+  {
+   "round": 1,
+   "ok": false,
+   "errors_n": 8,
+   "build_s": 13,
+   "jobs": 2715
+  },
+  {
+   "round": 2,
+   "ok": false,
+   "errors_n": 13,
+   "build_s": 67,
+   "jobs": 2715
+  },
+  {
+   "round": 3,
+   "ok": false,
+   "errors_n": 4,
+   "build_s": 14,
+   "jobs": 2715
+  },
+  {
+   "round": 4,
+   "ok": false,
+   "errors_n": 1,
+   "build_s": 28,
+   "jobs": 2715
+  },
+  {
+   "round": 5,
+   "ok": false,
+   "errors_n": 3,
+   "build_s": 5,
+   "jobs": 2715
+  },
+  {
+   "round": 6,
+   "ok": true,
+   "errors_n": 0,
+   "build_s": 8,
+   "jobs": 2715
+  }
+ ],
+ "broken_green_after_sorry": true,
+ "broken_proofs": [
+  "Spqr/Auxiliary/Aeneas/StdNextCoreIterRangeStep.lean::IteratorRange_next_I32_spec",
+  "Spqr/Specs/Aeneas/FmtArgumentsFromStr.lean::from_str_spec",
+  "Spqr/Specs/Chain/Chain/FromPb.lean::from_pb_loop.body_spec",
+  "Spqr/Specs/Chain/Chain/FromPb.lean::from_pb_spec",
+  "Spqr/Specs/Encoding/Gf/Reduce/PolyReduce.lean::poly_reduce_spec",
+  "Spqr/Specs/Encoding/Gf/Unaccelerated/PolyMul.lean::poly_mul_loop_spec",
+  "Spqr/Specs/Encoding/Polynomial/PolyDecoder/CallMut.lean::call_mut_spec",
+  "Spqr/Specs/Encoding/Polynomial/PolyDecoder/FromPb.lean::body_spec#2",
+  "Spqr/Specs/Encoding/Polynomial/PolyDecoder/FromPb.lean::from_pb_spec",
+  "Spqr/Specs/Encoding/Polynomial/PolyDecoder/IntoPb.lean::body_spec#2",
+  "Spqr/Specs/Encoding/Polynomial/PolyDecoder/NewWithPolyCount.lean::new_with_poly_count_spec",
+  "Spqr/Specs/Encoding/Polynomial/PolyEncoder/IntoPb.lean::body_spec#3",
+  "Spqr/Specs/Encoding/Polynomial/Pt/Deserialize.lean::from_be_bytes_spec",
+  "Spqr/Specs/Lib/Version/TryFrom.lean::try_from_spec",
+  "Spqr/Specs/V1/Chunked/States/Serialize/MessageType/TryFrom.lean::try_from_spec"
+ ],
+ "broken_proofs_detail": [
+  {
+   "file": "Spqr/Specs/Lib/Version/TryFrom.lean",
+   "line": 50,
+   "decl": "try_from_spec",
+   "where": "body",
+   "kind": "unsolved-goals",
+   "msg": "unsolved goals\ncase h_3\nvalue value✝ : U8\nh0 : value = 0#8#uscalar → False\nh1 : value = 1#8#uscalar → False\nhv0 : ↑value ≠ 0\nhv1 : ↑value ≠ 1\n⊢ (do\n      let _ ← ok ()\n      let a1 ← ok ()\n      let s1 ← alloc.fmt.format a1\n      ok (core.result.Result.Err s1)) ⦃\n    result =>\n    ¬result = core.result.Result.Ok V0 ∧ ¬result = core.result.Result.Ok V1 ∧ ∃ e, result = core.result.Result.Err e ⦄",
+   "round": 2,
+   "decl_kind": "theorem"
+  },
+  {
+   "file": "Spqr/Specs/V1/Chunked/States/Serialize/MessageType/TryFrom.lean",
+   "line": 72,
+   "decl": "try_from_spec",
+   "where": "body",
+   "kind": "syntax",
+   "msg": "Invalid `⟨...⟩` notation: The expected type\n  Data.Coinductive.DWP WP.effectWP\n    (do\n      let _ ← ok ()\n      let a1 ← ok ()\n      let s1 ← alloc.fmt.format a1\n      ok (core.result.Result.Err s1))\n    (fun value x => (fun result => ∃ e, result = core.result.Result.Err e) value) ()\nis not an inductive type\n\nNote: This notation can only be used when the expected type is an inductive type with a single constructor",
+   "round": 2,
+   "decl_kind": "theorem"
+  },
+  {
+   "file": "Spqr/Specs/Encoding/Polynomial/PolyDecoder/CallMut.lean",
+   "line": 38,
+   "decl": "call_mut_spec",
+   "where": "body",
+   "kind": "unsolved-goals",
+   "msg": "unsolved goals\nc : closure\ntupled_args : Usize\n⊢ (do\n      let ss ← ok (alloc.vec.Vec.new Pt)\n      ok (ss, c)) ⦃\n    result => result.1 = alloc.vec.Vec.new Pt ⦄",
+   "round": 2,
+   "decl_kind": "theorem"
+  },
+  {
+   "file": "Spqr/Specs/Encoding/Polynomial/Pt/Deserialize.lean",
+   "line": 99,
+   "decl": "from_be_bytes_spec",
+   "where": "body",
+   "kind": "tactic-failed",
+   "msg": "Tactic `rewrite` failed: Did not find an occurrence of the pattern\n  (?x ||| ?y).toNat\nin the target expression\n  (BitVec.cast ⋯ (BitVec.fromLEBytes ((List.map U8.bv [a0, a1]).reverseAux []))).toNat = a0.bv.toNat * 256 + a1.bv.toNat\n\na : Std.Array U8 2#usize\na0 a1 : U8\nhv : ↑a = [a0, a1]\n⊢ (BitVec.cast ⋯ (BitVec.fromLEBytes ((List.map U8.bv [a0, a1]).reverseAux []))).toNat = a0.bv.toNat * 256 + a1.bv.toNat\n\nNote: The target expression is not type-correct under the `implicit` transparency level, which may have triggered the failure. This is usually caused by unfolding of semireducible definitio",
+   "round": 2,
+   "decl_kind": "theorem"
+  },
+  {
+   "file": "Spqr/Specs/Encoding/Gf/Unaccelerated/PolyMul.lean",
+   "line": 303,
+   "decl": "poly_mul_loop_spec",
+   "where": "body",
+   "kind": "tactic-failed",
+   "msg": "Tactic `apply` failed: could not unify the conclusion of `@Nat.mod_eq_of_lt`\n  ?a % ?b = ?a\nwith the goal\n  clmul ↑me ↑b ↑shift' ^^^ ↑me <<< ↑shift' % U32.size = clmul ↑me ↑b ↑shift' ^^^ ↑me <<< ↑shift'\n\nNote: The full type of `@Nat.mod_eq_of_lt` is\n  ∀ {a b : ℕ}, a < b → a % b = a\n\nNote: The following definitions were not unfolded because their definition is not exposed:\n  Nat.xor ↦ 7\n\ncase right.left\nb : U16\nacc me shift : U32\nh_shift : ↑shift ≤ 16\nacc' shift' : U32\ni : U16\n_✝² : [> let i ← 1#u16 <<< shift' <]\ni1 : U16\n_✝¹ : [> let i1 ← lift (b &&& i) <]\nx : U32\n_✝ : [> let x ← me <<< shift'",
+   "round": 2,
+   "decl_kind": "theorem"
+  },
+  {
+   "file": "Spqr/Specs/Aeneas/FmtArgumentsFromStr.lean",
+   "line": 41,
+   "decl": "from_str_spec",
+   "where": "body",
+   "kind": "tactic-failed",
+   "msg": "`simp` made no progress\n\nNote: The target expression is not type-correct under the `implicit` transparency level, which may have triggered the failure. This is usually caused by unfolding of semireducible definitions in prior tactic steps. Use `set_option linter.tacticCheckInstances true` to investigate the source of the issue.\nFull error:\n  Application type mismatch: The argument\n    ()\n  has type\n    Unit\n  but is expected to have type\n    Arguments\n  in the application\n    ok ()",
+   "round": 2,
+   "decl_kind": "theorem"
+  },
+  {
+   "file": "Spqr/Auxiliary/Aeneas/StdNextCoreIterRangeStep.lean",
+   "line": 54,
+   "decl": "IteratorRange_next_I32_spec",
+   "where": "body",
+   "kind": "tactic-failed",
+   "msg": "`simp` made no progress",
+   "round": 2,
+   "decl_kind": "theorem"
+  },
+  {
+   "file": "Spqr/Specs/Chain/Chain/FromPb.lean",
+   "line": 101,
+   "decl": "from_pb_loop.body_spec",
+   "where": "body",
+   "kind": "unsolved-goals",
+   "msg": "unsolved goals\ncase h_2\niter : alloc.vec.into_iter.IntoIter proto.pq_ratchet.chain.Epoch\nlinks : alloc.collections.vec_deque.VecDeque ChainEpoch Global\nhd✝ : proto.pq_ratchet.chain.Epoch\ntl✝ : List proto.pq_ratchet.chain.Epoch\nheq✝ : ↑iter = hd✝ :: tl✝\nhcap : (↑links.buf).length + (tl✝.length + 1) ≤ Usize.max\nhlen : ↑links.length = (↑links.buf).length\n⊢ (let (o, iter1) := (some hd✝, alloc.vec.Vec.from tl✝ ⋯)\n    match o with\n    | none => ok (ControlFlow.done (links, none))\n    | some link => do\n      let r ← from_pb.link_from_pb link\n      match r with\n        | core.result.Result.Ok epoch =>",
+   "round": 2,
+   "decl_kind": "theorem"
+  },
+  {
+   "file": "Spqr/Specs/Chain/Chain/FromPb.lean",
+   "line": 200,
+   "decl": "from_pb_spec",
+   "where": "body",
+   "kind": "tactic-failed",
+   "msg": "Tactic `apply` failed: could not unify the conclusion of `WP.spec_bind\n  (from_pb_loop_spec pb.links ?m.251 ?m.252 ?m.253)`\n  Std.bind (from_pb_loop pb.links ?m.251) ?m.247 ⦃ ?m.248 ⦄\nwith the goal\n  (do\n      let iter ← ok pb.links\n      let (links1, error) ←\n        from_pb_loop iter { buf := alloc.vec.Vec.new ChainEpoch, head := 0#usize, length := 0#usize }\n      match error with\n        | none => do\n          let r2 ← core.option.Option.ok_or pb.params Error.StateDecode\n          let cf1 ←\n            match r2 with\n              | core.result.Result.Ok v => ok (core.ops.control_flow.Contro",
+   "round": 2,
+   "decl_kind": "theorem"
+  },
+  {
+   "file": "Spqr/Specs/Encoding/Polynomial/PolyEncoder/IntoPb.lean",
+   "line": 369,
+   "decl": "body_spec#3",
+   "where": "body",
+   "kind": "unsolved-goals",
+   "msg": "unsolved goals\npolys : Std.Array Poly 16#usize\niter : core.ops.range.Range Usize\nv : alloc.vec.Vec (alloc.vec.Vec U8)\nh_end_le : ↑iter.end ≤ (↑polys).length\nh_out_overflow : v.length + 1 ≤ Usize.max\nh_ser_overflow : ∀ j < polys.length, 2 * (↑polys)[j]!.degree + 2 ≤ Usize.max\nopt : Option Usize\niter1' : core.ops.range.Range Usize\nh_none : ¬↑iter.start < ↑iter.end → opt = none ∧ iter1' = iter\nh_some : ↑iter.start < ↑iter.end → opt = some iter.start ∧ ↑iter1'.start = ↑iter.start + 1 ∧ iter1'.end = iter.end\nh_lt : ↑iter.start < ↑iter.end\nh_opt_eq : opt = some iter.start\nh_start1 : ↑iter1'.start = ",
+   "round": 2,
+   "decl_kind": "theorem"
+  },
+  {
+   "file": "Spqr/Specs/Encoding/Polynomial/PolyDecoder/NewWithPolyCount.lean",
+   "line": 69,
+   "decl": "new_with_poly_count_spec",
+   "where": "body",
+   "kind": "tactic-failed",
+   "msg": "Tactic `rfl` failed: The left-hand side\n  do\n    let ss ← ok (alloc.vec.Vec.new Pt)\n    ok (ss, ())\nis not definitionally equal to the right-hand side\n  ok (default, ())\n\ncase h_const\nlen_bytes _polys i✝ : Usize\n_✝ : [> let i✝ ← len_bytes % 2#usize <]\ni_post : ↑i✝ = ↑len_bytes % 2\nh✝ : ¬(i✝ != 0#usize) = true\ni1 : Usize\n_ : [> let i1 ← len_bytes / 2#usize <]\ni1_post : ↑i1 = ↑len_bytes / 2\ni : Usize\n⊢ (do\n      let ss ← ok (alloc.vec.Vec.new Pt)\n      ok (ss, ())) =\n    ok (default, ())",
+   "round": 3,
+   "decl_kind": "theorem"
+  },
+  {
+   "file": "Spqr/Specs/Encoding/Gf/Reduce/PolyReduce.lean",
+   "line": 284,
+   "decl": "poly_reduce_spec",
+   "where": "body",
+   "kind": "tactic-failed",
+   "msg": "scalar_tac failed to prove the goal below.\n\nNote that scalar_tac is almost equivalent to:\n  scalar_tac_preprocess; omega\n\nGoal: \nv i : U32\n_✝⁸ : [> let i ← v >>> 24#i32 <]\ni_post : ↑i = ↑v >>> 24\ni_post1 : i.bv = v.bv >>> 24\ni1 : Usize\n_✝⁷ : [> let i1 ← lift (UScalar.cast UScalarTy.Usize i) <]\ni1_post : i1 = UScalar.cast UScalarTy.Usize i\na : Std.Array U16 256#usize\n_✝⁶ : [> let a ← reduce_bytes <]\na_post : ∀ (j : Usize), ↑j < 256 → natToBinaryPoly ↑a[j]! = natToBinaryPoly ↑j * X ^ 16 %ₘ polyGF2\ni2 : U16\n_✝⁵ : [> let i2 ← a.index_usize i1 <]\ni2_post : i2 = (↑a)[↑i1]\ni3 : U32\n_✝⁴ : [> let i3 ← ",
+   "round": 3,
+   "decl_kind": "theorem"
+  },
+  {
+   "file": "Spqr/Specs/Encoding/Polynomial/PolyDecoder/IntoPb.lean",
+   "line": 230,
+   "decl": "body_spec#2",
+   "where": "body",
+   "kind": "tactic-failed",
+   "msg": "Step failed: could not find a local assumption or a theorem to apply",
+   "round": 4,
+   "decl_kind": "theorem"
+  },
+  {
+   "file": "Spqr/Specs/Encoding/Polynomial/PolyDecoder/FromPb.lean",
+   "line": 423,
+   "decl": "body_spec#2",
+   "where": "body",
+   "kind": "tactic-failed",
+   "msg": "Could not unify the theorem with the target:\n- theorem: Std.bind (core.slice.Slice.chunks_exact pts.deref 4#usize) ?k ⦃ ?Pₖ ⦄\n- target: (do\n    let v1 ← ok (alloc.vec.Vec.new Pt)\n    let iter2 ← core.slice.Slice.chunks_exact pts.deref 4#usize\n    let v2 ← from_pb_loop0_loop0 iter2 v1\n    massert (iter.start < 16#usize)\n    let (ss, index_mut_back) ← out_pts.index_mut_usize iter.start\n    let a ← (index_mut_back ss).update iter.start v2\n    ok (ControlFlow.cont (iter1', a))) ⦃\n  cf =>\n  match cf with\n  | ControlFlow.done r =>\n    (iter.start < iter.end →\n        v[↑iter.start]!.length % 4 ≠ 0 ∧",
+   "round": 5,
+   "decl_kind": "theorem"
+  },
+  {
+   "file": "Spqr/Specs/Encoding/Polynomial/PolyDecoder/FromPb.lean",
+   "line": 706,
+   "decl": "from_pb_spec",
+   "where": "body",
+   "kind": "unsolved-goals",
+   "msg": "unsolved goals\ncase h_const\npb : proto.pq_ratchet.PolynomialDecoder\nh_pts_overflow : ∀ j < pb.pts.length, pb.pts[j]!.length + 4 ≤ Usize.max\nh✝ : ¬¬(↑pb.pts).length = 16\nh16 : (↑pb.pts).length = 16\ng : from_pb.closure\ni : Usize\n⊢ (do\n      let ss ← ok (alloc.vec.Vec.new Pt)\n      ok (ss, g)) =\n    ok (alloc.vec.Vec.new Pt, g)",
+   "round": 5,
+   "decl_kind": "theorem"
+  }
+ ],
+ "statement_errors": [],
+ "cascades": [],
+ "header_errors": [],
+ "statement_broken": [],
+ "needs_statement_change": false,
+ "file_errors": [],
+ "blocked_modules": [],
+ "blocked_files": [],
+ "verdict": "break confirmed",
+ "comparison": {
+  "predicted_n": 91,
+  "actual_n": 15,
+  "true_positive": [
+   "Spqr/Auxiliary/Aeneas/StdNextCoreIterRangeStep.lean::IteratorRange_next_I32_spec",
+   "Spqr/Specs/Aeneas/FmtArgumentsFromStr.lean::from_str_spec",
+   "Spqr/Specs/Chain/Chain/FromPb.lean::from_pb_loop.body_spec",
+   "Spqr/Specs/Chain/Chain/FromPb.lean::from_pb_spec",
+   "Spqr/Specs/Encoding/Gf/Reduce/PolyReduce.lean::poly_reduce_spec",
+   "Spqr/Specs/Encoding/Gf/Unaccelerated/PolyMul.lean::poly_mul_loop_spec",
+   "Spqr/Specs/Encoding/Polynomial/PolyDecoder/CallMut.lean::call_mut_spec",
+   "Spqr/Specs/Encoding/Polynomial/PolyDecoder/FromPb.lean::body_spec#2",
+   "Spqr/Specs/Encoding/Polynomial/PolyDecoder/FromPb.lean::from_pb_spec",
+   "Spqr/Specs/Encoding/Polynomial/PolyDecoder/IntoPb.lean::body_spec#2",
+   "Spqr/Specs/Encoding/Polynomial/PolyDecoder/NewWithPolyCount.lean::new_with_poly_count_spec",
+   "Spqr/Specs/Encoding/Polynomial/PolyEncoder/IntoPb.lean::body_spec#3",
+   "Spqr/Specs/Encoding/Polynomial/Pt/Deserialize.lean::from_be_bytes_spec",
+   "Spqr/Specs/Lib/Version/TryFrom.lean::try_from_spec",
+   "Spqr/Specs/V1/Chunked/States/Serialize/MessageType/TryFrom.lean::try_from_spec"
+  ],
+  "false_positive": [
+   "Spqr/Math/Gf2Poly/Basic.lean::natToBinaryPoly_coeff",
+   "Spqr/Math/Poly/Aeneas/PolyIdentity.lean::poly_identity_from",
+   "Spqr/Math/Poly/CharTwo/ToGF216.lean::getElem!_toGF216_eq_coeff",
+   "Spqr/Math/Poly/Coeff/Basic.lean::listToGF216Poly_cons",
+   "Spqr/Math/Poly/Coeff/ListOps.lean::listToGF216Poly_add",
+   "Spqr/Math/Poly/Coeff/ListOps.lean::listToGF216Poly_append_singleton",
+   "Spqr/Math/Poly/Coeff/ListOps.lean::listToGF216Poly_eq_X_mul_listToGF216Poly_drop_one",
+   "Spqr/Math/Poly/Coeff/MultXdiffPolyIdentity.lean::mult_xdiff_poly_identity",
+   "Spqr/Math/Poly/ExpectedTrailing/Basic.lean::expectedTrailingPoly_coeff_eq_zero_of_lt",
+   "Spqr/Math/Poly/Horner/Defs.lean::hornerAccum_unfold",
+   "Spqr/Math/Poly/Identities/Basic.lean::coeff_succ_C_add_X_sub_C_mul",
+   "Spqr/Math/Poly/Lagrange/BasisPoly.lean::natDegree_lagrangeBasisPoly_le",
+   "Spqr/Math/Poly/Lagrange/CondProdLinearFactors.lean::condProdLinearFactors_accum",
+   "Spqr/Math/Poly/Lagrange/CondProdLinearFactors.lean::condProdLinearFactors_skip",
+   "Spqr/Math/Poly/Lagrange/CountNonSkip.lean::countNonSkip_accum",
+   "Spqr/Math/Poly/Lagrange/CountNonSkip.lean::countNonSkip_skip",
+   "Spqr/Math/Poly/Lagrange/DenomProd.lean::lagrangeDenomProd_accum",
+   "Spqr/Math/Poly/Lagrange/DenomProd.lean::lagrangeDenomProd_skip",
+   "Spqr/Math/Poly/Lagrange/InterpolantSum.lean::lagrangeInterpolantSum_coeff_high",
+   "Spqr/Math/Poly/LinearFactors/Basic.lean::prodLinearFactors_eq_one_of_not_lt",
+   "Spqr/Math/Poly/LinearFactors/Basic.lean::prodLinearFactors_step",
+   "Spqr/Math/Poly/LinearFactors/Degree.lean::prodLinearFactors_coeff_eq_zero_high",
+   "Spqr/Specs/Aeneas/SliceChunksExact.lean::List.toChunksExact_chunks_length_eq",
+   "Spqr/Specs/Aeneas/SliceChunksExact.lean::attach_map_getElem!_val",
+   "Spqr/Specs/Aeneas/SliceChunksExact.lean::chunks_exact_spec_with_content",
+   "Spqr/Specs/Aeneas/SliceIteratorNext.lean::next_spec",
+   "Spqr/Specs/Aeneas/SliceListToVec.lean::listToVec_spec",
+   "Spqr/Specs/Aeneas/TryFromSliceToArray.lean::try_from_spec",
+   "Spqr/Specs/Aeneas/VecExtendFromSlice.lean::extend_from_slice_GF16_spec",
+   "Spqr/Specs/Aeneas/VecExtendFromSlice.lean::extend_from_slice_U8_spec",
+   "Spqr/Specs/Chain/Chain/IntoPb.lean::body_spec",
+   "Spqr/Specs/Chain/Chain/RecvKey.lean::recv_key_spec",
+   "Spqr/Specs/Chain/Chain/RecvKey32.lean::recv_key_spec_32",
+   "Spqr/Specs/Chain/Chain/SendKey.lean::send_key_spec",
+   "Spqr/Specs/Chain/ChainEpochDirection/Key.lean::KeyLoopInv.step",
+   "Spqr/Specs/Chain/ChainEpochDirection/Key.lean::body_done",
+   "Spqr/Specs/Chain/ChainEpochDirection/Key.lean::body_spec",
+   "Spqr/Specs/Chain/ChainEpochDirection/Key.lean::cedKeyAdvancePost_of_tail",
+   "Spqr/Specs/Chain/ChainEpochDirection/Key.lean::eq_iterKeyHistory_of_data",
+   "Spqr/Specs/Chain/ChainEpochDirection/Key.lean::iterChainSecret_succ",
+   "Spqr/Specs/Chain/ChainEpochDirection/Key.lean::iterKeyHistoryData_succ",
+   "Spqr/Specs/Chain/ChainEpochDirection/Key.lean::key_spec_all_core",
+   "Spqr/Specs/Chain/KeyHistory/Gc.lean::body_spec",
+   "Spqr/Specs/Chain/KeyHistory/Gc.lean::gc_loop_spec",
+   "Spqr/Specs/Chain/KeyHistory/Get.lean::get_spec",
+   "Spqr/Specs/Encoding/Gf/Reduce/ReduceBytes.lean::reduceByteTable_eq_poly_full",
+   "Spqr/Specs/Encoding/Gf/Unaccelerated/PolyMul.lean::clmul_poly_eq_mul",
+   "Spqr/Specs/Encoding/Polynomial/Poly/AddAssign.lean::enumerate_sliceiter_next_some",
+   "Spqr/Specs/Encoding/Polynomial/Poly/AddAssign.lean::poly_update_in_range",
+   "Spqr/Specs/Encoding/Polynomial/Poly/FromCompletePoints.lean::EnumerateSliceIter_next_Pt_some",
+   "Spqr/Specs/Encoding/Polynomial/Poly/LagrangeInterpolate.lean::lagrange_interpolate_spec",
+   "Spqr/Specs/Encoding/Polynomial/Poly/LagrangeInterpolateComplete.lean::lagrange_interpolate_complete_spec",
+   "Spqr/Specs/Encoding/Polynomial/Poly/Serialize.lean::extend_from_slice_U8_spec",
+   "Spqr/Specs/Encoding/Polynomial/PolyConst/LagrangeInterpolatePt.lean::listToGF216Poly_replicate_zero_set_one",
+   "Spqr/Specs/Encoding/Polynomial/PolyConst/MultXdiff.lean::body_spec",
+   "Spqr/Specs/Encoding/Polynomial/PolyConst/MultXdiff.lean::body_spec#2",
+   "Spqr/Specs/Encoding/Polynomial/PolyDecoder/AddChunk.lean::body_pts_length_le",
+   "Spqr/Specs/Encoding/Polynomial/PolyDecoder/AddChunk.lean::body_spec",
+   "Spqr/Specs/Encoding/Polynomial/PolyDecoder/AddChunk.lean::ite_or_of_neg_neg",
+   "Spqr/Specs/Encoding/Polynomial/PolyEncoder/ChunkAt.lean::loop_spec",
+   "Spqr/Specs/Encoding/Polynomial/PolyEncoder/Defs.lean::from_pb_new_implies_old_partial",
+   "Spqr/Specs/Encoding/Polynomial/PolyEncoder/EncodeBytesBase.lean::body_spec_chunk",
+   "Spqr/Specs/Encoding/Polynomial/PolyEncoder/EncodeBytesBase.lean::encode_bytes_base_spec",
+   "Spqr/Specs/Encoding/Polynomial/PolyEncoder/FromPb.lean::body_spec",
+   "Spqr/Specs/Encoding/Polynomial/PolyEncoder/FromPb.lean::from_pb_spec",
+   "Spqr/Specs/Encoding/Polynomial/PolyEncoder/PointAt.lean::body_spec#2",
+   "Spqr/Specs/Encoding/Polynomial/PolyEncoder/PointAt.lean::enum_next_some",
+   "Spqr/Specs/Encoding/Polynomial/PolyEncoder/PointAt.lean::point_at_spec",
+   "Spqr/Specs/IncrementalMlkem768/FlipEndianness.lean::loop_spec",
+   "Spqr/Specs/V1/Chunked/States/Serialize/Message/Deserialize.lean::Message.deserialize_spec",
+   "Spqr/Specs/V1/Unchunked/SendCt/Serialize/Ct1Sent/FromPb.lean::from_pb_spec",
+   "Spqr/Specs/V1/Unchunked/SendCt/Serialize/Ct1SentEkReceived/FromPb.lean::from_pb_spec",
+   "Spqr/Specs/V1/Unchunked/SendCt/Serialize/HeaderReceived/FromPb.lean::from_pb_spec",
+   "Spqr/Specs/V1/Unchunked/SendEk/Serialize/EkSent/FromPb.lean::from_pb_spec",
+   "Spqr/Specs/V1/Unchunked/SendEk/Serialize/EkSentCt1Received/FromPb.lean::from_pb_spec",
+   "Spqr/Specs/V1/Unchunked/SendEk/Serialize/HeaderSent/FromPb.lean::from_pb_spec"
+  ],
+  "false_negative": []
+ }
+}

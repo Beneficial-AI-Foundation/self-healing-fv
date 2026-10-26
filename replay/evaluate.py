@@ -65,6 +65,7 @@ def main() -> int:
         mod = lambda k: k.split("::")[0]
         blocked = set(res.get("blocked_files") or [m.replace(".", "/") + ".lean" for m in res["blocked_modules"]])
         blocked |= {e["file"] for e in res["file_errors"] + res.get("header_errors", [])}
+        blocked |= {t["file"] for t in res.get("timeouts", [])}  # hung file: its theorems are unknown
         unknown = {p for p in pred - act if mod(p) in blocked}
         # Edited by the human only because a statement they changed (in the same module) forced it.
         stmt_mods = {mod(k) for k in statement_broken(res)}

@@ -1,0 +1,177 @@
+{
+ "case_id": "spqr/49a5b29f",
+ "change_pr_url": "https://github.com/Beneficial-AI-Foundation/SparsePostQuantumRatchet-verify/pull/106",
+ "replayed_at": "2026-10-26T05:34:22+00:00",
+ "machine": {
+  "cpus": 18
+ },
+ "timing": {
+  "export_s": 0.1,
+  "base_fixed_wall_s": 260,
+  "broken_setup_s": 15.8,
+  "broken_rounds_s": 60,
+  "total_s": 337
+ },
+ "fixed": {
+  "ok": true,
+  "stage": "build",
+  "timings": {
+   "seed_s": 69.5,
+   "cache_lock_wait_s": 9.0,
+   "cache_get_s": 23,
+   "build_s": 158,
+   "store_s": 0.5
+  },
+  "reuse": {
+   "packages_reused": [
+    "mathlib",
+    "plausible",
+    "LeanSearchClient",
+    "importGraph",
+    "proofwidgets",
+    "aesop",
+    "Qq",
+    "batteries",
+    "Cli"
+   ],
+   "packages_fetched": [
+    "aeneas"
+   ],
+   "project_build_seeded_from": "e4dda3b02fc166a9b012a800b9b2d1b54c6ac089"
+  },
+  "orphaned_pins": [],
+  "jobs": 2271,
+  "errors": [],
+  "tail": ""
+ },
+ "base": {
+  "ok": true,
+  "stage": "build",
+  "timings": {
+   "seed_s": 69.0,
+   "cache_lock_wait_s": 0.0,
+   "cache_get_s": 10,
+   "build_s": 43,
+   "store_s": 0.2
+  },
+  "reuse": {
+   "packages_reused": [
+    "aeneas",
+    "mathlib",
+    "plausible",
+    "LeanSearchClient",
+    "importGraph",
+    "proofwidgets",
+    "aesop",
+    "Qq",
+    "batteries",
+    "Cli"
+   ],
+   "packages_fetched": [],
+   "project_build_seeded_from": "e4dda3b02fc166a9b012a800b9b2d1b54c6ac089"
+  },
+  "orphaned_pins": [],
+  "jobs": 2267,
+  "errors": [],
+  "tail": ""
+ },
+ "overlay": [
+  "Spqr/Code/Funs.lean",
+  "Spqr/Code/Types.lean",
+  "aeneas-config.yml",
+  "lake-manifest.json",
+  "lakefile.toml"
+ ],
+ "external_models_overlaid": [
+  "Spqr/Code/FunsExternal.lean"
+ ],
+ "extraction_errors": [],
+ "broken_rounds": [
+  {
+   "round": 1,
+   "ok": false,
+   "errors_n": 43,
+   "build_s": 17,
+   "jobs": 2271
+  },
+  {
+   "round": 2,
+   "ok": false,
+   "errors_n": 2,
+   "build_s": 21,
+   "jobs": 2271
+  },
+  {
+   "round": 3,
+   "ok": false,
+   "errors_n": 5,
+   "build_s": 11,
+   "jobs": 2271
+  },
+  {
+   "round": 4,
+   "ok": true,
+   "errors_n": 0,
+   "build_s": 11,
+   "jobs": 2271
+  }
+ ],
+ "broken_green_after_sorry": true,
+ "broken_proofs": [
+  "Spqr/Specs/Encoding/Gf/Reduce/PolyReduce.lean::poly_reduce_spec",
+  "Spqr/Specs/Encoding/Gf/Reduce/ReduceBytes.lean::reduce_bytes_loop_spec",
+  "Spqr/Specs/Encoding/Polynomial/Pt/Serialize.lean::serialize_spec"
+ ],
+ "broken_proofs_detail": [
+  {
+   "file": "Spqr/Specs/Encoding/Polynomial/Pt/Serialize.lean",
+   "line": 127,
+   "decl": "serialize_spec",
+   "where": "body",
+   "kind": "tactic-failed",
+   "msg": "`grind` failed\ncase grind.1.1.1.1.1.1.1.1.1.1.1.1\nself : Pt\ns : Slice U8\nindex_mut_back : Slice U8 → Std.Array U8 4#usize\n__1 :\n  [> let(s, index_mut_back) ←\n    core.array.Array.index_mut (core.ops.index.IndexMutSlice (core.slice.index.SliceIndexRangeToUsizeSlice U8))\n      (Array.repeat 4#usize 0#u8) { «end» := 2#usize } <]\ns_post3 : ∀ (s' : Slice U8), ↑(index_mut_back s') = (↑(Array.repeat 4#usize 0#u8)).setSlice! 0 ↑s'\ns_post1 : ↑s = List.slice 0 2 ↑(Array.repeat 4#usize 0#u8)\ns_post2 : s.length = 2\na : Std.Array U8 2#usize\n__2 : [> let a ← lift (core.num.U16.to_be_bytes self.x.value) <]\na",
+   "round": 2,
+   "decl_kind": "theorem"
+  },
+  {
+   "file": "Spqr/Specs/Encoding/Gf/Reduce/ReduceBytes.lean",
+   "line": 32,
+   "decl": "reduce_bytes_loop_spec",
+   "where": "body",
+   "kind": "tactic-failed",
+   "msg": "`grind` failed\ncase grind.1.1.1.1.1.1\nout : Std.Array U16 256#usize\ni : Usize\nhi : ↑i ≤ 256\nh_inv : ∀ j < i, ↑out[j]! = reduceByteTable ↑j\nout' : Std.Array U16 256#usize\ni' : Usize\nhi'_bound : ↑(out', i').2 ≤ 256\nh_inv' : ∀ j < (out', i').2, ↑(out', i').1[j]! = reduceByteTable ↑j\nhLt : i' < 256#usize\nh : i' < 256#usize\ni1 : U8\n__1 : [> let i1 ← lift (UScalar.cast UScalarTy.U8 i') <]\ni1_post : i1 = UScalar.cast UScalarTy.U8 i'\ni2 : U32\n__2 : [> let i2 ← reduce_from_byte i1 <]\ni2_post : ↑i2 % 2 ^ 16 = reduceByteTable ↑i1\ni3 : U16\n__3 : [> let i3 ← lift (UScalar.cast UScalarTy.U16 i2) <]\ni3_post ",
+   "round": 2,
+   "decl_kind": "theorem"
+  },
+  {
+   "file": "Spqr/Specs/Encoding/Gf/Reduce/PolyReduce.lean",
+   "line": 284,
+   "decl": "poly_reduce_spec",
+   "where": "body",
+   "kind": "tactic-failed",
+   "msg": "`grind` failed\ncase grind.1.1.1.1.1.1.1.1.1.2.2.1.2.1.1.1.1.1.1.2.1\nv i : U32\n__1 : [> let i ← v >>> 24#i32 <]\ni_post1 : ↑i = ↑v >>> 24\ni_post2 : i.bv = v.bv >>> 24\ni1 : Usize\n__2 : [> let i1 ← lift (UScalar.cast UScalarTy.Usize i) <]\ni1_post : i1 = UScalar.cast UScalarTy.Usize i\na : Std.Array U16 256#usize\n__3 : [> let a ← reduce_bytes <]\na_post : ∀ (j : Usize), ↑j < 256 → natToBinaryPoly ↑a[j]! = natToBinaryPoly ↑j * X ^ 16 %ₘ polyGF2\ni2 : U16\n__4 : [> let i2 ← a.index_usize i1 <]\ni2_post : i2 = (↑a)[↑i1]\ni3 : U32\n__5 : [> let i3 ← lift (UScalar.cast UScalarTy.U32 i2) <]\ni3_post : i3 = UScal",
+   "round": 3,
+   "decl_kind": "theorem"
+  }
+ ],
+ "statement_errors": [],
+ "cascades": [],
+ "header_errors": [],
+ "statement_broken": [],
+ "needs_statement_change": false,
+ "file_errors": [],
+ "blocked_modules": [],
+ "blocked_files": [],
+ "verdict": "break confirmed",
+ "comparison": {
+  "predicted_n": 3,
+  "actual_n": 3,
+  "true_positive": [
+   "Spqr/Specs/Encoding/Gf/Reduce/PolyReduce.lean::poly_reduce_spec",
+   "Spqr/Specs/Encoding/Gf/Reduce/ReduceBytes.lean::reduce_bytes_loop_spec",
+   "Spqr/Specs/Encoding/Polynomial/Pt/Serialize.lean::serialize_spec"
+  ],
+  "false_positive": [],
+  "false_negative": []
+ }
+}

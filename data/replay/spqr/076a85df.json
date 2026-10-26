@@ -1,0 +1,285 @@
+{
+ "case_id": "spqr/076a85df",
+ "change_pr_url": "https://github.com/Beneficial-AI-Foundation/SparsePostQuantumRatchet-verify/pull/287",
+ "replayed_at": "2026-10-26T05:46:58+00:00",
+ "machine": {
+  "cpus": 18
+ },
+ "timing": {
+  "export_s": 0.1,
+  "base_fixed_wall_s": 380,
+  "broken_setup_s": 18.6,
+  "broken_rounds_s": 95,
+  "total_s": 494
+ },
+ "fixed": {
+  "ok": true,
+  "stage": "build",
+  "timings": {
+   "seed_s": 73.9,
+   "cache_lock_wait_s": 6.9,
+   "cache_get_s": 12,
+   "build_s": 138,
+   "store_s": 0.2
+  },
+  "reuse": {
+   "packages_reused": [
+    "aeneas",
+    "mathlib",
+    "plausible",
+    "LeanSearchClient",
+    "importGraph",
+    "proofwidgets",
+    "aesop",
+    "Qq",
+    "batteries",
+    "Cli"
+   ],
+   "packages_fetched": [],
+   "project_build_seeded_from": "49e2f3125b38d23dcaffbf6c71973c3d4207b89c"
+  },
+  "orphaned_pins": [],
+  "jobs": 2392,
+  "errors": [],
+  "tail": ""
+ },
+ "base": {
+  "ok": true,
+  "stage": "build",
+  "timings": {
+   "seed_s": 67.8,
+   "cache_lock_wait_s": 0.0,
+   "cache_get_s": 13,
+   "build_s": 299,
+   "store_s": 0.5
+  },
+  "reuse": {
+   "packages_reused": [
+    "mathlib",
+    "plausible",
+    "LeanSearchClient",
+    "importGraph",
+    "proofwidgets",
+    "aesop",
+    "Qq",
+    "batteries",
+    "Cli"
+   ],
+   "packages_fetched": [
+    "aeneas"
+   ],
+   "project_build_seeded_from": "49e2f3125b38d23dcaffbf6c71973c3d4207b89c"
+  },
+  "orphaned_pins": [],
+  "jobs": 2372,
+  "errors": [],
+  "tail": ""
+ },
+ "overlay": [
+  "SrcTranslated/Funs.lean",
+  "SrcTranslated/Types.lean",
+  "aeneas-config.yml",
+  "lake-manifest.json",
+  "lakefile.toml",
+  "lean-toolchain"
+ ],
+ "external_models_overlaid": [
+  "SrcTranslated/FunsExternal.lean",
+  "SrcTranslated/TypesExternal.lean"
+ ],
+ "extraction_errors": [],
+ "broken_rounds": [
+  {
+   "round": 1,
+   "ok": false,
+   "errors_n": 4,
+   "build_s": 16,
+   "jobs": 2393
+  },
+  {
+   "round": 2,
+   "ok": false,
+   "errors_n": 7,
+   "build_s": 41,
+   "jobs": 2393
+  },
+  {
+   "round": 3,
+   "ok": false,
+   "errors_n": 6,
+   "build_s": 19,
+   "jobs": 2393
+  },
+  {
+   "round": 4,
+   "ok": false,
+   "errors_n": 4,
+   "build_s": 19,
+   "jobs": 2393
+  }
+ ],
+ "broken_green_after_sorry": false,
+ "broken_proofs": [
+  "Spqr/Specs/Encoding/Gf/ParallelMult.lean::parallel_mult_spec",
+  "Spqr/Specs/Encoding/Gf/Reduce/ReduceBytes.lean::reduce_bytes_loop_spec",
+  "Spqr/Specs/Encoding/Polynomial/Poly/AddAssign.lean::add_assign_spec",
+  "Spqr/Specs/Encoding/Polynomial/PolyConst/MultXdiff.lean::loop_spec",
+  "Spqr/Specs/Encoding/Polynomial/Pt/Deserialize.lean::from_be_bytes_spec"
+ ],
+ "broken_proofs_detail": [
+  {
+   "file": "Spqr/Specs/Encoding/Polynomial/Pt/Deserialize.lean",
+   "line": 103,
+   "decl": "from_be_bytes_spec",
+   "where": "body",
+   "kind": "tactic-failed",
+   "msg": "`simp` made no progress",
+   "round": 2,
+   "decl_kind": "theorem"
+  },
+  {
+   "file": "Spqr/Specs/Encoding/Gf/Reduce/ReduceBytes.lean",
+   "line": 31,
+   "decl": "reduce_bytes_loop_spec",
+   "where": "body",
+   "kind": "unsolved-goals",
+   "msg": "unsolved goals\ncase pos\nout : Std.Array U16 256#usize\ni : Usize\nhi : ↑i ≤ 256\nout' : Std.Array U16 256#usize\ni' : Usize\ni1 : U8\n_✝³ : [> let i1 ← lift (UScalar.cast UScalarTy.U8 i') <]\ni2 : U32\n_✝² : [> let i2 ← reduce_from_byte i1 <]\ni3 : U16\n_✝¹ : [> let i3 ← lift (UScalar.cast UScalarTy.U16 i2) <]\na : Std.Array U16 256#usize\n_✝ : [> let a ← out'.update i' i3 <]\ni4 : Usize\n_ : [> let i4 ← i' + 1#usize <]\nj : Usize\nh_inv : ∀ (j : Usize), ↑j < ↑i → ↑((↑out)[↑j]?.getD default) = reduceByteTable ↑j\nhi'_bound : ↑i' ≤ 256\nh_inv' : ∀ (j : Usize), ↑j < ↑i' → ↑((↑out')[↑j]?.getD default) = reduceByte",
+   "round": 2,
+   "decl_kind": "theorem"
+  },
+  {
+   "file": "Spqr/Specs/Encoding/Polynomial/Poly/AddAssign.lean",
+   "line": 322,
+   "decl": "add_assign_spec",
+   "where": "body",
+   "kind": "unknown-identifier",
+   "msg": "Unknown identifier `core.slice.iter.IteratorSliceIter.enumerate`",
+   "round": 2,
+   "decl_kind": "theorem"
+  },
+  {
+   "file": "Spqr/Specs/Encoding/Gf/ParallelMult.lean",
+   "line": 99,
+   "decl": "parallel_mult_spec",
+   "where": "body",
+   "kind": "tactic-failed",
+   "msg": "`grind` failed\ncase grind.1.2.1\na : GF16\ninto : Slice GF16\na1 : GF16\ninto1 : Slice GF16\ni : Usize\n__1 : [> let(a1, into1, i) ← parallel_mult_loop a into 0#usize <]\na1_post2 : into1.length = into.length\na1_post3 : into.length < ↑i + 2\nh : i < into1.len\ng : GF16\nindex_mut_back : GF16 → Slice GF16\n__2 : [> let(g, index_mut_back) ← into1.index_mut_usize i <]\ng1 : GF16\n_ : [> let g1 ← GF16.Insts.CoreOpsArithMulAssignGF16.mul_assign g a1 <]\nhlen : (↑into).length + 2 ≤ Usize.max\na1_post1 : a1 = a\na1_post5 : ↑i ≤ (↑into).length\na1_post7 : ∀ (j : ℕ) (a : j < (↑into).length), ↑i ≤ j → (↑into1)[j] = (↑in",
+   "round": 3,
+   "decl_kind": "theorem"
+  },
+  {
+   "file": "Spqr/Specs/Encoding/Polynomial/PolyConst/MultXdiff.lean",
+   "line": 119,
+   "decl": "loop_spec",
+   "where": "body",
+   "kind": "tactic-failed",
+   "msg": "`grind` failed\ncase grind.1.1.1.1.1.1.1.1.1.1.1.1.1.2.1.1.1.1.1.2.1.1.1.1.1.1.1.1.2.1.1.1.1.1.1.2.1.1.1.1.1.1.1.1.2\nN i i1 : Usize\na xp dp : Std.Array GF16 N\ndifference : GF16\nh_i_lt_N : i < N\nh_i1_le_N : i1 ≤ N\nh_dp_inv : ∀ j < ↑i1, ∀ (hj : j < dp.length), ((↑dp).get ⟨j, hj⟩).toGF216 = (↑a)[j]!.toGF216 * difference.toGF216\nh_xp_inv : ∀ j < ↑i1, j < ↑i → ∀ (h_idx : j + 1 < xp.length), (↑xp).get ⟨j + 1, h_idx⟩ = (↑a)[j]!\nxp' dp' : Std.Array GF16 N\ni1' : Usize\nh_i1_le : i1' ≤ N\nh_dp_proc : ∀ j < ↑i1', ∀ (hj : j < dp'.length), ((↑dp').get ⟨j, hj⟩).toGF216 = (↑a)[j]!.toGF216 * difference.toGF216\nh",
+   "round": 3,
+   "decl_kind": "theorem"
+  }
+ ],
+ "statement_errors": [
+  {
+   "file": "Spqr/Specs/Aeneas/RangeStepBy.lean",
+   "line": 33,
+   "decl": "step_by_spec",
+   "where": "statement",
+   "kind": "unknown-identifier",
+   "msg": "Unknown identifier `core.iter.range.IteratorRange.step_by`",
+   "round": 2
+  }
+ ],
+ "cascades": [],
+ "header_errors": [],
+ "statement_broken": [
+  "Spqr/Specs/Aeneas/RangeStepBy.lean::step_by_spec"
+ ],
+ "needs_statement_change": true,
+ "file_errors": [
+  {
+   "file": "Spqr/Aux/Aeneas/StdNextCoreIterRangeStep.lean",
+   "line": 6,
+   "decl": null,
+   "where": "file",
+   "kind": "other",
+   "msg": "module name 'Spqr.Aux.Aeneas.StdNextCoreIterRangeStep' is not portable: 'Aux' is a reserved file name on some operating systems",
+   "round": 2
+  },
+  {
+   "file": "Spqr/Aux/Aeneas/StdNextStepUsize.lean",
+   "line": 6,
+   "decl": null,
+   "where": "file",
+   "kind": "other",
+   "msg": "module name 'Spqr.Aux.Aeneas.StdNextStepUsize' is not portable: 'Aux' is a reserved file name on some operating systems",
+   "round": 2
+  }
+ ],
+ "blocked_modules": [
+  "Spqr",
+  "Spqr.Specs.Aeneas.RangeIteratorNext",
+  "Spqr.Specs.Encoding.Gf.GF16.Div",
+  "Spqr.Specs.Encoding.Gf.GF16.DivAssign",
+  "Spqr.Specs.Encoding.Gf.GF16.DivImpl",
+  "Spqr.Specs.Encoding.Polynomial.Poly.ComputeAt",
+  "Spqr.Specs.Encoding.Polynomial.Poly.Deserialize",
+  "Spqr.Specs.Encoding.Polynomial.Poly.LagrangeInterpolate",
+  "Spqr.Specs.Encoding.Polynomial.Poly.LagrangeInterpolateComplete",
+  "Spqr.Specs.Encoding.Polynomial.Poly.LagrangeInterpolatePrepare",
+  "Spqr.Specs.Encoding.Polynomial.Poly.LagrangeInterpolatePt",
+  "Spqr.Specs.Encoding.Polynomial.Poly.LagrangeSum",
+  "Spqr.Specs.Encoding.Polynomial.Poly.MultXdiffAssignTrailing",
+  "Spqr.Specs.Encoding.Polynomial.Poly.Serialize",
+  "Spqr.Specs.Encoding.Polynomial.PolyEncoder.FromPb",
+  "Spqr.Specs.Encoding.Polynomial.PolyEncoder.IntoPb",
+  "Spqr.Specs.IncrementalMlkem768.FlipEndianness",
+  "Spqr.Specs.Util.Compare",
+  "scripts.Audit"
+ ],
+ "blocked_files": [
+  "Spqr.lean",
+  "Spqr/Specs/Aeneas/RangeIteratorNext.lean",
+  "Spqr/Specs/Encoding/Gf/GF16/Div.lean",
+  "Spqr/Specs/Encoding/Gf/GF16/DivAssign.lean",
+  "Spqr/Specs/Encoding/Gf/GF16/DivImpl.lean",
+  "Spqr/Specs/Encoding/Polynomial/Poly/ComputeAt.lean",
+  "Spqr/Specs/Encoding/Polynomial/Poly/Deserialize.lean",
+  "Spqr/Specs/Encoding/Polynomial/Poly/LagrangeInterpolate.lean",
+  "Spqr/Specs/Encoding/Polynomial/Poly/LagrangeInterpolateComplete.lean",
+  "Spqr/Specs/Encoding/Polynomial/Poly/LagrangeInterpolatePrepare.lean",
+  "Spqr/Specs/Encoding/Polynomial/Poly/LagrangeInterpolatePt.lean",
+  "Spqr/Specs/Encoding/Polynomial/Poly/LagrangeSum.lean",
+  "Spqr/Specs/Encoding/Polynomial/Poly/MultXdiffAssignTrailing.lean",
+  "Spqr/Specs/Encoding/Polynomial/Poly/Serialize.lean",
+  "Spqr/Specs/Encoding/Polynomial/PolyEncoder/FromPb.lean",
+  "Spqr/Specs/Encoding/Polynomial/PolyEncoder/IntoPb.lean",
+  "Spqr/Specs/IncrementalMlkem768/FlipEndianness.lean",
+  "Spqr/Specs/Util/Compare.lean",
+  "scripts/Audit.lean"
+ ],
+ "verdict": "break confirmed",
+ "comparison": {
+  "predicted_n": 13,
+  "actual_n": 6,
+  "true_positive": [
+   "Spqr/Specs/Encoding/Gf/ParallelMult.lean::parallel_mult_spec",
+   "Spqr/Specs/Encoding/Gf/Reduce/ReduceBytes.lean::reduce_bytes_loop_spec",
+   "Spqr/Specs/Encoding/Polynomial/Poly/AddAssign.lean::add_assign_spec",
+   "Spqr/Specs/Encoding/Polynomial/PolyConst/MultXdiff.lean::loop_spec",
+   "Spqr/Specs/Encoding/Polynomial/Pt/Deserialize.lean::from_be_bytes_spec"
+  ],
+  "false_positive": [
+   "Spqr/Auxiliary/Aeneas/StdNextCoreIterRangeStep.lean::IteratorRange_next_I32_spec",
+   "Spqr/Math/Poly/Coeff/Basic.lean::listToGF216Poly_coeff",
+   "Spqr/Math/Poly/Eval.lean::listToGF216Poly_eval",
+   "Spqr/Math/Poly/Lagrange/InterpolantSum.lean::lagrangeInterpolantSum_coeff_high",
+   "Spqr/Specs/Encoding/Polynomial/Poly/LagrangeInterpolate.lean::lagrange_interpolate_spec",
+   "Spqr/Specs/Encoding/Polynomial/Poly/LagrangeInterpolateComplete.lean::loop1_spec",
+   "Spqr/Specs/Encoding/Polynomial/Poly/LagrangeInterpolatePrepare.lean::loop_spec",
+   "Spqr/Specs/IncrementalMlkem768/FlipEndianness.lean::body_spec"
+  ],
+  "false_negative": [
+   "Spqr/Specs/Aeneas/RangeStepBy.lean::step_by_spec"
+  ]
+ }
+}

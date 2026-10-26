@@ -1,6 +1,6 @@
 # Experiment: forward Aeneas upgrade of SymCrypt (held-out cases)
 
-Status: in progress (2026-10-23). Linear: SCI-1714 (data), SCI-1715 (evaluation).
+Status: first ladder done (2026-10-23). Linear: SCI-1714 (data), SCI-1715 (evaluation).
 
 ## Why
 
@@ -59,8 +59,28 @@ cd lean && lake update && lake exe cache get && lake build
 | `Symcrust/Properties/MLKEM/Helpers/KPKEStructure.lean`, `Spec/SHA3/Properties.lean` | `split` failed (7), unsolved goals | proof repair |
 | not reached | module-system imports of hand-written `*External.lean`; 12 changed external signatures; specs over 51 changed functions | escalate (trusted externals), then statement checks and proof repair |
 
+## Automation
+
+- `replay/generate_aeneas_upgrade.py --config symcrypt --repo repos/SymCrypt --aeneas-src work/symcrypt-upgrade/aeneas-src --aeneas <commit>` builds the upgraded tree under `work/symcrypt-gen/<commit>/` (about 5-7 min: Charon at the Aeneas pin, Aeneas, `make extract`, Lake setup). Every step is checked by its outputs.
+- `replay/replay_case.py --generated symcrypt/gen-aeneas-<commit> --config symcrypt --base-tree work/symcrypt-upgrade/base --upgraded-tree work/symcrypt-gen/<commit> --repo-subdir SymCrypt` analyzes it like a historical broken state (rounds of `sorry`, statement / body / file errors, blocked modules). Results: `data/replay/symcrypt/gen-aeneas-*.json`.
+
+## Ladder (base: Aeneas d71d2e3f, Lean v4.31.0, green)
+
+Aeneas kept Lean v4.31.0 and Mathlib until 73b7cf9f (2026-10-12) and switched its output to the Lean module system at a3446f52 (2026-09-23), so the steps isolate one kind of change each.
+
+| Aeneas | Date | Lean | Extraction vs. published | Outcome |
+|---|---|---|---|---|
+| 6e167c9b | 07-24 | v4.31 | identical | **proof repair**: 3 broken proofs (`agrind` failed; `Case tag h1 not found` from `step` naming), nothing blocked; 10 min |
+| 5d08da45 | 08-19 | v4.31 | fails | **extraction fails**: Charon type errors on `core::slice::iter` (mismatched trait clause), ~20 Aeneas internal errors; 1203 functions translated instead of 508. A toolchain regression, fixed by later releases. |
+| 12a018bb | 09-22 | v4.31 | changed | **large break**: 228 broken proofs, 21 statement-broken declarations in the hand-written intrinsic models (`Intrinsics/Simd.lean`, `Intrinsics/Bytes.lean`: definitional equalities such as `subArray_val`, `u32le_width` no longer hold), 136 blocked modules; 8 rounds, 19 min |
+| 557f7a15 | 09-24 | v4.31 | module system | **setup failure**: generated `Types.lean` (a `module`) cannot import the hand-written non-module `TypesExternal`; 7 proofs broken below it, 140 modules blocked |
+| cd419953 | 10-14 | v4.35-rc4 | module system | **setup failure**, same cause, plus Lean drift (removed core module, `ListN` changes) |
+
+Outcome classes seen: proof repair (bot repairs), escalation of trusted-model changes (statement-broken intrinsic models, external models out of sync with the generated templates), structural repair (module-system migration), and extraction failure (stop and report the tool errors). Small steps give repair cases; large steps mostly escalation.
+
 ## Next steps
 
-1. Generalize `replay/replay_case.py` to generated cases (a base tree and an upgraded tree instead of two commits) and run its round-by-round unblocking on this case to list every break by layer.
-2. Try a smaller Aeneas step (first release after d71d2e3f that stays on Lean v4.31.0) for a mostly-proof-repair case.
-3. Describe generated held-out cases in DESIGN.md §8 (evaluation): frozen once generated, never used for tuning.
+1. Bisect between 6e167c9b and 12a018bb (about 35 nightlies, Charon pins change often) for more mid-sized proof-repair cases, and find where the intrinsic-model statements start to break.
+2. A "migrated" variant of the module-system steps: convert the hand-written `*External.lean` files to modules first, to see the proof breaks behind the setup failure.
+3. Describe generated held-out cases in DESIGN.md §8: frozen once generated, never used for tuning; plus a time-split holdout on dalek/SPQR.
+4. Run the repair loop (SCI-1715) on `gen-aeneas-6e167c9b`: a small, clean held-out repair case.

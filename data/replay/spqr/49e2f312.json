@@ -1,0 +1,230 @@
+{
+ "case_id": "spqr/49e2f312",
+ "change_pr_url": "https://github.com/Beneficial-AI-Foundation/SparsePostQuantumRatchet-verify/pull/238",
+ "replayed_at": "2026-10-26T05:39:59+00:00",
+ "machine": {
+  "cpus": 18
+ },
+ "timing": {
+  "export_s": 0.1,
+  "base_fixed_wall_s": 344,
+  "broken_setup_s": 16.5,
+  "broken_rounds_s": 59,
+  "total_s": 419
+ },
+ "fixed": {
+  "ok": true,
+  "stage": "build",
+  "timings": {
+   "seed_s": 69.2,
+   "cache_lock_wait_s": 0.0,
+   "cache_get_s": 12,
+   "build_s": 262,
+   "store_s": 0.7
+  },
+  "reuse": {
+   "packages_reused": [
+    "mathlib",
+    "plausible",
+    "LeanSearchClient",
+    "importGraph",
+    "proofwidgets",
+    "aesop",
+    "Qq",
+    "batteries",
+    "Cli"
+   ],
+   "packages_fetched": [
+    "aeneas"
+   ],
+   "project_build_seeded_from": "49a5b29f38e6feb8f8f9295dd99797176a048a85"
+  },
+  "orphaned_pins": [],
+  "jobs": 2342,
+  "errors": [],
+  "tail": ""
+ },
+ "base": {
+  "ok": true,
+  "stage": "build",
+  "timings": {
+   "seed_s": 69.2,
+   "cache_lock_wait_s": 12.4,
+   "cache_get_s": 12,
+   "build_s": 250,
+   "store_s": 0.7
+  },
+  "reuse": {
+   "packages_reused": [
+    "mathlib",
+    "plausible",
+    "LeanSearchClient",
+    "importGraph",
+    "proofwidgets",
+    "aesop",
+    "Qq",
+    "batteries",
+    "Cli"
+   ],
+   "packages_fetched": [
+    "aeneas"
+   ],
+   "project_build_seeded_from": "49a5b29f38e6feb8f8f9295dd99797176a048a85"
+  },
+  "orphaned_pins": [],
+  "jobs": 2336,
+  "errors": [],
+  "tail": ""
+ },
+ "overlay": [
+  "SrcTranslated/Funs.lean",
+  "aeneas-config.yml",
+  "lake-manifest.json",
+  "lakefile.toml"
+ ],
+ "external_models_overlaid": [],
+ "extraction_errors": [],
+ "broken_rounds": [
+  {
+   "round": 1,
+   "ok": false,
+   "errors_n": 5,
+   "build_s": 49,
+   "jobs": 2342
+  },
+  {
+   "round": 2,
+   "ok": false,
+   "errors_n": 2,
+   "build_s": 7,
+   "jobs": 2342
+  },
+  {
+   "round": 3,
+   "ok": false,
+   "errors_n": 1,
+   "build_s": 3,
+   "jobs": 2342
+  }
+ ],
+ "broken_green_after_sorry": false,
+ "broken_proofs": [
+  "Spqr/Aux/Aeneas/StdNextStepUsize.lean::next_spec",
+  "Spqr/Specs/Encoding/Polynomial/Poly/AddAssign.lean::body_cont_spec",
+  "Spqr/Specs/Encoding/Polynomial/Poly/AddAssign.lean::body_spec",
+  "Spqr/Specs/Encoding/Polynomial/Poly/AddAssign.lean::body_test_done_spec",
+  "Spqr/Specs/Util/Compare.lean::compare_loop_spec"
+ ],
+ "broken_proofs_detail": [
+  {
+   "file": "Spqr/Aux/Aeneas/StdNextStepUsize.lean",
+   "line": 55,
+   "decl": "next_spec",
+   "where": "body",
+   "kind": "tactic-failed",
+   "msg": "`simp` made no progress",
+   "round": 1,
+   "decl_kind": "theorem"
+  },
+  {
+   "file": "Spqr/Specs/Encoding/Polynomial/Poly/AddAssign.lean",
+   "line": 80,
+   "decl": "body_spec",
+   "where": "body",
+   "kind": "tactic-failed",
+   "msg": "Tactic `rewrite` failed: Did not find an occurrence of the pattern\n  Enumerate.Insts.CoreIterTraitsIteratorIteratorPairUsizeClause0_Item.next\n    (core.iter.traits.iterator.IteratorSliceIter GF16) iter\nin the target expression\n  (do\n      let (o, iter1) ← IteratorEnumerate.next (core.iter.traits.iterator.IteratorSliceIter GF16) iter\n      match o with\n        | none => ok (done self)\n        | some p =>\n          let (i, v) := p\n          have i1 := self.coefficients.len;\n          if i < i1 then do\n            let (g, index_mut_back) ←\n              alloc.vec.Vec.index_mut (core.slice.index.S",
+   "round": 1,
+   "decl_kind": "theorem"
+  },
+  {
+   "file": "Spqr/Specs/Encoding/Polynomial/Poly/AddAssign.lean",
+   "line": 194,
+   "decl": "body_cont_spec",
+   "where": "body",
+   "kind": "tactic-failed",
+   "msg": "Tactic `rewrite` failed: Did not find an occurrence of the pattern\n  Enumerate.Insts.CoreIterTraitsIteratorIteratorPairUsizeClause0_Item.next\n    (core.iter.traits.iterator.IteratorSliceIter GF16) iter'\nin the target expression\n  (do\n      let (o, iter1) ← IteratorEnumerate.next (core.iter.traits.iterator.IteratorSliceIter GF16) iter'\n      match o with\n        | none => ok (done self')\n        | some p =>\n          let (i, v) := p\n          have i1 := self'.coefficients.len;\n          if i < i1 then do\n            let (g, index_mut_back) ←\n              alloc.vec.Vec.index_mut (core.slice.ind",
+   "round": 1,
+   "decl_kind": "theorem"
+  },
+  {
+   "file": "Spqr/Specs/Encoding/Polynomial/Poly/AddAssign.lean",
+   "line": 210,
+   "decl": "body_test_done_spec",
+   "where": "body",
+   "kind": "tactic-failed",
+   "msg": "Tactic `split` failed: Could not split an `if` or `match` expression in the goal\n\nHint: Use `set_option trace.split.failure true` to display additional diagnostic information\n\niter' : Enumerate (Iter GF16)\nself' : Poly\nh_not_lt : ¬iter'.iter.i < iter'.iter.slice.length\n⊢ (do\n      let (o, iter1) ← IteratorEnumerate.next (core.iter.traits.iterator.IteratorSliceIter GF16) iter'\n      match o with\n        | none => ok (done self')\n        | some p =>\n          let (i, v) := p\n          if i < self'.coefficients.len then do\n            let (g, index_mut_back) ←\n              alloc.vec.Vec.index_mu",
+   "round": 1,
+   "decl_kind": "theorem"
+  },
+  {
+   "file": "Spqr/Specs/Util/Compare.lean",
+   "line": 53,
+   "decl": "compare_loop_spec",
+   "where": "body",
+   "kind": "unsolved-goals",
+   "msg": "unsolved goals\ncase neg\nlhs rhs : Slice U8\niter : core.ops.range.Range Usize\nr : U8\nhlen✝ : lhs.length = rhs.length\niter' : core.ops.range.Range Usize\nr' : U8\nhlen : (↑lhs).length = (↑rhs).length\nhstart : ↑iter.start ≤ (↑rhs).length\nhend : ↑iter.end = (↑rhs).length\nhinv : ↑r = 0 ↔ ∀ j < ↑iter.start, (↑lhs)[j]?.getD default = (↑rhs)[j]?.getD default\nh_end : ↑iter'.end = (↑rhs).length\nh_inv' : ↑r' = 0 ↔ ∀ (j : ℕ) (a : j < (↑rhs).length), (↑lhs)[j] = (↑rhs)[j]\n⊢ (do\n      let x ← core.iter.range.StepUsize.partialOrdInst.lt iter'.start iter'.end\n      let (o, iter1) ←\n        if x = true then do\n ",
+   "round": 2,
+   "decl_kind": "theorem"
+  }
+ ],
+ "statement_errors": [
+  {
+   "file": "Spqr/Specs/Aeneas/RangeIteratorNext.lean",
+   "line": 48,
+   "decl": "next_Usize_spec",
+   "where": "statement",
+   "kind": "name-clash",
+   "msg": "`Aeneas.Std.core.iter.range.IteratorRange.next_Usize_spec` has already been declared",
+   "round": 1
+  }
+ ],
+ "cascades": [],
+ "header_errors": [],
+ "statement_broken": [
+  "Spqr/Specs/Aeneas/RangeIteratorNext.lean::next_Usize_spec"
+ ],
+ "needs_statement_change": true,
+ "file_errors": [],
+ "blocked_modules": [
+  "Spqr",
+  "Spqr.Specs.Encoding.Polynomial.Poly.ComputeAt",
+  "Spqr.Specs.Encoding.Polynomial.Poly.Deserialize",
+  "Spqr.Specs.Encoding.Polynomial.Poly.LagrangeInterpolateComplete",
+  "Spqr.Specs.Encoding.Polynomial.Poly.MultXdiffAssignTrailing",
+  "Spqr.Specs.Encoding.Polynomial.Poly.Serialize",
+  "scripts.Audit"
+ ],
+ "blocked_files": [
+  "Spqr.lean",
+  "Spqr/Specs/Encoding/Polynomial/Poly/ComputeAt.lean",
+  "Spqr/Specs/Encoding/Polynomial/Poly/Deserialize.lean",
+  "Spqr/Specs/Encoding/Polynomial/Poly/LagrangeInterpolateComplete.lean",
+  "Spqr/Specs/Encoding/Polynomial/Poly/MultXdiffAssignTrailing.lean",
+  "Spqr/Specs/Encoding/Polynomial/Poly/Serialize.lean",
+  "scripts/Audit.lean"
+ ],
+ "verdict": "break confirmed",
+ "comparison": {
+  "predicted_n": 10,
+  "actual_n": 6,
+  "true_positive": [
+   "Spqr/Aux/Aeneas/StdNextStepUsize.lean::next_spec",
+   "Spqr/Specs/Encoding/Polynomial/Poly/AddAssign.lean::body_test_done_spec",
+   "Spqr/Specs/Util/Compare.lean::compare_loop_spec"
+  ],
+  "false_positive": [
+   "Spqr/Specs/Encoding/Polynomial/Poly/AddAssign.lean::EnumerateSliceIter_next_post",
+   "Spqr/Specs/Encoding/Polynomial/Poly/AddAssign.lean::enumerate_sliceiter_next_some",
+   "Spqr/Specs/Encoding/Polynomial/Poly/ComputeAt.lean::body_spec",
+   "Spqr/Specs/Encoding/Polynomial/Poly/ComputeAt.lean::body_spec#2",
+   "Spqr/Specs/Encoding/Polynomial/Poly/Deserialize.lean::body_spec",
+   "Spqr/Specs/Encoding/Polynomial/Poly/MultXdiffAssignTrailing.lean::body_spec",
+   "Spqr/Specs/Encoding/Polynomial/Poly/Serialize.lean::body_spec"
+  ],
+  "false_negative": [
+   "Spqr/Specs/Aeneas/RangeIteratorNext.lean::next_Usize_spec",
+   "Spqr/Specs/Encoding/Polynomial/Poly/AddAssign.lean::body_cont_spec",
+   "Spqr/Specs/Encoding/Polynomial/Poly/AddAssign.lean::body_spec"
+  ]
+ }
+}
