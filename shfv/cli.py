@@ -198,6 +198,8 @@ def main(argv: list[str] | None = None) -> int:
     for e in rep["repairs"] + rep["escalations"]:
         counts[e.get("outcome")] = counts.get(e.get("outcome"), 0) + 1
     by_outcome = " · ".join(f"{k} {v}" for k, v in sorted(counts.items())) or "nothing to repair"
+    if inherited := (rep.get("gate") or {}).get("inherited_sorry"):
+        by_outcome += f" (inherited sorry {len(inherited)})"
     run.p.final(f"{rep['verdict'].upper()} · {by_outcome} · {report_mod.usd(t['cost_usd'])} · {fmt_s(t['wall_seconds'])} → "
                 f"{m.relative_to(ROOT) if m.is_relative_to(ROOT) else m}")
     if "error" in rep:

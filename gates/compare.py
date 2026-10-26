@@ -5,8 +5,10 @@
                     canonical type and, for definitions, canonical body in the stubbed broken
                     state and in the candidate; a missing declaration counts as a change
   G2 trust base     axiom closures within the standard three plus each declaration's own base
-                    closure (no `sorryAx` for repaired theorems); no new sorry anywhere; every
-                    added declaration is used by a repaired theorem
+                    closure; a repaired theorem has no sorry of its own and reaches no sorry
+                    source its base version did not reach (sorries inherited from lemmas already
+                    unproved at the base are flagged in `inherited_sorry`); no new sorry
+                    anywhere; every added declaration is used by a repaired theorem
   G3 clean build    the candidate snapshot is the stubbed broken state plus exactly this diff,
                     built from a fresh copy without project build output, green, fully covered
   G5 kernel replay  every module the diff changed was replayed through the Lean kernel
@@ -21,6 +23,8 @@ target config; the candidate's build and fingerprinting completed. Otherwise the
 
 Verdicts:
   accepted                       every check passed, G5 included, and the case is complete
+                                 (non-empty `inherited_sorry`: accepted, flagged; some repaired
+                                 theorem rests on lemmas that were already unproved at the base)
   passed-without-kernel-replay   every check that ran passed, but G5 did not run: not accepted
   rejected                       a check failed, the case is ineligible, or a theorem is unrepaired
   gate-unavailable               the gate could not decide (see `unavailable`)
@@ -128,17 +132,27 @@ def compare(cfg: dict, base: dict, broken: dict, cand: dict, diff: str) -> dict:
                              "unobserved_n": len(unobserved)}}
 
     # --- G2 trust base.
-    v2 = []
+    v2, inherited = [], {}
     for name, r in inventory_.items():
         c = cand["records"].get(name)
         if c is None or "error" in c:
             continue
         allowed = BASE3 | set(r.get("axioms", []))
-        if name in repaired:
-            allowed.discard(SORRY)
         extra = sorted(set(c.get("axioms", [])) - allowed)
-        if SORRY in extra:
+        if name in repaired and SORRY in c.get("axioms", []):
+            # Sorry only where the base version already reached it, through the same unproved
+            # lemmas, and flagged (owner decision 2026-10-26). A stub of a still-broken theorem
+            # is never a base sorry source, so depending on one is still rejected here.
+            srcs = set(c.get("sorry_sources", []))
+            new = sorted(srcs - set(r.get("sorry_sources", [])) if SORRY not in extra else srcs)
+            if name in srcs or new or not srcs:
+                v2.append({"check": "G2", "decl": name, "msg": "depends on sorry"
+                           + (f" through {', '.join(new[:5])}" if new else "")})
+            else:
+                inherited[name] = sorted(srcs)
+        elif SORRY in extra:
             v2.append({"check": "G2", "decl": name, "msg": "depends on sorry"})
+        if SORRY in extra:
             extra.remove(SORRY)
         if extra:
             v2.append({"check": "G2", "decl": name, "msg": f"new axioms in its closure: {', '.join(extra)}"})
@@ -154,7 +168,8 @@ def compare(cfg: dict, base: dict, broken: dict, cand: dict, diff: str) -> dict:
         users = [t for t in repaired if a in cand["records"].get(t, {}).get("uses", [])]
         if not users:
             v2.append({"check": "G2", "decl": a, "msg": "added declaration is not used by any repaired theorem"})
-    checks["G2"] = {"id": "G2", "ok": not v2, "violations": v2, "info": {"added": added}}
+    checks["G2"] = {"id": "G2", "ok": not v2, "violations": v2,
+                    "info": {"added": added, "inherited_sorry": inherited}}
 
     # --- G3 clean build of exactly (stubbed broken state + diff).
     v3 = []
@@ -223,5 +238,6 @@ def compare(cfg: dict, base: dict, broken: dict, cand: dict, diff: str) -> dict:
         verdict = "accepted"
     return {"format": 2, "gate_version": version(), "verdict": verdict, "failed_checks": failed,
             "unavailable": unavailable, "eligible": eligible, "theorems": theorems,
+            "inherited_sorry": inherited if verdict == "accepted" else {},
             "heartbeats": g0["info"]["heartbeats"], "checks": checks,
             "acceptance": "complete-case (prototype, §4.3); G5 required"}

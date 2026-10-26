@@ -205,7 +205,9 @@ def sorry_rejected(v, rc):
     """Complete-case acceptance must reject a repair that still depends on sorry, by G2 itself."""
     assert rc == 1 and v["verdict"] == "rejected"
     assert not v["theorems"][0]["repaired"]
-    assert any(x["decl"] == "double_spec" and x["msg"] == "depends on sorry" for x in v["checks"]["G2"]["violations"])
+    assert any(x["decl"] == "double_spec" and x["msg"].startswith("depends on sorry")
+               for x in v["checks"]["G2"]["violations"])
+    assert not v.get("inherited_sorry")
     assert v["checks"]["G3"]["ok"]  # it builds: sorry is only a warning, so the build alone would pass it
 
 

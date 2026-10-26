@@ -29,3 +29,17 @@ def test_report_has_marker_and_no_live_mentions():
     md = render(minimal_report())
     assert md.startswith("<!-- self-healing-fv:report case=demo/00000000 -->")
     assert "@someone" not in md and "Needs a human" in md
+
+
+def test_inherited_sorry_is_flagged_on_an_accepted_repair():
+    rep = {"theorem": "T", "file": "A.lean", "decl": "T", "outcome": "repaired", "attempts": []}
+    md = render(minimal_report(verdict="accepted", broken={"proofs": ["T"], "statements": []}, repairs=[rep],
+                               gate={"verdict": "accepted", "checks": {}, "inherited_sorry": {"T": ["Ns.pow2k_spec"]}}))
+    assert "Rests on unproved lemmas, as before the change" in md and "`pow2k_spec`" in md
+
+
+def test_failed_run_without_error_record_gives_the_gate_reason():
+    rep = {"theorem": "T", "file": "A.lean", "decl": "T", "outcome": "gate-unavailable", "attempts": [],
+           "reason": "kernel replay (G5) could not run: no checker"}
+    md = render(minimal_report(verdict="failed", repairs=[rep]))
+    assert "`None`" not in md and "kernel replay (G5) could not run" in md

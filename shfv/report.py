@@ -230,6 +230,16 @@ def render(r: dict) -> str:
         out.append(f"The change {pr} broke {n_proofs} proof{'s' * (n_proofs != 1)}. The bot repaired "
                    f"{'it' if n_proofs == 1 else 'them'}, and the gate checked the repair mechanically and accepted it: "
                    "no theorem statement or definition changed, no new axioms or `sorry`, and the project rebuilds from scratch.")
+        inherited = (r.get("gate") or {}).get("inherited_sorry") or {}
+        if inherited:
+            lemmas = sorted({s for v_ in inherited.values() for s in v_})
+            out.append("")
+            out.append(f"🏷️ **Rests on unproved lemmas, as before the change.** {len(inherited)} repaired theorem"
+                       f"{'s' * (len(inherited) != 1)} still depend{'s' * (len(inherited) == 1)} on "
+                       f"{len(lemmas)} lemma{'s' * (len(lemmas) != 1)} that {'was' if len(lemmas) == 1 else 'were'} "
+                       "already unproved (`sorry`) at the base commit, exactly as "
+                       f"{'it' if len(inherited) == 1 else 'they'} did there; the repair adds none: "
+                       + ", ".join(f"`{short_name(s)}`" for s in lemmas[:8]) + (" …" if len(lemmas) > 8 else ""))
     elif v == "passed-without-kernel-replay":
         out.append(f"### 🟡 Repair passed every check that ran, not accepted yet: {len(repaired)} of {n_proofs} broken "
                    f"proof{'s' * (n_proofs != 1)} fixed")
@@ -237,13 +247,16 @@ def render(r: dict) -> str:
         out.append(f"The change {pr} broke {n_proofs} proof{'s' * (n_proofs != 1)}. The bot repaired "
                    f"{'it' if n_proofs == 1 else 'them'}, and every gate check that ran passed: no theorem statement or "
                    "definition changed, no new axioms or `sorry`, and the project rebuilds from scratch. The change is "
-                   "**not accepted** yet: acceptance also needs the kernel replay (`lean4checker`), which this "
-                   "prototype does not run yet.")
+                   "**not accepted** yet: acceptance also needs the kernel replay (`lean4checker`), which did "
+                   "not run.")
     elif v == "failed":
+        err = r.get("error") or {}
+        reasons = sorted({e.get("reason") for e in repairs + escal if e.get("reason")})
         out.append("### ⛔ The repair run failed (infrastructure)")
         out.append("")
         out.append(f"The run for {pr} could not complete, so it says nothing about the proofs. "
-                   f"`{r.get('error', {}).get('outcome')}`: {r.get('error', {}).get('detail', '')[:500]}")
+                   + (f"`{err.get('outcome')}`: {err.get('detail', '')[:500]}" if err
+                      else "; ".join(reasons)[:500] or "No reason was recorded."))
     else:
         if n_stmts:
             head = f"{n_stmts} theorem statement{'s' * (n_stmts != 1)} no longer type-check{'s' * (n_stmts == 1)}"
