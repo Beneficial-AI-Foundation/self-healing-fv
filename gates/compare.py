@@ -27,7 +27,8 @@ Verdicts:
                                  theorem rests on lemmas that were already unproved at the base)
   passed-without-kernel-replay   every check that ran passed, but G5 did not run: not accepted
   rejected                       a check failed, the case is ineligible, or a theorem is unrepaired
-  gate-unavailable               the gate could not decide (see `unavailable`)
+  gate-unavailable               the gate could not decide (see `unavailable`); a check that
+                                 failed outright while only G5 could not run is `rejected`
 
 Complete-case acceptance (the prototype): every broken theorem must be repaired (§4.3).
 """
@@ -228,8 +229,11 @@ def compare(cfg: dict, base: dict, broken: dict, cand: dict, diff: str) -> dict:
         theorems.append({"name": n, "file": bt["file"], "failed_checks": fails,
                          "repaired": not fails and not unavailable and n not in still_stubbed})
     failed = [cid for cid, c in checks.items() if c["ok"] is False]
-    if unavailable:
+    g5_only = all(u.startswith("kernel replay (G5)") for u in unavailable)
+    if unavailable and not (failed and g5_only):
         verdict = "gate-unavailable"
+    elif failed and unavailable:  # a definite G0-G3 failure stands without G5 (owner decision 2026-10-26)
+        verdict = "rejected"
     elif failed or not eligible or not bset or still_stubbed:
         verdict = "rejected"
     elif checks["G5"]["ok"] is not True:  # defensive: G5 must have run and passed to accept

@@ -327,7 +327,7 @@ Every run that does not end with all broken theorems repaired escalates. Per the
 | `proof-hard` | The budget ran out with no evidence against the statement. | The last goal state, an attempt summary |
 | `blocked-on` | The theorem depends on another theorem that is still broken. | The blocking theorem |
 | `infrastructure-failure` | Setup, build environment, runner, or a timeout outside proof search failed. Says nothing about the theorem. | The failing step and its log |
-| `gate-unavailable` | A gate check could not run (e.g. no `lean4checker` for this toolchain, or a snapshot could not be built). Nothing is accepted. | The missing check, with coverage |
+| `gate-unavailable` | A gate check could not run (e.g. no `lean4checker` for this toolchain, or a snapshot could not be built). Nothing is accepted. If the inputs were trustworthy and a check failed outright while only G5 could not run, the candidate is rejected instead (owner decision, 2026-10-26): a definite failure is not hidden behind the missing check. | The missing check, with coverage |
 
 `infrastructure-failure` and `gate-unavailable` are excluded from repair-rate and escalation-quality metrics and reported separately (§8). Coverage stays "unknown" for anything they prevented from being checked.
 

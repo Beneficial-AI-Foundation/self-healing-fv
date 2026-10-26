@@ -61,6 +61,19 @@ def test_no_kernel_replay_means_no_decision():
     assert v["verdict"] == "gate-unavailable" and any("could not run" in u for u in v["unavailable"])
 
 
+def test_definite_failure_without_kernel_replay_is_a_rejection():
+    base, broken, cand, diff = case(cand_axioms=BASE3 + ["sorryAx"])
+    cand["kernel_replay"] = {"ran": False, "error": "no checker for this toolchain", "modules": {}}
+    v = verdict(base, broken, cand, diff)
+    assert v["verdict"] == "rejected" and "G2" in v["failed_checks"] and v["unavailable"]
+
+
+def test_failure_on_untrustworthy_inputs_is_still_no_decision():
+    base, broken, cand, diff = case(cand_axioms=BASE3 + ["sorryAx"])
+    base["build"] = {"ok": False, "failed_modules": ["M"], "errors": ["boom"]}
+    assert verdict(base, broken, cand, diff)["verdict"] == "gate-unavailable"
+
+
 def test_kernel_replay_must_cover_every_changed_module():
     base, broken, cand, diff = case()
     cand["kernel_replay"]["modules"] = {}
