@@ -172,7 +172,23 @@ The extracted `sub_loop` moved its `mask` argument to the front and now also ret
 
 ## 6. Early results
 
-Pending the first scoreboard.
+**Read with care: the sample of agent repairs is small.** Only 3 of 16 cases needed the agent (17 theorems in all), and 2 of those 3 acceptances carry flags. The scoreboard shows the pipeline decides safely; it does not yet measure how well the agent repairs proofs.
+
+All 15 confirmed curve25519-dalek-lean-verify breaks plus one generated SymCrypt case, run on one tool commit (`20f70af`) with Claude Opus 5.5. Every report is linked from [examples/reports](examples/reports/README.md).
+
+| Outcome | Cases | Which |
+|---|---|---|
+| Accepted, fixed by the sweep (no model) | 2 | PRs 41, 782 |
+| Accepted, fixed by the agent | 3 | PR 278 (flagged), PR 734 (flagged), SymCrypt `gen-aeneas-6e167c9b` |
+| Escalated: a statement no longer type-checks | 9 | PRs 74, 101, 232, 343, 535, 584, 638, 764, 865 |
+| Escalated: the broken state can't be checked | 2 | PRs 720, 824 (a limit of how we rebuild the broken state) |
+
+- No run crashed or ended `gate-unavailable`. The agent cost $7.39 in total (API list-price estimate).
+- PRs 278 and 734 were accepted with the inherited-`sorry` flag; PR 734 also has an incomplete kernel replay (native code that was already there at the base).
+- On PR 535, the audit of the change itself flags the weakened `*_clamped` specs ([curve25519-dalek-lean-verify issue 873](https://github.com/Beneficial-AI-Foundation/curve25519-dalek-lean-verify/issues/873)) among 259 statement changes.
+- PRs 41 and 782 were used during development, so they are not held out.
+
+Next: compare accepted and escalated cases with the human fixes in history, to check the gates are not too strict, and build more proof-repair cases.
 
 ## 7. Limits of the prototype
 
