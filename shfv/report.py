@@ -104,12 +104,17 @@ def gate_table(r: dict, g: dict) -> list[str]:
         if c is None:
             mark, text = "⚪", "not reached (scope check failed first)"
         elif c.get("ok") is None:
-            mark, text = "⚪", desc + (": required for acceptance, not implemented yet" if c.get("required")
+            why = (c.get("info") or {}).get("checker") if cid == "G5" else None
+            mark, text = "⚪", desc + (f": required for acceptance, could not run ({why})" if c.get("required") and why
+                                      else ": required for acceptance, did not run" if c.get("required")
                                       else ": not run in this prototype")
         else:
             mark = "✅" if c["ok"] else "❌"
             text = desc.format(inventory=inv, targets=", ".join(c.get("info", {}).get("targets", ["the project"])),
                                build=f" in {fmt_s(build)}" if build else "")
+            if cid == "G5" and (checker := (c.get("info") or {}).get("checker")):
+                text = re.sub(r"\s*\((cached build|built)\)$", "", checker)
+                text = text.replace("lean4checker", "`lean4checker`", 1).replace("bundled leanchecker", "`leanchecker` (bundled with Lean)")
             if not c["ok"]:
                 v = c.get("violations", [])
                 first = "; ".join(f"`{short_name(x['decl'])}`: {x['msg']}" if x.get("decl") else x["msg"] for x in v[:3])
@@ -430,9 +435,8 @@ def render(r: dict) -> str:
         out.append("")
     out.append("---")
     out += provenance_lines(r)
-    out.append("<sub>self-healing-fv prototype · acceptance needs every check to pass; the bot never changes "
-               "theorem statements or definitions · not run in this prototype: the audit of statement changes made "
-               "by the triggering change itself, and `lean4checker` · full run record: `report.json`</sub>")
+    out.append("<sub>self-healing-fv prototype · acceptance needs every check to pass, the kernel replay included; "
+               "the bot never changes theorem statements or definitions · full run record: `report.json`</sub>")
     md = "\n".join(out) + "\n"
     if len(md) > GITHUB_LIMIT:
         md = md[:GITHUB_LIMIT - 200] + "\n\n… (truncated to fit a GitHub comment; full report in the run record)\n"
