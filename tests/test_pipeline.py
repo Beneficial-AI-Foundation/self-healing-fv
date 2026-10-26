@@ -123,20 +123,25 @@ def toy_case(tmp_path_factory):
 
 
 class FakeAgent:
-    """Scripted agent: script[decl] -> (stop, new proof body or None, extra text to add before it)."""
+    """Scripted agent: script[decl] -> (stop, new proof body or None, extra text to add before it), or a
+    list of those, one per attempt; a 4th element is the structured diagnosis to return."""
     name = "fake"
     capabilities = {"tool_calling": True, "mcp": False, "lsp_tools": False}
 
     def __init__(self, script: dict, model: str = "fake-model", partial: bool = False):
-        self.script, self.model, self.partial, self.calls = script, model, partial, []
+        self.script, self.model, self.partial, self.calls, self.tasks = script, model, partial, [], []
 
     def version(self):
         return "fake 1.0"
 
     def run(self, task, workspace, budget, log_dir, progress):
         self.calls.append((task.decl, list(task.repaired_before), list(task.still_stubbed), budget))
+        self.tasks.append((task.decl, task.attempt, task.strategy, task.feedback))
         log_dir.mkdir(parents=True, exist_ok=True)
-        stop, body, extra = self.script[task.decl]
+        plan = self.script[task.decl]
+        step = plan[min(task.attempt, len(plan)) - 1] if isinstance(plan, list) else plan
+        stop, body, extra = step[:3]
+        diagnosis = step[3] if len(step) > 3 else None
         f = workspace / task.file
         if body is not None:
             text = replace_body(f.read_text(), task.decl, body)
@@ -149,6 +154,7 @@ class FakeAgent:
         if stop != "error":
             att.tokens = dict(TOKENS)
             att.tokens_complete = stop != "timeout"
+        att.diagnosis = diagnosis
         return att
 
 
@@ -191,20 +197,25 @@ def test_success_in_dependency_order(toy_case, monkeypatch):
     assert t["resolved_models"] == ["fake-model-v1"]
 
 
+DOUBT = {"outcome": "gave-up", "summary": "false now", "failure_scope": "global", "suspects_statement": True,
+         "statement_doubt": "counterexample x = 1", "helpers_added": []}
+
+
 def test_give_up_blocks_the_dependent_theorem(toy_case, monkeypatch):
-    script = {**GOOD, "double_spec": ("gave-up", None, None)}
+    script = {**GOOD, "double_spec": ("gave-up", None, None, DOUBT)}
     rep, agent, run = run_case(toy_case, monkeypatch, script, "giveup")
     assert [c[0] for c in agent.calls] == ["double_spec"]  # double_even is not attempted
     e = {x["decl"]: x for x in rep["repairs"]}
     assert e["double_spec"]["outcome"] == "proof-hard" and "gave up" in e["double_spec"]["reason"]
     assert e["double_even"]["outcome"] == "blocked-on" and e["double_even"]["blocked_by"] == ["double_spec"]
     assert rep["verdict"] == "escalated"
+    assert len(e["double_spec"]["attempts"]) == 1  # a global doubt about the statement is not retried blindly
 
 
 def test_failed_attempt_is_rolled_back_completely(toy_case, monkeypatch):
     helper = "theorem stray_helper : 1 = 1 := rfl\n\n"
-    script = {"double_spec": ("done", ":= by\n  exact stray_helper", helper),  # builds? no: wrong proof
-              "double_even": ("done", FIX_EVEN, None)}
+    bad = ("done", ":= by\n  exact stray_helper", helper)  # adds a helper, and the proof does not build
+    script = {"double_spec": [bad, bad], "double_even": ("done", FIX_EVEN, None)}
     rep, agent, run = run_case(toy_case, monkeypatch, script, "rollback")
     e = {x["decl"]: x for x in rep["repairs"]}
     assert e["double_spec"]["outcome"] == "proof-hard" and not e["double_spec"]["prebuild_ok"]
@@ -261,3 +272,28 @@ def test_adapter_without_lsp_tools_cannot_run_the_lsp_profile():
     with pytest.raises(SystemExit, match="lsp_tools"):
         pipeline.check_capabilities(FakeAgent({}), "lsp")
     pipeline.check_capabilities(FakeAgent({}), "minimal")  # tool calling is enough
+
+
+def test_retry_gets_the_build_errors_and_succeeds(toy_case, monkeypatch):
+    script = {**GOOD, "double_spec": [("done", ":= by\n  omega", None), ("done", FIX_SPEC, None)]}
+    rep, agent, _ = run_case(toy_case, monkeypatch, script, "retry")
+    spec = [t for t in agent.tasks if t[0] == "double_spec"]
+    assert [(t[1], t[2]) for t in spec] == [(1, "patch"), (2, "fresh")]
+    assert "did not build" in spec[1][3] and "omega" in spec[1][3]
+    assert outcomes(rep) == {"double_spec": "repaired", "double_even": "repaired"}
+    assert len(rep["repairs"][0]["attempts"]) == 2
+
+
+def test_scope_violation_is_caught_before_the_gate_and_fed_back(toy_case, monkeypatch):
+    sneaky = ("done", FIX_SPEC, "axiom helpful : True\n\n")  # builds, but adds an axiom
+    script = {**GOOD, "double_spec": [sneaky, ("done", FIX_SPEC, None)]}
+    rep, agent, _ = run_case(toy_case, monkeypatch, script, "pregate")
+    spec = [t for t in agent.tasks if t[0] == "double_spec"]
+    assert len(spec) == 2 and "axiom" in spec[1][3]
+    assert outcomes(rep)["double_spec"] == "repaired"
+    assert "axiom" not in rep["gate"]["diff"]
+
+
+def test_delete_tactic_block_removes_the_tactic_and_its_sub_block():
+    src = "theorem t : True := by\n  skip\n  · constructor\n    exact x\n  trivial\n"
+    assert pipeline.delete_tactic_block(src, 3) == "theorem t : True := by\n  skip\n  trivial\n"

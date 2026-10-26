@@ -36,6 +36,12 @@ per_theorem_minutes = 25
 per_theorem_turns = 80
 per_run_usd = 20.0
 per_run_minutes = 120
+# Attempts per theorem: 1 patches the old proof; later ones start fresh, told why the last failed.
+attempts_per_theorem = 2
+
+[repair]
+# The no-model sweep (§3.3 S4) before any agent: leftover tactics, timeouts, unsolved goals.
+sweep = true
 
 # USD per million tokens, used to compute cost from token counts for every adapter.
 # Anthropic first-party list prices from https://platform.claude.com/docs/en/about-claude/pricing

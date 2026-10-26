@@ -227,49 +227,159 @@ class Run:
                               still_stubbed=[o["key"] for o in broken[i:]],
                               repaired_before=[short(r) for r in repaired], context_dir=ctx, lsp_tools=lsp,
                               structured=structured)
-            budget = Budget(usd=None if remaining_usd is None else min(bud["per_theorem_usd"], remaining_usd),
-                            minutes=min(bud["per_theorem_minutes"], remaining_min), turns=bud["per_theorem_turns"])
-            self.p.step(f"[{i}/{len(broken)}] {b['key']} → agent attempt 1 ({self.agent.name}, {self.agent.model})")
-            log_dir = self.out / "attempts" / f"{i:02d}-{b['key'][:60]}"
-            att = self.agent.run(task, cand, budget, log_dir, self.p.live)
-            self.p.done_live()
-            price_attempt(att, prices, budget)
-            if att.cost_usd is not None:
-                spent_usd += att.cost_usd
-            if prices is not None and att.cost_status != "computed":
-                # Killed before reporting usage: count the whole per-theorem cap (Claude Code enforces
-                # it itself), so the run cap stays an upper bound, and stop further paid attempts if
-                # even that is unknown.
-                spent_usd = spent_usd - (att.cost_usd or 0) + (budget.usd or 0)
-                unaccounted = budget.usd is None
-            entry["attempts"].append(att.to_json())
-            # Pre-gate (feedback only; the gate alone decides): does the file build now?
-            mod = b["file"][:-len(".lean")].replace("/", ".")
-            pre = proc.run(["lake", "build", mod], cand,
-                           {**os.environ, "LEAN_NUM_THREADS": str(self.cfg["lean"]["lean_num_threads"])},
-                           timeout=60 * self.cfg["lean"].get("build_timeout_minutes", 90))
-            builds = pre.returncode == 0
-            entry["prebuild_ok"] = builds
-            self.p.result(f"{att.stop}, {att.turns} turns, {costs.describe(att.cost_status, att.cost_usd, att.model)}, "
-                          f"{fmt_s(att.seconds)} · file builds: {'yes' if builds else 'no (timed out)' if pre.timed_out else 'no'}")
-            if att.stop == "done" and builds:
+            log_root = self.out / "attempts" / f"{i:02d}-{b['key'][:60]}"
+            # 1. The no-model sweep (§3.3 S4): cheap fixes for the common error kinds.
+            if self.cfg.get("repair", {}).get("sweep", True) and det.get("kind") in SWEEPABLE:
+                self.p.step(f"[{i}/{len(broken)}] {b['key']} → automation sweep ({det.get('kind')})")
+                ok, tries = self.sweep(cand, b)
+                entry["sweep"] = tries
+                if ok and not self.pregate_violations(cand, b):
+                    self.p.result(f"repaired by the sweep, no model call ({', '.join(t['action'] for t in tries)})")
+                    entry.update(outcome="candidate", repaired_by="sweep")
+                    repaired.append(b["name"])
+                    continue
+                self.p.result("the sweep did not repair it" + (f" (tried {', '.join(t['action'] for t in tries)})" if tries else ""))
+                restore_sources(cand, checkpoint, tree_sources(cand))
+            # 2. Agent attempts: patch the old proof, then a fresh session with the failure as feedback.
+            theorem_deadline = time.monotonic() + 60 * min(bud["per_theorem_minutes"], remaining_min)
+            theorem_usd = None if remaining_usd is None else min(bud["per_theorem_usd"], remaining_usd)
+            feedback, outcome = "", None
+            max_attempts = int(bud.get("attempts_per_theorem", 2))
+            for n in range(1, max_attempts + 1):
+                minutes_left = (theorem_deadline - time.monotonic()) / 60
+                usd_left = None if theorem_usd is None else theorem_usd - sum(
+                    a.get("cost_usd") or 0 for a in entry["attempts"])
+                if minutes_left <= 1 or (usd_left is not None and usd_left <= 0.05) or unaccounted:
+                    break
+                task.feedback, task.strategy, task.attempt = feedback, "patch" if n == 1 else "fresh", n
+                budget = Budget(usd=usd_left, minutes=minutes_left, turns=bud["per_theorem_turns"])
+                self.p.step(f"[{i}/{len(broken)}] {b['key']} → agent attempt {n} ({self.agent.name}, {self.agent.model})")
+                log_dir = log_root if n == 1 else log_root.with_name(log_root.name + f"-attempt{n}")
+                att = self.agent.run(task, cand, budget, log_dir, self.p.live)
+                self.p.done_live()
+                price_attempt(att, prices, budget)
+                if att.cost_usd is not None:
+                    spent_usd += att.cost_usd
+                if prices is not None and att.cost_status != "computed":
+                    # Killed before reporting usage: count the whole cap it was given (Claude Code
+                    # enforces it itself), so the run cap stays an upper bound; stop paid attempts if
+                    # even that is unknown.
+                    spent_usd = spent_usd - (att.cost_usd or 0) + (budget.usd or 0)
+                    unaccounted = budget.usd is None
+                entry["attempts"].append(att.to_json())
+                # Pre-gate (feedback only; the gate alone decides): the file builds, and G0 holds.
+                builds, errors = self.build_module(cand, b)
+                violations = self.pregate_violations(cand, b) if builds else []
+                entry["prebuild_ok"] = builds
+                self.p.result(f"{att.stop}, {att.turns} turns, {costs.describe(att.cost_status, att.cost_usd, att.model)}, "
+                              f"{fmt_s(att.seconds)} · file builds: {'yes' if builds else 'no'}"
+                              + (f" · scope: {len(violations)} violation(s)" if violations else ""))
+                if att.stop == "done" and builds and not violations:
+                    outcome = "candidate"
+                    break
+                after = tree_sources(cand)
+                (log_dir / "suggestion.patch").write_text(patch.make_diff(checkpoint, after))
+                restore_sources(cand, checkpoint, after)  # roll the whole attempt back
+                d = att.diagnosis or {}
+                if att.stop == "error" and not att.turns:
+                    outcome = "infrastructure-failure"
+                    break
+                if att.stop in ("timeout", "budget") or (d.get("suspects_statement") and d.get("failure_scope") == "global"):
+                    break  # out of budget, or the agent argues the statement is false: no blind retry
+                feedback = "\n".join(
+                    ([f"The previous attempt changed things the rules forbid: " + "; ".join(violations)] if violations else [])
+                    + ([f"After the previous attempt the file did not build:\n{errors}"] if not builds and errors else [])
+                    + ([f"The previous attempt gave up: {d.get('summary', '')}"] if att.stop == "gave-up" else []))
+            if outcome == "candidate":
                 entry["outcome"] = "candidate"
                 repaired.append(b["name"])
                 continue
-            entry["outcome"] = "proof-hard"
-            entry["reason"] = {"gave-up": "the agent gave up", "max-turns": "turn cap reached",
-                               "budget": "cost cap reached", "timeout": "time cap reached",
-                               "error": f"agent error: {att.error or ''}"[:300]}.get(att.stop, att.stop) \
-                if att.stop != "done" else "the file does not build after the attempt"
-            if att.stop == "error" and not att.turns:
-                entry["outcome"] = "infrastructure-failure"
-            # Roll the whole attempt back, keeping what it did as an unaccepted suggestion.
-            after = tree_sources(cand)
-            (log_dir / "suggestion.patch").write_text(patch.make_diff(checkpoint, after))
-            restore_sources(cand, checkpoint, after)
+            entry["outcome"] = outcome or "proof-hard"
+            last = entry["attempts"][-1] if entry["attempts"] else {}
+            entry["reason"] = ("not attempted: no budget left for this theorem" if not last else
+                               {"gave-up": "the agent gave up", "max-turns": "turn cap reached",
+                                "budget": "cost cap reached", "timeout": "time cap reached",
+                                "error": f"agent error: {last.get('error') or ''}"[:300]}.get(
+                                   last.get("stop"), "the file did not build, or broke the scope rules, after "
+                                   f"{len(entry['attempts'])} attempt(s)"))
             if b.get("stubbed", True):
                 self._restub(cand, b)
         return cand
+
+    def build_module(self, cand: Path, b: dict) -> tuple[bool, str]:
+        """Build the theorem's module in the candidate: (ok, its error messages for that file)."""
+        mod = b["file"][:-len(".lean")].replace("/", ".")
+        r = proc.run(["lake", "build", mod], cand,
+                     {**os.environ, "LEAN_NUM_THREADS": str(self.cfg["lean"]["lean_num_threads"])},
+                     timeout=60 * self.cfg["lean"].get("build_timeout_minutes", 90))
+        if r.returncode == 0:
+            return True, ""
+        errs = [e for e in replay_case.parse_diags(r.stdout + r.stderr)
+                if e["severity"] == "error" and e["file"].endswith(b["file"])]
+        text = "\n\n".join(f"line {e['line']}: {e['msg']}" for e in errs[:5]) or ("timed out" if r.timed_out else "")
+        return False, text[:4000]
+
+    def decl_errors(self, cand: Path, b: dict) -> list[dict]:
+        """Errors inside the theorem's own declaration, with Lake's classification."""
+        mod = b["file"][:-len(".lean")].replace("/", ".")
+        r = proc.run(["lake", "build", mod], cand,
+                     {**os.environ, "LEAN_NUM_THREADS": str(self.cfg["lean"]["lean_num_threads"])},
+                     timeout=60 * self.cfg["lean"].get("build_timeout_minutes", 90))
+        if r.returncode == 0:
+            return []
+        d = decl_text((cand / b["file"]).read_text(), b["key"])
+        errs = [e for e in replay_case.parse_diags(r.stdout + r.stderr)
+                if e["severity"] == "error" and e["file"].endswith(b["file"])]
+        inside = [e for e in errs if d and d["line"] <= e["line"] <= d["end_line"]]
+        return inside or [{"kind": "other", "line": 0, "msg": "build failed outside the theorem"}]
+
+    def sweep(self, cand: Path, b: dict) -> tuple[bool, list[dict]]:
+        """No-model fixes, at most SWEEP_BUILDS builds: delete a leftover tactic that has no goals,
+        raise maxHeartbeats on a timeout (allowed by G0 and reported), or append a standard closer
+        to unsolved goals. Every change is inside the proof or its `set_option ... in` prefix."""
+        tries: list[dict] = []
+        done: set[str] = set()
+        for _ in range(SWEEP_BUILDS):
+            errs = self.decl_errors(cand, b)
+            if not errs:
+                return True, tries
+            e = errs[0]
+            f = cand / b["file"]
+            src = f.read_text()
+            d = decl_text(src, b["key"])
+            if d is None:
+                break
+            if e["kind"] == "no-goals" and e["line"]:
+                new, action = delete_tactic_block(src, e["line"]), f"delete the leftover tactic at line {e['line']}"
+            elif e["kind"] == "heartbeats" and "heartbeats" not in done:
+                new = src[:d["start"]] + f"set_option maxHeartbeats {SWEEP_HEARTBEATS} in\n" + src[d["start"]:]
+                action, _ = f"raise maxHeartbeats to {SWEEP_HEARTBEATS}", done.add("heartbeats")
+            elif e["kind"] == "unsolved-goals" and "closer" not in done:
+                new = replace_body(src, b["key"], d["proof"].rstrip() + "\n  " + SWEEP_CLOSER)
+                action, _ = "append a standard closer", done.add("closer")
+            else:
+                break
+            if new == src:
+                break
+            f.write_text(new)
+            tries.append({"kind": e["kind"], "line": e["line"], "action": action})
+        return not self.decl_errors(cand, b) if tries else False, tries
+
+    def pregate_violations(self, cand: Path, b: dict) -> list[str]:
+        """G0 run locally on the candidate, as feedback before the expensive clean build (§3.3 S4).
+        Only the gate's own verdict (S5) decides."""
+        if not getattr(self, "snapshot_paths", None):
+            return []
+        d = self.scratch / "pregate.patch"
+        out = self.scratch / "pregate.scope.json"
+        gate("diff", "--config", str(self.config), "--before", str(self.broken), "--after", str(cand), "--out", str(d))
+        B, K = self.snapshot_paths
+        gate("scope", "--config", str(self.config), "--base", str(B), "--broken", str(K), "--diff", str(d),
+             "--out", str(out), check=False)
+        try:
+            return [v["msg"] for v in json.loads(out.read_text())["violations"]][:10]
+        except (OSError, json.JSONDecodeError, KeyError):
+            return []
 
     def delivery_diff(self, cand: Path, broken: list[dict]) -> str:
         """The repair as it would apply to the change's head: the real broken sources (the base
@@ -380,6 +490,7 @@ class Run:
             t0 = time.time()
             B = self.snapshot("B", self.base)
             K = self.snapshot("K", self.broken)
+            self.snapshot_paths = (B, K)
             self.timing["snapshots_s"] = time.time() - t0
             t0 = time.time()
             report["audit"] = self.audit(B)
@@ -598,6 +709,24 @@ class Run:
 
 
 SKIP_DIRS = {".lake", ".git", "lake-packages"}
+SWEEPABLE = {"no-goals", "heartbeats", "unsolved-goals"}
+SWEEP_BUILDS = 3
+SWEEP_HEARTBEATS = 1000000  # 5x Lean's default; raising it is allowed (G0) and shown in the report
+SWEEP_CLOSER = "all_goals first | omega | simp_all | decide | rfl"
+
+
+def delete_tactic_block(src: str, line: int) -> str:
+    """Delete the tactic at 1-based `line` and the lines indented under it (its sub-block)."""
+    lines = src.split("\n")
+    if not 0 < line <= len(lines):
+        return src
+    indent = len(lines[line - 1]) - len(lines[line - 1].lstrip())
+    end = line
+    while end < len(lines) and (not lines[end].strip() or len(lines[end]) - len(lines[end].lstrip()) > indent):
+        end += 1
+    while end > line and not lines[end - 1].strip():  # keep trailing blank lines
+        end -= 1
+    return "\n".join(lines[:line - 1] + lines[end:])
 
 
 def tree_sources(root: Path) -> dict[str, str]:

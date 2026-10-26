@@ -27,6 +27,9 @@ class RepairTask:
     context_dir: Path | None = None  # read-only extra context (e.g. extraction diff)
     lsp_tools: bool = True    # whether the adapter gives the agent Lean language-server tools
     structured: bool = False  # whether the adapter returns the structured diagnosis (prompt.DIAGNOSIS_SCHEMA)
+    attempt: int = 1
+    strategy: str = "patch"   # patch the old proof, or "fresh": write a new proof from the goal state
+    feedback: str = ""        # why the previous attempt failed (build errors, scope violations, give-up)
 
 
 @dataclass

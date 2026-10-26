@@ -60,6 +60,12 @@ def build_prompt(task: RepairTask) -> str:
         context = (f"\nRead-only context for this change is in `{task.context_dir}` "
                    "(for example `extraction.diff`: how the extracted Lean code changed).\n")
     module = task.file[:-len(".lean")].replace("/", ".")
+    retry = ""
+    if task.attempt > 1:
+        retry = (f"\nThis is attempt {task.attempt}. A previous attempt failed and its edits were rolled back:\n\n"
+                 f"```\n{task.feedback[:3000] or '(no details)'}\n```\n"
+                 + ("Do not patch the old proof this time: write a fresh proof from the goal state.\n"
+                    if task.strategy == "fresh" else ""))
     ending = ("Then report the outcome in the structured output: whether you repaired it or gave up, what "
               "broke and what you changed, whether a failure is local or global, whether you suspect the "
               "statement itself, and any helper lemmas you added." if task.structured else
@@ -75,7 +81,7 @@ Its proof worked before the change. Now it fails with:
 ```
 {errors}
 ```
-{others}{context}
+{others}{context}{retry}
 Check your work with `lake build {module}` (or `lake env lean {task.file}`). {tools}
 
 Rules. They are checked mechanically afterwards, and any violation rejects the whole repair:
