@@ -100,6 +100,18 @@ def _stmtcanon_batch(tree: Path, cfg: dict, modules: list[str]) -> proc.Result:
                     timeout=60 * cfg["lean"].get("stmtcanon_timeout_minutes", 30))
 
 
+NATIVE = "Lean.ofReduceBool"
+
+
+def normalize_axioms(axioms: list[str]) -> list[str]:
+    """Proofs by native code (`native_decide`, `bv_decide`) rest on `Lean.ofReduceBool` in older
+    Lean; newer Lean (SymCrypt, v4.31) instead adds one auxiliary axiom per use, named
+    `T._native.native_decide.ax_1_2` or `T._native.bv_decide.ax_1_32`. Both mean "trusted because
+    compiled code returned true". Map the per-use axioms to `Lean.ofReduceBool`, so the trust
+    checks compare that category rather than names that change whenever a proof is edited."""
+    return sorted({NATIVE if "._native." in a else a for a in axioms})
+
+
 def stmtcanon(tree: Path, cfg: dict, modules: list[str]) -> tuple[dict[str, dict], dict]:
     """Fingerprint the declarations of `modules`, loading them all into one environment if possible.
     Modules that each build can still be impossible to load together (two dependencies declaring
@@ -128,6 +140,8 @@ def stmtcanon(tree: Path, cfg: dict, modules: list[str]) -> tuple[dict[str, dict
             if not line.startswith("{"):
                 continue
             r = json.loads(line)
+            if "axioms" in r:
+                r["axioms"] = normalize_axioms(r["axioms"])
             if r["name"] in records:
                 info["duplicate_lines"] += 1
                 continue

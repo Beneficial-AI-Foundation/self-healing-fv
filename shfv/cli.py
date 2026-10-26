@@ -85,7 +85,8 @@ def write_index(to: Path) -> None:
         inp = m["inputs"]
         n_ok = sum(1 for o in m["outcomes"].values() if o == "repaired")
         rows.append((m["case_id"], m["started_at"],
-                     f"| [PR {inp.get('change_pr')}]({inp.get('change_pr_url')}) `{m['case_id'].split('/')[1]}` "
+                     (f"| [PR {inp['change_pr']}]({inp.get('change_pr_url')}) " if inp.get("change_pr") else "| generated ")
+                     + f"`{m['case_id'].split('/')[1]}` "
                      f"| [{m['started_at'][:16].replace('T', ' ')} UTC]({f.parent.name}/{f.stem}.md) "
                      f"| `{provenance.short(p['tool'])}` | `{p['gate_version'][:7]}` | `{p['agent']['model']}` "
                      f"| {m['verdict']} | {n_ok}/{len(m['outcomes'])} | {report_mod.usd(t.get('cost_usd'))} |"))

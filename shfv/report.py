@@ -176,6 +176,8 @@ def audit_section(r: dict, focus: str | None = None) -> list[str]:
     if not a:
         return []
     out = ["#### Changes made by the triggering change itself (audit)", ""]
+    if a["outcome"] == "not-applicable":
+        return out + ["⚪ Not applicable: this is a generated case with no human change to compare against.", ""]
     if a["outcome"] == "no-change":
         return out + ["✅ No frozen statement, definition or trust assumption changed (complete comparison).", ""]
     if a["outcome"] == "incomplete" and not a.get("summary"):

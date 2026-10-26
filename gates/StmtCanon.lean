@@ -123,6 +123,9 @@ def isAuxiliary (n : Name) (env? : Option Environment := none) : Bool :=
     let s := c.toString (escape := false)  -- `«_aux_…»` must compare as `_aux_…`
     c.isNum ||
     isNumbered s "proof_" || isNumbered s "match_" || isNumbered s "eq_" ||
+    isNumbered s "hcongr_" ||  -- congruence lemmas `simp` adds on demand (`Array.make.hcongr_4`)
+    s == "_native" ||  -- per-use axioms of `native_decide`/`bv_decide` (`T._native.native_decide.ax_1_2`,
+                       -- newer Lean); they carry the source range of the proof that made them
     (s.startsWith "_" && (!written || s.startsWith "_aux")) ||  -- `_aux…`: notation/macro helpers
     ["eq_def", "eq_unfold", "below", "brecOn", "binductionOn", "noConfusion",
      "noConfusionType", "casesOn", "recOn", "rec", "ibelow", "sizeOf_spec", "inj",

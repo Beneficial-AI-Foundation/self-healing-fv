@@ -219,7 +219,8 @@ class Run:
         unaccounted = False  # an attempt whose cost could not be bounded: no further paid attempts
         details = {f"{d['file']}::{d['decl']}": d for d in self.replay.get("broken_proofs_detail", [])}
         details.update({f"{d['file']}::{d['decl']}": d for d in self.replay.get("statement_errors", [])})
-        trigger = f"PR {self.record.get('change_pr')} (\"{self.record['change_subject']}\")"
+        trigger = (f"PR {self.record['change_pr']} (\"{self.record['change_subject']}\")" if self.record.get("change_pr")
+                   else f"the change \"{self.record['change_subject']}\"")
         toolchain = (self.broken / "lean-toolchain").read_text().strip()
         deps = broken_deps([b for b in broken if b.get("name")], base_records)
         repaired: list[str] = []
@@ -496,7 +497,8 @@ class Run:
         r = self.record
         pins = r.get("pin_changes", {})
         lean = pins.get("lean")
-        self.p.header(f"{self.case_id} · PR {r.get('change_pr')} \"{r['change_subject']}\" · cause: "
+        self.p.header(f"{self.case_id} · " + (f"PR {r['change_pr']} " if r.get("change_pr") else "")
+                      + f"\"{r['change_subject']}\" · cause: "
                       f"{', '.join(r.get('causes') or [r['cause']])}" + (f" (Lean {lean[0].split(':')[-1]} → "
                                                                           f"{lean[1].split(':')[-1]})" if lean else ""))
         gate_version = gate("version").stdout.strip()
