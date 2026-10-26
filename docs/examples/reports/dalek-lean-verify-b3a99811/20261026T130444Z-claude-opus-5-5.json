@@ -1,0 +1,94 @@
+{
+ "case_id": "dalek-lean-verify/b3a99811",
+ "run_id": "20261026T130444Z-claude-opus-5-5",
+ "started_at": "2026-10-26T13:04:44+00:00",
+ "provenance": {
+  "tool": {
+   "commit": "20f70af9b101427492ac07c753861c715da4d82a",
+   "branch": "HEAD",
+   "dirty": false,
+   "dirty_files": null
+  },
+  "gate_version": "56936417a027",
+  "prompt_sha256": "74621d301b9e",
+  "config_sha256": "6c6bb7a2a38c",
+  "agent": {
+   "adapter": "claude-code",
+   "model": "claude-opus-5-5",
+   "harness": "2.1.310 (Claude Code)"
+  },
+  "python": "3.14.8",
+  "platform": "Darwin 27.0.0 arm64",
+  "machine": {
+   "cpus": 18,
+   "memory_gb": 24.0
+  }
+ },
+ "renders": null,
+ "verdict": "escalated",
+ "totals": {
+  "cost_usd": 0,
+  "cost_status": "computed",
+  "tokens": {},
+  "reported_cost_usd": null,
+  "resolved_models": [],
+  "turns": 0,
+  "agent_seconds": 0,
+  "wall_seconds": 402,
+  "stages": {
+   "prepare_s": 0,
+   "snapshots_s": 79,
+   "audit_s": 38,
+   "human_fix_gate_s": 284
+  },
+  "attempts": 0
+ },
+ "inputs": {
+  "repo": "Beneficial-AI-Foundation/curve25519-dalek-lean-verify",
+  "base_commit": "52640a29aaf568535775370ccbfbc4208d45ddc3",
+  "generated": false,
+  "repo_lean_root": "",
+  "change_commit": "b3a99811049141910daeaa8028f6a1b212af953b",
+  "change_pr": 638,
+  "change_pr_url": "https://github.com/Beneficial-AI-Foundation/curve25519-dalek-lean-verify/pull/638",
+  "change_subject": "Update aeneas to version b6dfa65d (#638)",
+  "cause": "aeneas",
+  "causes": [
+   "aeneas"
+  ],
+  "pin_changes": {
+   "aeneas": [
+    "1620d2ad2d8358e87674593b59dc960e73379113",
+    "b6dfa65deae794f609a2945af7fe02e84d895eb8"
+   ]
+  },
+  "fix_commits": [
+   "b3a99811049141910daeaa8028f6a1b212af953b",
+   "b2db46d3d6430c067cec05e63c325caa353b5d7e"
+  ]
+ },
+ "broken": {
+  "proofs": [],
+  "statements": [
+   "Aeneas.Std.Array.index_SliceIndexRangeUsizeSlice"
+  ],
+  "frozen_inventory": 939,
+  "observed_in_broken": 936,
+  "unobserved_modules": [
+   "Curve25519Dalek",
+   "Curve25519Dalek.Specs.Ristretto.RistrettoPoint.FromUniformBytes"
+  ],
+  "missing_frozen": [
+   "Aeneas.Std.Array.index_SliceIndexRangeUsizeSlice",
+   "core.slice.index.SliceIndexRangeUsizeSlice.index.progress_spec",
+   "curve25519_dalek.ristretto.RistrettoPoint.from_uniform_bytes_spec"
+  ]
+ },
+ "outcomes": {
+  "Aeneas.Std.Array.index_SliceIndexRangeUsizeSlice": "statement-must-change"
+ },
+ "gate": {
+  "verdict": null,
+  "failed_checks": null
+ }
+}

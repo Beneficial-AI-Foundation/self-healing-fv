@@ -1,0 +1,131 @@
+{
+ "case_id": "dalek-lean-verify/9d82afb9",
+ "run_id": "20261026T141100Z-claude-opus-5-5",
+ "started_at": "2026-10-26T14:11:00+00:00",
+ "provenance": {
+  "tool": {
+   "commit": "20f70af9b101427492ac07c753861c715da4d82a",
+   "branch": "HEAD",
+   "dirty": false,
+   "dirty_files": null
+  },
+  "gate_version": "56936417a027",
+  "prompt_sha256": "74621d301b9e",
+  "config_sha256": "6c6bb7a2a38c",
+  "agent": {
+   "adapter": "claude-code",
+   "model": "claude-opus-5-5",
+   "harness": "2.1.310 (Claude Code)"
+  },
+  "python": "3.14.8",
+  "platform": "Darwin 27.0.0 arm64",
+  "machine": {
+   "cpus": 18,
+   "memory_gb": 24.0
+  }
+ },
+ "renders": null,
+ "verdict": "accepted",
+ "totals": {
+  "cost_usd": 0,
+  "cost_status": "computed",
+  "tokens": {},
+  "reported_cost_usd": null,
+  "resolved_models": [],
+  "turns": 0,
+  "agent_seconds": 0,
+  "wall_seconds": 417,
+  "stages": {
+   "prepare_s": 0,
+   "snapshots_s": 47,
+   "audit_s": 23,
+   "agent_s": 193,
+   "gate_s": 151
+  },
+  "attempts": 0
+ },
+ "inputs": {
+  "repo": "Beneficial-AI-Foundation/curve25519-dalek-lean-verify",
+  "base_commit": "12ccfd27544c330b8f7a8f64923f5b4e45046678",
+  "generated": false,
+  "repo_lean_root": "",
+  "change_commit": "9d82afb96268f1d0e568b4682b1895689fd82db6",
+  "change_pr": 41,
+  "change_pr_url": "https://github.com/Beneficial-AI-Foundation/curve25519-dalek-lean-verify/pull/41",
+  "change_subject": "chore: Update aeneas (#41)",
+  "cause": "aeneas",
+  "causes": [
+   "aeneas",
+   "lean-mathlib",
+   "lean-dep"
+  ],
+  "pin_changes": {
+   "Cli": [
+    "7c6aef5f75a43ebbba763b44d535175a1b04c9e0",
+    "91c18fa62838ad0ab7384c03c9684d99d306e1da"
+   ],
+   "LeanSearchClient": [
+    "6c62474116f525d2814f0157bb468bf3a4f9f120",
+    "99657ad92e23804e279f77ea6dbdeebaa1317b98"
+   ],
+   "Qq": [
+    "e9c65db4823976353cd0bb03199a172719efbeb7",
+    "dea6a3361fa36d5a13f87333dc506ada582e025c"
+   ],
+   "aeneas": [
+    "0eb6619fa6a7c556fb6cebecf418829df6c500e4",
+    "d6ff3182a6b0b9c5a0376ac0ff19bf69a8a74afc"
+   ],
+   "aesop": [
+    "8ff27701d003456fd59f13a9212431239d902aef",
+    "725ac8cd67acd70a7beaf47c3725e23484c1ef50"
+   ],
+   "batteries": [
+    "8d2067bf518731a70a255d4a61b5c103922c772e",
+    "8da40b72fece29b7d3fe3d768bac4c8910ce9bee"
+   ],
+   "importGraph": [
+    "d07bd64f1910f1cc5e4cc87b6b9c590080e7a457",
+    "d768126816be17600904726ca7976b185786e6b9"
+   ],
+   "lean": [
+    "leanprover/lean4:v4.21.0",
+    "leanprover/lean4:v4.24.0"
+   ],
+   "mathlib": [
+    "308445d7985027f538e281e18df29ca16ede2ba3",
+    "f897ebcf72cd16f89ab4577d0c826cd14afaafc7"
+   ],
+   "plausible": [
+    "c4aa78186d388e50a436e8362b947bae125a2933",
+    "dfd06ebfe8d0e8fa7faba9cb5e5a2e74e7bd2805"
+   ],
+   "proofwidgets": [
+    "6980f6ca164de593cb77cd03d8eac549cc444156",
+    "556caed0eadb7901e068131d1be208dd907d07a2"
+   ]
+  },
+  "fix_commits": [
+   "9d82afb96268f1d0e568b4682b1895689fd82db6"
+  ]
+ },
+ "broken": {
+  "proofs": [
+   "mul_internal_spec",
+   "curve25519_dalek.backend.serial.u64.scalar.Scalar52.square_internal_spec"
+  ],
+  "statements": [],
+  "frozen_inventory": 62,
+  "observed_in_broken": 62,
+  "unobserved_modules": [],
+  "missing_frozen": []
+ },
+ "outcomes": {
+  "mul_internal_spec": "repaired",
+  "curve25519_dalek.backend.serial.u64.scalar.Scalar52.square_internal_spec": "repaired"
+ },
+ "gate": {
+  "verdict": "accepted",
+  "failed_checks": []
+ }
+}

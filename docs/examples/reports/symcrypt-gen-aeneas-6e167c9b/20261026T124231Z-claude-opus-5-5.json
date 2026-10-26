@@ -1,0 +1,97 @@
+{
+ "case_id": "symcrypt/gen-aeneas-6e167c9b",
+ "run_id": "20261026T124231Z-claude-opus-5-5",
+ "started_at": "2026-10-26T12:42:31+00:00",
+ "provenance": {
+  "tool": {
+   "commit": "20f70af9b101427492ac07c753861c715da4d82a",
+   "branch": "HEAD",
+   "dirty": false,
+   "dirty_files": null
+  },
+  "gate_version": "56936417a027",
+  "prompt_sha256": "74621d301b9e",
+  "config_sha256": "8a92414096be",
+  "agent": {
+   "adapter": "claude-code",
+   "model": "claude-opus-5-5",
+   "harness": "2.1.310 (Claude Code)"
+  },
+  "python": "3.14.8",
+  "platform": "Darwin 27.0.0 arm64",
+  "machine": {
+   "cpus": 18,
+   "memory_gb": 24.0
+  }
+ },
+ "renders": null,
+ "verdict": "accepted",
+ "totals": {
+  "cost_usd": 0.9718,
+  "cost_status": "computed",
+  "tokens": {
+   "input": 52,
+   "output": 7772,
+   "cache_read": 765678,
+   "cache_write_5m": 0,
+   "cache_write_1h": 82876
+  },
+  "reported_cost_usd": 0.9718,
+  "resolved_models": [
+   "claude-opus-5-5"
+  ],
+  "turns": 37,
+  "agent_seconds": 204,
+  "wall_seconds": 898,
+  "stages": {
+   "prepare_s": 0,
+   "snapshots_s": 98,
+   "audit_s": 0,
+   "agent_s": 248,
+   "gate_s": 546
+  },
+  "attempts": 3
+ },
+ "inputs": {
+  "repo": "microsoft/SymCrypt",
+  "base_commit": "c2e575ace0ea4b6b7a4184c1f19b81d1d5b2b5be",
+  "generated": true,
+  "repo_lean_root": "SymCRust/lean",
+  "change_commit": null,
+  "change_pr": null,
+  "change_pr_url": null,
+  "change_subject": "upgrade aeneas d71d2e3f → 6e167c9b (generated)",
+  "cause": "aeneas",
+  "causes": [
+   "aeneas"
+  ],
+  "pin_changes": {
+   "aeneas": [
+    "d71d2e3f",
+    "6e167c9b"
+   ]
+  },
+  "fix_commits": []
+ },
+ "broken": {
+  "proofs": [
+   "Symcrust.Properties.MLKEM.encapsInt.prelude.spec",
+   "Symcrust.Properties.MLKEM.keyGenerate.body.spec",
+   "symcrust.Shake4x.extract_all_loop.some_body.spec"
+  ],
+  "statements": [],
+  "frozen_inventory": 3456,
+  "observed_in_broken": 3456,
+  "unobserved_modules": [],
+  "missing_frozen": []
+ },
+ "outcomes": {
+  "Symcrust.Properties.MLKEM.encapsInt.prelude.spec": "repaired",
+  "Symcrust.Properties.MLKEM.keyGenerate.body.spec": "repaired",
+  "symcrust.Shake4x.extract_all_loop.some_body.spec": "repaired"
+ },
+ "gate": {
+  "verdict": "accepted",
+  "failed_checks": []
+ }
+}

@@ -1,0 +1,109 @@
+{
+ "case_id": "dalek-lean-verify/e1430358",
+ "run_id": "20261026T125735Z-claude-opus-5-5",
+ "started_at": "2026-10-26T12:57:35+00:00",
+ "provenance": {
+  "tool": {
+   "commit": "20f70af9b101427492ac07c753861c715da4d82a",
+   "branch": "HEAD",
+   "dirty": false,
+   "dirty_files": null
+  },
+  "gate_version": "56936417a027",
+  "prompt_sha256": "74621d301b9e",
+  "config_sha256": "6c6bb7a2a38c",
+  "agent": {
+   "adapter": "claude-code",
+   "model": "claude-opus-5-5",
+   "harness": "2.1.310 (Claude Code)"
+  },
+  "python": "3.14.8",
+  "platform": "Darwin 27.0.0 arm64",
+  "machine": {
+   "cpus": 18,
+   "memory_gb": 24.0
+  }
+ },
+ "renders": null,
+ "verdict": "accepted",
+ "totals": {
+  "cost_usd": 5.2068,
+  "cost_status": "computed",
+  "tokens": {
+   "input": 246,
+   "output": 64801,
+   "cache_read": 5480543,
+   "cache_write_5m": 0,
+   "cache_write_1h": 351716
+  },
+  "reported_cost_usd": 5.2068,
+  "resolved_models": [
+   "claude-opus-5-5"
+  ],
+  "turns": 163,
+  "agent_seconds": 1707,
+  "wall_seconds": 2620,
+  "stages": {
+   "prepare_s": 0,
+   "snapshots_s": 100,
+   "audit_s": 48,
+   "agent_s": 2103,
+   "gate_s": 362
+  },
+  "attempts": 9
+ },
+ "inputs": {
+  "repo": "Beneficial-AI-Foundation/curve25519-dalek-lean-verify",
+  "base_commit": "f0ffefa0e482658cdda47338ca2ba1b5de9e21b7",
+  "generated": false,
+  "repo_lean_root": "",
+  "change_commit": "e14303589f63bde37c070b03f4fca0b2031ac4e0",
+  "change_pr": 734,
+  "change_pr_url": "https://github.com/Beneficial-AI-Foundation/curve25519-dalek-lean-verify/pull/734",
+  "change_subject": "update aeneas  to 1180be60  (#734)",
+  "cause": "aeneas",
+  "causes": [
+   "aeneas"
+  ],
+  "pin_changes": {
+   "aeneas": [
+    "5918d4719139b5e5ae6e7b63f584b036620b41b7",
+    "1180be60c7a0e642cb442bfe90fe5cd8c1bb853f"
+   ]
+  },
+  "fix_commits": [
+   "e14303589f63bde37c070b03f4fca0b2031ac4e0"
+  ]
+ },
+ "broken": {
+  "proofs": [
+   "curve25519_dalek.backend.serial.u64.field.FieldElement51.from_bytes_bitList_spec",
+   "curve25519_dalek.backend.serial.u64.field.FieldElement51.to_bytes_spec",
+   "curve25519_dalek.field.FieldElement51.sqrt_ratio_i_spec'",
+   "curve25519_dalek.montgomery.elligator_encode_spec",
+   "curve25519_dalek.Shared0RistrettoPoint.Insts.CoreOpsArithAddSharedARistrettoPointRistrettoPoint.add_spec",
+   "curve25519_dalek.ristretto.RistrettoPoint.elligator_ristretto_flavor_spec",
+   "curve25519_dalek.Shared0RistrettoPoint.Insts.CoreOpsArithMulSharedAScalarRistrettoPoint.mul_spec",
+   "curve25519_dalek.Shared0RistrettoPoint.Insts.CoreOpsArithSubSharedARistrettoPointRistrettoPoint.sub_spec"
+  ],
+  "statements": [],
+  "frozen_inventory": 1199,
+  "observed_in_broken": 1199,
+  "unobserved_modules": [],
+  "missing_frozen": []
+ },
+ "outcomes": {
+  "curve25519_dalek.backend.serial.u64.field.FieldElement51.from_bytes_bitList_spec": "repaired",
+  "curve25519_dalek.backend.serial.u64.field.FieldElement51.to_bytes_spec": "repaired",
+  "curve25519_dalek.field.FieldElement51.sqrt_ratio_i_spec'": "repaired",
+  "curve25519_dalek.montgomery.elligator_encode_spec": "repaired",
+  "curve25519_dalek.Shared0RistrettoPoint.Insts.CoreOpsArithAddSharedARistrettoPointRistrettoPoint.add_spec": "repaired",
+  "curve25519_dalek.ristretto.RistrettoPoint.elligator_ristretto_flavor_spec": "repaired",
+  "curve25519_dalek.Shared0RistrettoPoint.Insts.CoreOpsArithMulSharedAScalarRistrettoPoint.mul_spec": "repaired",
+  "curve25519_dalek.Shared0RistrettoPoint.Insts.CoreOpsArithSubSharedARistrettoPointRistrettoPoint.sub_spec": "repaired"
+ },
+ "gate": {
+  "verdict": "accepted",
+  "failed_checks": []
+ }
+}

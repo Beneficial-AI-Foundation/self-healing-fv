@@ -1,0 +1,115 @@
+{
+ "case_id": "dalek-lean-verify/a3751754",
+ "run_id": "20261026T131126Z-claude-opus-5-5",
+ "started_at": "2026-10-26T13:11:26+00:00",
+ "provenance": {
+  "tool": {
+   "commit": "20f70af9b101427492ac07c753861c715da4d82a",
+   "branch": "HEAD",
+   "dirty": false,
+   "dirty_files": null
+  },
+  "gate_version": "56936417a027",
+  "prompt_sha256": "74621d301b9e",
+  "config_sha256": "6c6bb7a2a38c",
+  "agent": {
+   "adapter": "claude-code",
+   "model": "claude-opus-5-5",
+   "harness": "2.1.310 (Claude Code)"
+  },
+  "python": "3.14.8",
+  "platform": "Darwin 27.0.0 arm64",
+  "machine": {
+   "cpus": 18,
+   "memory_gb": 24.0
+  }
+ },
+ "renders": null,
+ "verdict": "escalated",
+ "totals": {
+  "cost_usd": 0,
+  "cost_status": "computed",
+  "tokens": {},
+  "reported_cost_usd": null,
+  "resolved_models": [],
+  "turns": 0,
+  "agent_seconds": 0,
+  "wall_seconds": 170,
+  "stages": {
+   "prepare_s": 0,
+   "snapshots_s": 112,
+   "audit_s": 55,
+   "human_fix_gate_s": 3
+  },
+  "attempts": 0
+ },
+ "inputs": {
+  "repo": "Beneficial-AI-Foundation/curve25519-dalek-lean-verify",
+  "base_commit": "34cced718a30c3963d426d755508260293706f67",
+  "generated": false,
+  "repo_lean_root": "",
+  "change_commit": "a3751754958cc8043ce10028f16779749e1599a8",
+  "change_pr": 764,
+  "change_pr_url": "https://github.com/Beneficial-AI-Foundation/curve25519-dalek-lean-verify/pull/764",
+  "change_subject": "Revert modifications to source (#764)",
+  "cause": "aeneas",
+  "causes": [
+   "aeneas",
+   "rust"
+  ],
+  "pin_changes": {
+   "aeneas": [
+    "1180be60c7a0e642cb442bfe90fe5cd8c1bb853f",
+    "28ad838ca560c469a1c8a2db4e89a87f9900a11b"
+   ]
+  },
+  "fix_commits": [
+   "a3751754958cc8043ce10028f16779749e1599a8"
+  ]
+ },
+ "broken": {
+  "proofs": [
+   "curve25519_dalek.backend.serial.u64.scalar.Scalar52.add_spec"
+  ],
+  "statements": [
+   "curve25519_dalek.backend.serial.u64.scalar.Scalar52.add_loop_spec"
+  ],
+  "frozen_inventory": 1303,
+  "observed_in_broken": 1285,
+  "unobserved_modules": [
+   "Curve25519Dalek",
+   "Curve25519Dalek.Specs.Backend.Serial.U64.Scalar.Scalar52.Add",
+   "Curve25519Dalek.Specs.Backend.Serial.U64.Scalar.Scalar52.FromBytesWide",
+   "Curve25519Dalek.Specs.Scalar.Scalar.Add",
+   "Curve25519Dalek.Specs.Scalar.Scalar.FromBytesModOrderWide"
+  ],
+  "missing_frozen": [
+   "_private.Curve25519Dalek.Specs.Backend.Serial.U64.Scalar.Scalar52.FromBytesWide.0.curve25519_dalek.backend.serial.u64.scalar.Scalar52.bit_slicing_wide_hi_identity",
+   "_private.Curve25519Dalek.Specs.Backend.Serial.U64.Scalar.Scalar52.FromBytesWide.0.curve25519_dalek.backend.serial.u64.scalar.Scalar52.bit_slicing_wide_lo_identity",
+   "_private.Curve25519Dalek.Specs.Backend.Serial.U64.Scalar.Scalar52.FromBytesWide.0.curve25519_dalek.backend.serial.u64.scalar.Scalar52.set_getElem!_ne",
+   "_private.Curve25519Dalek.Specs.Backend.Serial.U64.Scalar.Scalar52.FromBytesWide.0.curve25519_dalek.backend.serial.u64.scalar.Scalar52.set_getElem!_self",
+   "_private.Curve25519Dalek.Specs.Backend.Serial.U64.Scalar.Scalar52.FromBytesWide.0.curve25519_dalek.backend.serial.u64.scalar.Scalar52.word_of_bytes_64_shifted",
+   "_private.Curve25519Dalek.Specs.Backend.Serial.U64.Scalar.Scalar52.FromBytesWide.0.curve25519_dalek.backend.serial.u64.scalar.Scalar52.words_wide_prefix_eq",
+   "curve25519_dalek.Shared0Scalar.Insts.CoreOpsArithAddSharedAScalarScalar.add_spec",
+   "curve25519_dalek.backend.serial.u64.scalar.Scalar52.add_loop_spec",
+   "curve25519_dalek.backend.serial.u64.scalar.Scalar52.add_spec",
+   "curve25519_dalek.backend.serial.u64.scalar.Scalar52.bit_slicing_wide",
+   "curve25519_dalek.backend.serial.u64.scalar.Scalar52.from_bytes_wide_loop_helper",
+   "curve25519_dalek.backend.serial.u64.scalar.Scalar52.from_bytes_wide_loop_spec",
+   "curve25519_dalek.backend.serial.u64.scalar.Scalar52.from_bytes_wide_spec",
+   "curve25519_dalek.backend.serial.u64.scalar.Scalar52.word_of_bytes_64",
+   "curve25519_dalek.backend.serial.u64.scalar.Scalar52.words_wide_as_Nat",
+   "curve25519_dalek.backend.serial.u64.scalar.Scalar52.words_wide_eq_bytes",
+   "curve25519_dalek.scalar.Scalar.Insts.CoreOpsArithAddSharedBScalarScalar.add_spec",
+   "curve25519_dalek.scalar.Scalar.from_bytes_mod_order_wide_spec"
+  ]
+ },
+ "outcomes": {
+  "curve25519_dalek.backend.serial.u64.scalar.Scalar52.add_spec": "blocked-on",
+  "curve25519_dalek.backend.serial.u64.scalar.Scalar52.add_loop_spec": "statement-must-change"
+ },
+ "gate": {
+  "verdict": null,
+  "failed_checks": null
+ }
+}
