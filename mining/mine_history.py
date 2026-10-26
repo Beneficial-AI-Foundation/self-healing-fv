@@ -343,14 +343,25 @@ def parse_decls(src: str | None) -> dict[str, dict]:
             "start": start, "body_start": body_start, "end": start + len(text),
             "line": idx[0] + 1, "kw_line": cur["kw_line"], "body_line": body_line0 + 1, "body_col": body_start - offsets[body_line0],
             "end_line": idx[-1] + 1,
+            "namespace": cur["ns"],  # enclosing `namespace` blocks, captured where the decl starts
         }
 
     pending: list[int] = []  # attribute / `set_option ... in` lines preceding a declaration
+    ns_stack: list[str] = []  # namespace names; "" for an anonymous or named section
     for i, line in enumerate(lines):
+        if line[:1] not in (" ", "\t", ""):
+            mn = re.match(r"namespace\s+(\S+)", line)
+            if mn:
+                ns_stack.append(mn.group(1))
+            elif SECTION_RE.match(line):
+                ns_stack.append("")
+            elif re.match(r"end\b", line) and ns_stack:
+                ns_stack.pop()
         m = DECL_RE.match(line)
         if m:
             close()
-            cur = {"kind": m.group(1), "name": m.group(2), "idx": pending + [i], "kw_line": i + 1}
+            cur = {"kind": m.group(1), "name": m.group(2), "idx": pending + [i], "kw_line": i + 1,
+                   "ns": ".".join(n for n in ns_stack if n)}
             pending = []
         elif line[:1] not in (" ", "\t", "") and BOUNDARY_RE.match(line):
             close(); cur = None
@@ -494,19 +505,21 @@ class Miner:
 
     def lean_diff(self, parent, sha, files: list[dict]) -> dict:
         """Declaration-level diff across a set of changed Lean files. Keys are "path::name"
-        (short names repeat across files); renamed files keep their keys via the new path,
-        while a theorem moved to another file shows up as removed + added."""
+        (short names repeat across files) with the path *before* the change: the broken state
+        keeps the base layout, so a renamed file's theorems must match it (SPQR #287 and dalek
+        #865 renamed Aux/ to Auxiliary/). A theorem moved to another file is removed + added."""
         before, after = {}, {}
         new_text, context_changed_files = {}, set()
         for f in files:
-            old_src = self.git.show(parent, f["old_path"]) if parent else None
+            base = f["old_path"]
+            old_src = self.git.show(parent, base) if parent else None
             if old_src is not None and context_lines(old_src) != context_lines(self.git.show(sha, f["path"])):
-                context_changed_files.add(f["path"])
-            for k, v in parse_decls(self.git.show(parent, f["old_path"]) if parent else None).items():
-                before[f"{f['path']}::{k}"] = dict(v, file=f["old_path"])
-            new_text[f["path"]] = self.git.show(sha, f["path"]) or ""
-            for k, v in parse_decls(new_text[f["path"]]).items():
-                after[f"{f['path']}::{k}"] = dict(v, file=f["path"])
+                context_changed_files.add(base)
+            for k, v in parse_decls(old_src).items():
+                before[f"{base}::{k}"] = dict(v, file=base)
+            new_text[base] = self.git.show(sha, f["path"]) or ""
+            for k, v in parse_decls(new_text[base]).items():
+                after[f"{base}::{k}"] = dict(v, file=f["path"])
         d = diff_decls(before, after)
         # A theorem that disappeared from code but whose name still appears in its file's
         # new text (i.e. inside a comment) was most likely commented out rather than deleted.
@@ -531,6 +544,7 @@ class Miner:
     def proof_summary(self, parent, sha, files, changed_extraction: list[str] | None = None) -> dict:
         d = self.lean_diff(parent, sha, files)
         before, after = d.pop("_before"), d.pop("_after")
+        deleted_files = {f["path"] for f in files if f.get("status") == "D"}
         thm = lambda n, side: side.get(n, {}).get("kind") in ("theorem", "lemma")
         # Short names (last component) of extracted defs this change modified or removed.
         short = {k.split("::", 1)[1].rsplit(".", 1)[-1] for k in changed_extraction or []}
@@ -558,8 +572,15 @@ class Miner:
             "theorems_removed_referencing_extraction": cap([n for n in d["removed"] if thm(n, before) and refs(n)]),
             # Project declarations placed in a library namespace clash when the library adds the
             # same name; the fix deletes them (replays: #638).
+            # Full name = enclosing namespace + name (SPQR #238 declares `next_Usize_spec`
+            # inside `namespace Aeneas.Std...`; dalek #638 spells the prefix in the name).
+            # Only from files that survive the change: deleting a whole file of library-namespace
+            # helpers is cleanup (dalek #535 mvcgen.lean), not a clash fix.
             "removed_in_library_namespace": cap([n for n in d["removed"]
-                                                 if re.match(r"(Aeneas|Std|Mathlib)\.", n.split("::", 1)[1])]),
+                                                 if n.split("::", 1)[0] not in deleted_files
+                                                 and re.match(r"(Aeneas|Std|Mathlib)\.",
+                                                             ".".join(x for x in (before[n].get("namespace"),
+                                                                                  n.split("::", 1)[1]) if x))]),
             "theorems_touched_referencing_extraction_n": sum(1 for n in existing_touched if refs(n)),
             # Every changed declaration in these files that mentions changed extracted code.
             "decls_referencing_extraction": sorted(n for n in set(before) & (

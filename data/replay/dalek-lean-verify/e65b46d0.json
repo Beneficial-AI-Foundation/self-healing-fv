@@ -1,24 +1,24 @@
 {
  "case_id": "dalek-lean-verify/e65b46d0",
  "change_pr_url": "https://github.com/Beneficial-AI-Foundation/curve25519-dalek-lean-verify/pull/782",
- "replayed_at": "2026-10-23T08:15:43+00:00",
+ "replayed_at": "2026-10-23T10:29:31+00:00",
  "machine": {
   "cpus": 18
  },
  "timing": {
-  "export_s": 2.4,
-  "base_fixed_wall_s": 33,
-  "broken_setup_s": 32.7,
-  "broken_rounds_s": 76,
-  "total_s": 144
+  "export_s": 2.3,
+  "base_fixed_wall_s": 35,
+  "broken_setup_s": 21.7,
+  "broken_rounds_s": 32,
+  "total_s": 92
  },
  "fixed": {
   "ok": true,
   "stage": "build",
   "timings": {
    "seed_s": 0.0,
-   "cache_lock_wait_s": 0.0,
-   "cache_get_s": 17,
+   "cache_lock_wait_s": 17.4,
+   "cache_get_s": 15,
    "build_s": 3,
    "store_s": 0.0
   },
@@ -37,9 +37,9 @@
   "stage": "build",
   "timings": {
    "seed_s": 0.0,
-   "cache_lock_wait_s": 16.9,
-   "cache_get_s": 13,
-   "build_s": 3,
+   "cache_lock_wait_s": 0.0,
+   "cache_get_s": 17,
+   "build_s": 5,
    "store_s": 0.0
   },
   "reuse": {
@@ -65,14 +65,14 @@
    "round": 1,
    "ok": false,
    "errors_n": 2,
-   "build_s": 19,
+   "build_s": 11,
    "jobs": 8345
   },
   {
    "round": 2,
    "ok": true,
    "errors_n": 0,
-   "build_s": 57,
+   "build_s": 21,
    "jobs": 8345
   }
  ],
@@ -100,6 +100,7 @@
  "file_errors": [],
  "blocked_modules": [],
  "blocked_files": [],
+ "verdict": "break confirmed",
  "comparison": {
   "predicted_n": 1,
   "actual_n": 1,
@@ -108,6 +109,5 @@
   ],
   "false_positive": [],
   "false_negative": []
- },
- "verdict": "break confirmed"
+ }
 }

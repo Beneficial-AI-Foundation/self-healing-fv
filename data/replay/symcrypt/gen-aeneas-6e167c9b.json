@@ -1,6 +1,7 @@
 {
  "case_id": "symcrypt/gen-aeneas-6e167c9b",
  "generated": true,
+ "base_commit": "c2e575ace0ea4b6b7a4184c1f19b81d1d5b2b5be",
  "base_pins": {
   "lean": "leanprover/lean4:v4.31.0",
   "aeneas": "d71d2e3f"

@@ -1,0 +1,322 @@
+{
+ "case_id": "spqr/e4dda3b0",
+ "change_pr_url": "https://github.com/Beneficial-AI-Foundation/SparsePostQuantumRatchet-verify/pull/52",
+ "replayed_at": "2026-10-26T05:28:53+00:00",
+ "machine": {
+  "cpus": 18
+ },
+ "timing": {
+  "export_s": 0.1,
+  "base_fixed_wall_s": 258,
+  "broken_setup_s": 15.4,
+  "broken_rounds_s": 55,
+  "total_s": 329
+ },
+ "fixed": {
+  "ok": true,
+  "stage": "build",
+  "timings": {
+   "seed_s": 70.7,
+   "cache_lock_wait_s": 17.0,
+   "cache_get_s": 14,
+   "build_s": 156,
+   "store_s": 0.5
+  },
+  "reuse": {
+   "packages_reused": [
+    "mathlib",
+    "plausible",
+    "LeanSearchClient",
+    "importGraph",
+    "proofwidgets",
+    "aesop",
+    "Qq",
+    "batteries",
+    "Cli"
+   ],
+   "packages_fetched": [
+    "aeneas"
+   ],
+   "project_build_seeded_from": "12dfd1d482d397e702500f2ec123690e26360fb4"
+  },
+  "orphaned_pins": [],
+  "jobs": 2254,
+  "errors": [],
+  "tail": ""
+ },
+ "base": {
+  "ok": true,
+  "stage": "build",
+  "timings": {
+   "seed_s": 70.0,
+   "cache_lock_wait_s": 0.0,
+   "cache_get_s": 18,
+   "build_s": 35,
+   "store_s": 0.1
+  },
+  "reuse": {
+   "packages_reused": [
+    "aeneas",
+    "mathlib",
+    "plausible",
+    "LeanSearchClient",
+    "importGraph",
+    "proofwidgets",
+    "aesop",
+    "Qq",
+    "batteries",
+    "Cli"
+   ],
+   "packages_fetched": [],
+   "project_build_seeded_from": "12dfd1d482d397e702500f2ec123690e26360fb4"
+  },
+  "orphaned_pins": [],
+  "jobs": 2151,
+  "errors": [],
+  "tail": ""
+ },
+ "overlay": [
+  "Spqr/Code/Funs.lean",
+  "Spqr/Code/Types.lean",
+  "aeneas-config.yml",
+  "lake-manifest.json",
+  "lakefile.toml",
+  "lean-toolchain"
+ ],
+ "external_models_overlaid": [
+  "Spqr/Code/FunsExternal.lean",
+  "Spqr/Code/TypesExternal.lean"
+ ],
+ "extraction_errors": [],
+ "broken_rounds": [
+  {
+   "round": 1,
+   "ok": false,
+   "errors_n": 2,
+   "build_s": 12,
+   "jobs": 2218
+  },
+  {
+   "round": 2,
+   "ok": false,
+   "errors_n": 3,
+   "build_s": 13,
+   "jobs": 2218
+  },
+  {
+   "round": 3,
+   "ok": false,
+   "errors_n": 13,
+   "build_s": 4,
+   "jobs": 2218
+  },
+  {
+   "round": 4,
+   "ok": false,
+   "errors_n": 1,
+   "build_s": 10,
+   "jobs": 2218
+  },
+  {
+   "round": 5,
+   "ok": false,
+   "errors_n": 2,
+   "build_s": 8,
+   "jobs": 2218
+  },
+  {
+   "round": 6,
+   "ok": true,
+   "errors_n": 0,
+   "build_s": 8,
+   "jobs": 2218
+  }
+ ],
+ "broken_green_after_sorry": true,
+ "broken_proofs": [
+  "Spqr/Math/Gf16/Basic.lean::natToBinaryPoly_polyGF2",
+  "Spqr/Math/Gf16/Basic.lean::polyGF2_dvd_modByMonic_sub",
+  "Spqr/Math/Gf2Poly/Basic.lean::natToBinaryPoly_one",
+  "Spqr/Math/Gf2Poly/NatRep.lean::natBinaryPolyModAux_log2_lt",
+  "Spqr/Math/Gf2Poly/NatRep.lean::natBinaryPolyMod_ne_zero_of_not_dvd",
+  "Spqr/Math/Gf2Poly/NatRep.lean::natToBinaryPoly_natDegree_eq_log2",
+  "Spqr/Math/Gf2Poly/NatRep.lean::natToBinaryPoly_surjective",
+  "Spqr/Math/Poly/ModByMonic.lean::ringHom_modByMonic",
+  "Spqr/Specs/Encoding/Gf/Reduce/ReduceBytes.lean::reduceByteTable_eq_poly_full",
+  "Spqr/Specs/Encoding/Gf/Reduce/ReduceBytes.lean::reduce_bytes_loop_spec",
+  "Spqr/Specs/Encoding/Gf/Unaccelerated/PolyMul.lean::poly_mul_loop_spec",
+  "Spqr/Specs/Encoding/Polynomial/Pt/Deserialize.lean::deserialize_spec",
+  "Spqr/Specs/Encoding/Polynomial/Pt/Deserialize.lean::try_from_spec"
+ ],
+ "broken_proofs_detail": [
+  {
+   "file": "Spqr/Specs/Encoding/Polynomial/Pt/Deserialize.lean",
+   "line": 136,
+   "decl": "try_from_spec",
+   "where": "body",
+   "kind": "tactic-failed",
+   "msg": "Tactic `split` failed: Could not split an `if` or `match` expression in the goal\n\nHint: Use `set_option trace.split.failure true` to display additional diagnostic information\n\nT : Type\nN : Usize\ncopyInst : core.marker.Copy T\ns : Slice T\nh_clone : ∀ x ∈ ↑s, copyInst.cloneInst.clone x = ok x\nh_len : s.length = ↑N\nhm : List.mapM copyInst.cloneInst.clone ↑s = ok ↑s\n⊢ ok (core.result.Result.Ok ⟨↑s, ⋯⟩) ⦃ result => ∃ a, result = core.result.Result.Ok a ∧ ↑a = ↑s ⦄",
+   "round": 2,
+   "decl_kind": "theorem"
+  },
+  {
+   "file": "Spqr/Specs/Encoding/Polynomial/Pt/Deserialize.lean",
+   "line": 159,
+   "decl": "deserialize_spec",
+   "where": "body",
+   "kind": "unsolved-goals",
+   "msg": "unsolved goals\ns : Std.Array U8 4#usize\ns1 : Slice U8\n_✝⁴ : [> let s1 ← core.slice.index.SliceIndexRangeToUsizeSlice.index { «end» := 2#usize } s.to_slice <]\ns1_post1 : ↑s1 = List.slice 0 2 ↑s.to_slice\ns1_post2 : s1.length = 2\nr : Std.Array U8 2#usize\nx✝¹ : core.result.Result (Std.Array U8 2#usize) core.array.TryFromSliceError\n_✝³ : [> let(r, x✝¹) ← core.array.TryFromArrayCopySlice.try_from 2#usize core.marker.CopyU8 s1 <]\nr_post1 : x✝¹ = core.result.Result.Ok r\nr_post2 : ↑r = List.slice 0 2 ↑s.to_slice\ni : U16\n_✝² : [> let i ← lift (core.num.U16.from_be_bytes r) <]\ni_post : ↑i = ↑r[0]! * 256 ",
+   "round": 2,
+   "decl_kind": "theorem"
+  },
+  {
+   "file": "Spqr/Math/Gf2Poly/Basic.lean",
+   "line": 181,
+   "decl": "natToBinaryPoly_one",
+   "where": "body",
+   "kind": "unknown-identifier",
+   "msg": "Unknown constant `Nat.testBit_eq_false_of_lt`",
+   "round": 2,
+   "decl_kind": "lemma"
+  },
+  {
+   "file": "Spqr/Math/Gf16/Basic.lean",
+   "line": 43,
+   "decl": "natToBinaryPoly_polyGF2",
+   "where": "body",
+   "kind": "no-goals",
+   "msg": "No goals to be solved",
+   "round": 3,
+   "decl_kind": "lemma"
+  },
+  {
+   "file": "Spqr/Math/Gf16/Basic.lean",
+   "line": 69,
+   "decl": "polyGF2_dvd_modByMonic_sub",
+   "where": "body",
+   "kind": "type-mismatch",
+   "msg": "Application type mismatch: The argument\n  polyGF2_monic\nhas type\n  Monic polyGF2\nof sort `Prop` but is expected to have type\n  (ZMod 2)[X]\nof sort `Type` in the application\n  modByMonic_add_div p polyGF2_monic",
+   "round": 3,
+   "decl_kind": "lemma"
+  },
+  {
+   "file": "Spqr/Math/Poly/ModByMonic.lean",
+   "line": 27,
+   "decl": "ringHom_modByMonic",
+   "where": "body",
+   "kind": "type-mismatch",
+   "msg": "Application type mismatch: The argument\n  hMonic\nhas type\n  Monic P\nof sort `Prop` but is expected to have type\n  (ZMod 2)[X]\nof sort `Type` in the application\n  modByMonic_add_div p hMonic",
+   "round": 3,
+   "decl_kind": "lemma"
+  },
+  {
+   "file": "Spqr/Math/Gf2Poly/NatRep.lean",
+   "line": 120,
+   "decl": "natBinaryPolyModAux_log2_lt",
+   "where": "body",
+   "kind": "no-goals",
+   "msg": "No goals to be solved",
+   "round": 3,
+   "decl_kind": "lemma"
+  },
+  {
+   "file": "Spqr/Math/Gf2Poly/NatRep.lean",
+   "line": 150,
+   "decl": "natToBinaryPoly_natDegree_eq_log2",
+   "where": "body",
+   "kind": "unsolved-goals",
+   "msg": "unsolved goals\ncase a.a\nb : ℕ\nhb : b ≥ 2\nhb_ne : b ≠ 0\nm : ℕ\nhm : ↑b.log2 < ↑m\nhm' : b.log2 < m\n⊢ b.testBit m = false",
+   "round": 3,
+   "decl_kind": "lemma"
+  },
+  {
+   "file": "Spqr/Math/Gf2Poly/NatRep.lean",
+   "line": 196,
+   "decl": "natBinaryPolyMod_ne_zero_of_not_dvd",
+   "where": "body",
+   "kind": "unsolved-goals",
+   "msg": "unsolved goals\ncase a\na b : ℕ\nhb : b ≥ 2\nq : BinaryPoly\nhq : natToBinaryPoly a = natToBinaryPoly b * q\nr : ℕ := natBinaryPolyMod a b\nhmod : r ≠ 0\nhr_def : r = natBinaryPolyMod a b\nhdvd_diff : natToBinaryPoly b ∣ natToBinaryPoly a - natToBinaryPoly (natBinaryPolyModAux b a (a + 1))\ns : BinaryPoly\nhs : natToBinaryPoly r = natToBinaryPoly b * s\nhr_ne : natToBinaryPoly r ≠ 0\nhs_ne : s ≠ 0\nhmonic_b : Monic (natToBinaryPoly b)\nhdeg : natDegree (natToBinaryPoly b * s) = natDegree (natToBinaryPoly b) + natDegree s\nhdeg_b : natDegree (natToBinaryPoly b) = b.log2\nhlower : b.log2 ≤ natDegree (natToBinary",
+   "round": 3,
+   "decl_kind": "lemma"
+  },
+  {
+   "file": "Spqr/Math/Gf2Poly/NatRep.lean",
+   "line": 242,
+   "decl": "natToBinaryPoly_surjective",
+   "where": "body",
+   "kind": "unsolved-goals",
+   "msg": "unsolved goals\nn : ℕ\n⊢ 0 = (monomial n) 0",
+   "round": 3,
+   "decl_kind": "lemma"
+  },
+  {
+   "file": "Spqr/Specs/Encoding/Gf/Unaccelerated/PolyMul.lean",
+   "line": 256,
+   "decl": "poly_mul_loop_spec",
+   "where": "body",
+   "kind": "tactic-failed",
+   "msg": "`simp` made no progress",
+   "round": 4,
+   "decl_kind": "theorem"
+  },
+  {
+   "file": "Spqr/Specs/Encoding/Gf/Reduce/ReduceBytes.lean",
+   "line": 32,
+   "decl": "reduce_bytes_loop_spec",
+   "where": "body",
+   "kind": "tactic-failed",
+   "msg": "`grind` failed\ncase grind.1.1.1.1.1.1\nout : Std.Array U16 256#usize\ni : Usize\nhi : ↑i ≤ 256\nh_inv : ∀ j < i, ↑out[j]! = reduceByteTable ↑j\nout' : Std.Array U16 256#usize\ni' : Usize\nhi'_bound : ↑(out', i').2 ≤ 256\nh_inv' : ∀ j < (out', i').2, ↑(out', i').1[j]! = reduceByteTable ↑j\nhLt : i' < 256#usize\nh : i' < 256#usize\ni1 : U8\n__1 : [> let i1 ← lift (UScalar.cast UScalarTy.U8 i') <]\ni1_post : i1 = UScalar.cast UScalarTy.U8 i'\ni2 : U32\n__2 : [> let i2 ← reduce_from_byte i1 <]\ni2_post : ↑i2 % 2 ^ 16 = reduceByteTable ↑i1\ni3 : U16\n__3 : [> let i3 ← lift (UScalar.cast UScalarTy.U16 i2) <]\ni3_post ",
+   "round": 5,
+   "decl_kind": "theorem"
+  },
+  {
+   "file": "Spqr/Specs/Encoding/Gf/Reduce/ReduceBytes.lean",
+   "line": 142,
+   "decl": "reduceByteTable_eq_poly_full",
+   "where": "body",
+   "kind": "type-mismatch",
+   "msg": "Application type mismatch: The argument\n  polyGF2_monic\nhas type\n  Monic polyGF2\nof sort `Prop` but is expected to have type\n  (ZMod 2)[X]\nof sort `Type` in the application\n  modByMonic_add_div A polyGF2_monic",
+   "round": 5,
+   "decl_kind": "theorem"
+  }
+ ],
+ "statement_errors": [],
+ "cascades": [],
+ "header_errors": [],
+ "statement_broken": [],
+ "needs_statement_change": false,
+ "file_errors": [],
+ "blocked_modules": [],
+ "blocked_files": [],
+ "verdict": "break confirmed",
+ "comparison": {
+  "predicted_n": 17,
+  "actual_n": 13,
+  "true_positive": [
+   "Spqr/Math/Gf16/Basic.lean::polyGF2_dvd_modByMonic_sub",
+   "Spqr/Math/Gf2Poly/Basic.lean::natToBinaryPoly_one",
+   "Spqr/Math/Gf2Poly/NatRep.lean::natBinaryPolyModAux_log2_lt",
+   "Spqr/Math/Gf2Poly/NatRep.lean::natToBinaryPoly_surjective",
+   "Spqr/Math/Poly/ModByMonic.lean::ringHom_modByMonic",
+   "Spqr/Specs/Encoding/Gf/Reduce/ReduceBytes.lean::reduceByteTable_eq_poly_full",
+   "Spqr/Specs/Encoding/Gf/Reduce/ReduceBytes.lean::reduce_bytes_loop_spec",
+   "Spqr/Specs/Encoding/Gf/Unaccelerated/PolyMul.lean::poly_mul_loop_spec",
+   "Spqr/Specs/Encoding/Polynomial/Pt/Deserialize.lean::deserialize_spec",
+   "Spqr/Specs/Encoding/Polynomial/Pt/Deserialize.lean::try_from_spec"
+  ],
+  "false_positive": [
+   "Spqr/Math/Gf2Poly/Basic.lean::natToBinaryPoly_coeff",
+   "Spqr/Math/Gf2Poly/Basic.lean::natToBinaryPoly_split",
+   "Spqr/Math/Gf2Poly/NatRep.lean::exists_natToBinaryPoly_eq_of_one_le_natDegree",
+   "Spqr/Math/Gf2Poly/NatRep.lean::natBinaryPolyModAux_preserves_dvd",
+   "Spqr/Specs/Encoding/Gf/Reduce/ReduceBytes.lean::reduceByteLoopFull_inv",
+   "Spqr/Specs/Encoding/Gf/Unaccelerated/Mul.lean::mul_spec",
+   "Spqr/Specs/Encoding/Gf/Unaccelerated/PolyMul.lean::clmul_poly_eq_mul"
+  ],
+  "false_negative": [
+   "Spqr/Math/Gf16/Basic.lean::natToBinaryPoly_polyGF2",
+   "Spqr/Math/Gf2Poly/NatRep.lean::natBinaryPolyMod_ne_zero_of_not_dvd",
+   "Spqr/Math/Gf2Poly/NatRep.lean::natToBinaryPoly_natDegree_eq_log2"
+  ]
+ }
+}

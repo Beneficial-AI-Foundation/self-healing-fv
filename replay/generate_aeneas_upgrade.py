@@ -89,7 +89,10 @@ def main() -> int:
     root = (args.out / commit[:8]).resolve()
     root.mkdir(parents=True, exist_ok=True)
     log = root / "generate.log"
-    report = {"aeneas": commit, "root": str(root), "log": str(log), "steps": []}
+    # Pin the base: the config rev may be a branch, and the generated case must name one commit.
+    repo_commit = subprocess.run(["git", "-C", str(args.repo.resolve()), "rev-parse", cfg["rev"]],
+                                 capture_output=True, text=True, check=True).stdout.strip()
+    report = {"aeneas": commit, "repo_commit": repo_commit, "root": str(root), "log": str(log), "steps": []}
     aeneas, repo = root / "aeneas", root / args.repo_subdir
     env = opam_env(args.opam_switch)
     env["PATH"] = f"{GNU_SED}:{env['PATH']}"
@@ -99,7 +102,7 @@ def main() -> int:
         sh(["git", "-C", str(src), "worktree", "add", "--detach", str(aeneas), commit], root, log)
     if not repo.exists():
         repo.mkdir()
-        archive = subprocess.run(["git", "-C", str(args.repo.resolve()), "archive", cfg["rev"], args.export_path],
+        archive = subprocess.run(["git", "-C", str(args.repo.resolve()), "archive", repo_commit, args.export_path],
                                  capture_output=True, check=True)
         subprocess.run(["tar", "-x", "-m", "-C", str(repo)], input=archive.stdout, check=True)
     step("layout", aeneas.exists() and (repo / lean_path(cfg, "lakefile.lean")).exists(), t0, report)

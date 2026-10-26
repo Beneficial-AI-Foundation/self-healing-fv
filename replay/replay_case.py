@@ -43,6 +43,9 @@ from mine_history import (REPO_CONFIGS, Git, Miner, lean_libs, lean_path,  # noq
                           module_resolver, parse_decls)
 
 MAX_ROUNDS = 20
+# A single Lean file elaborating longer than this is hung (a whole project builds in minutes).
+# Heartbeat limits do not cover kernel checking or some tactic loops (SPQR #635 ran for 80+ min).
+FILE_TIMEOUT_S = 900
 SORRYABLE = ("theorem", "lemma", "def", "abbrev", "instance")
 # Position is optional: Lake reports e.g. `error: Foo.lean: bad import 'X'` without one.
 DIAG_RE = re.compile(r"^(error|warning|info): (?:\./)?(\S+?\.lean)(?::(\d+):(\d+))?: ?(.*)$")
@@ -182,25 +185,61 @@ ORPHAN_RE = re.compile(r"info: (\S+): checking out revision '([0-9a-f]{7,40})'\s
                        r"fatal: (?:unable to read tree|reference is not a tree)")
 
 
-def lake(cmd: list[str], cwd: Path, log: Path, orphans: list | None = None) -> tuple[int, float, str]:
+def run_watched(argv: list[str], cwd: Path, hung: list | None) -> tuple[int, str]:
+    """Run `argv`; kill any `lean` child compiling a file under `cwd` for more than
+    FILE_TIMEOUT_S and append that file (relative to `cwd`) to `hung`."""
+    p = subprocess.Popen(argv, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                         text=True, errors="replace")
+    chunks = []
+    reader = threading.Thread(target=lambda: chunks.append(p.stdout.read()), daemon=True)
+    reader.start()
+    first_seen: dict[int, float] = {}
+    root = str(cwd.resolve()) + "/"
+    while p.poll() is None:
+        time.sleep(15)
+        if hung is None:
+            continue
+        ps = subprocess.run(["ps", "-Ao", "pid=,command="], capture_output=True, text=True).stdout
+        for line in ps.splitlines():
+            pid_s, _, command = line.strip().partition(" ")
+            args = command.split()
+            if len(args) < 3 or not args[0].endswith("/lean") or "-o" not in args:
+                continue
+            src = args[1]
+            if not (src.startswith(root) and src.endswith(".lean")):
+                continue
+            pid = int(pid_s)
+            first_seen.setdefault(pid, time.time())
+            if time.time() - first_seen[pid] > FILE_TIMEOUT_S:
+                subprocess.run(["kill", str(pid)], capture_output=True)
+                hung.append(src[len(root):])
+                first_seen[pid] = float("inf")  # report once
+    reader.join()
+    return p.returncode, "".join(chunks)
+
+
+def lake(cmd: list[str], cwd: Path, log: Path, orphans: list | None = None,
+         hung: list | None = None) -> tuple[int, float, str]:
     """Run lake. If a dependency pin points at a commit no branch reaches any more (history
-    rewritten upstream), fetch that commit by SHA (GitHub still serves it) and retry."""
+    rewritten upstream), fetch that commit by SHA (GitHub still serves it) and retry.
+    With `hung`, files that compile longer than FILE_TIMEOUT_S are killed and listed there."""
     t0 = time.time()
     for _ in range(3):
-        p = subprocess.run(["lake", *cmd], cwd=cwd, capture_output=True, text=True, errors="replace")
-        out = p.stdout + p.stderr
+        rc, out = run_watched(["lake", *cmd], cwd, hung)
         with open(log, "a") as fh:
-            fh.write(f"\n$ lake {' '.join(cmd)}\n{out}\nEXIT={p.returncode}\n")
+            fh.write(f"\n$ lake {' '.join(cmd)}\n{out}\nEXIT={rc}\n")
+            if hung:
+                fh.write(f"KILLED after {FILE_TIMEOUT_S}s: {hung}\n")
         m = ORPHAN_RE.search(out)
         pkg_dir = cwd / ".lake" / "packages" / m.group(1) if m else None
-        if p.returncode == 0 or not (pkg_dir and pkg_dir.exists()):
+        if rc == 0 or not (pkg_dir and pkg_dir.exists()):
             break
         f = subprocess.run(["git", "-C", str(pkg_dir), "fetch", "-q", "origin", m.group(2)], capture_output=True)
         if f.returncode != 0:
             break
         if orphans is not None:
             orphans.append({"package": m.group(1), "rev": m.group(2)})
-    return p.returncode, time.time() - t0, out
+    return rc, time.time() - t0, out
 
 
 def build_state(name: str, d: Path, logdir: Path, fetch_cache: bool,
@@ -225,12 +264,15 @@ def build_state(name: str, d: Path, logdir: Path, fetch_cache: bool,
         if rc != 0:
             return {"ok": False, "stage": "cache_get", "timings": timings, "reuse": reuse, "orphaned_pins": orphans,
                     "errors": parse_diags(out), "tail": out[-3000:]}
-    rc, t, out = lake(["build"], d, log, orphans)
+    hung: list[str] = []
+    rc, t, out = lake(["build"], d, log, orphans, hung)
     timings["build_s"] = round(t)
     diags = parse_diags(out)
     for x in diags:
         if prefix:
             x["file"] = f"{prefix}/{x['file']}"
+    hung = [f"{prefix}/{h}" if prefix else h for h in hung]
+    diags = [x for x in diags if not (x["file"] in hung and x["line"] == 0)]  # Lake's "killed" notice
     if rc == 0 and store is not None:
         t0 = time.time()
         store.save(d, sha)
@@ -238,6 +280,7 @@ def build_state(name: str, d: Path, logdir: Path, fetch_cache: bool,
     return {"ok": rc == 0, "stage": "build", "timings": timings, "reuse": reuse,
             "orphaned_pins": orphans,  # pins fetchable only by SHA: a live CI bot would hit this too
             "jobs": count_jobs(out),
+            "hung": hung,  # files killed after FILE_TIMEOUT_S (repo-relative)
             "errors": [x for x in diags if x["severity"] == "error"],
             "tail": "" if rc == 0 else out[-3000:]}
 
@@ -414,7 +457,24 @@ def replay(record: dict, repo: Path, work: Path, skip_base: bool) -> dict:
     clone_lake_dir(proj(root / "fixed") / ".lake", proj(broken) / ".lake")
     freshen(broken)
     timing["broken_setup_s"] = round(time.time() - t0, 1)
-    overlay_external = lambda: overlay_change(git, miner, base, change, broken, classes=("external",))
+    def overlay_external() -> list[str]:
+        """Overlay the change's external models, plus project modules they import that exist
+        only in the change (e.g. a helper the same PR added; SPQR #635), transitively."""
+        applied = overlay_change(git, miner, base, change, broken, classes=("external",))
+        todo, support = list(applied), []
+        while todo:
+            text = (broken / todo.pop()).read_text(errors="replace")
+            for mod in re.findall(r"^(?:public |private |meta )*import\s+(?:all\s+)?(\S+)", text, re.M):
+                rel = lean_path(cfg, mod.replace(".", "/") + ".lean")
+                if (broken / rel).exists():
+                    continue
+                content = git.show(change, rel)
+                if content is not None:
+                    (broken / rel).parent.mkdir(parents=True, exist_ok=True)
+                    (broken / rel).write_text(content)
+                    support.append(rel); todo.append(rel)
+        result["external_support_overlaid"] = support
+        return applied + support
     result.update(analyze_broken(broken, proj(broken), cfg, miner, logdir, overlay_external))
     result["comparison"] = compare(record, result)
     timing["broken_rounds_s"] = result.pop("_rounds_s")
@@ -436,6 +496,7 @@ def analyze_broken(broken: Path, project: Path, cfg: dict, miner: Miner, logdir:
 
     rounds, sorried, stmt_errors, file_errors, cascades, header_errors = [], {}, [], [], [], []
     extraction_errors, external_overlaid, setup_failed, unparsed = [], [], False, False
+    timeouts = []  # hung files: which declaration hangs is unknown, so all their proofs are sorried
     for rnd in range(1, MAX_ROUNDS + 1):
         st = build_state(f"broken-round{rnd}", project, logdir, fetch_cache=False, prefix=lean_root)
         errs = st["errors"]
@@ -443,7 +504,15 @@ def analyze_broken(broken: Path, project: Path, cfg: dict, miner: Miner, logdir:
                        "jobs": st["jobs"]})
         if st["ok"]:
             break
-        if not errs:
+        hung_to_sorry = {}
+        for rel in st["hung"]:
+            src = (broken / rel).read_text()
+            names = {n for n, d in parse_decls(src).items()
+                     if d["kind"] in ("theorem", "lemma") and d["body"] != ":= by sorry"}
+            if names:
+                hung_to_sorry[rel] = names
+            timeouts.append({"file": rel, "round": rnd, "sorried": sorted(names)})
+        if not errs and not hung_to_sorry:
             result["broken_tail"] = st["tail"]
             unparsed = True  # failed, but no diagnostic we could read: never report this as green
             break
@@ -462,7 +531,7 @@ def analyze_broken(broken: Path, project: Path, cfg: dict, miner: Miner, logdir:
                     continue
             setup_failed = True
             break
-        to_sorry: dict[str, set[str]] = {}
+        to_sorry: dict[str, set[str]] = hung_to_sorry
         seen_errs = {(x["file"], x["decl"], x["msg"]) for x in stmt_errors + file_errors + header_errors}
         # Process "unknown identifier/constant X" errors last: when X is a declaration that failed
         # (and is sorried) this round, they are cascades; defer them a round and count them only
@@ -532,14 +601,17 @@ def analyze_broken(broken: Path, project: Path, cfg: dict, miner: Miner, logdir:
         "needs_statement_change": bool(stmt_broken),
         "file_errors": file_errors,
         "blocked_modules": blocked,
+        # Files killed after FILE_TIMEOUT_S. Their proofs were all sorried to unblock importers,
+        # so these are suspects, not ground truth; the file itself is a break.
+        "timeouts": timeouts,
         "blocked_files": sorted(lean_path(cfg, mods[m]) for m in blocked if m in mods),  # repo-relative
     })
     result["_rounds_s"] = sum(r["build_s"] for r in rounds)
     if setup_failed:
         result["verdict"] = "setup failure: extracted code does not build in the broken state"
-    elif unparsed and not (sorried or stmt_errors or file_errors or header_errors):
+    elif unparsed and not (sorried or stmt_errors or file_errors or header_errors or timeouts):
         result["verdict"] = "unparsed build failure: see broken_tail"
-    elif sorried or stmt_errors or file_errors or header_errors:
+    elif sorried or stmt_errors or file_errors or header_errors or timeouts:
         result["verdict"] = "break confirmed"
     else:
         result["verdict"] = "no break: broken state builds green"
@@ -572,7 +644,11 @@ def replay_generated(case_id: str, cfg_name: str, base_root: Path, upgraded_root
     t_start = time.time()
     repo = lambda r: r / repo_subdir if repo_subdir else r
     proj = lambda r: repo(r) / lean_root if lean_root else repo(r)
+    gen = upgraded_root / "generate.json"  # written by generate_aeneas_upgrade.py
+    gen = json.loads(gen.read_text()) if gen.exists() else {}
     result = {"case_id": case_id, "generated": True,
+              # Repo commit both trees were exported from (proofs unchanged; only extraction differs).
+              "base_commit": gen.get("repo_commit"),
               "base_pins": tree_pins(repo(base_root), cfg), "upgraded_pins": tree_pins(repo(upgraded_root), cfg),
               "replayed_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
               "machine": {"cpus": os.cpu_count()}}

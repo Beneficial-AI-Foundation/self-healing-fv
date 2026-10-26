@@ -1,0 +1,175 @@
+{
+ "case_id": "spqr/52ad65cd",
+ "change_pr_url": "https://github.com/Beneficial-AI-Foundation/SparsePostQuantumRatchet-verify/pull/493",
+ "replayed_at": "2026-10-26T05:55:12+00:00",
+ "machine": {
+  "cpus": 18
+ },
+ "timing": {
+  "export_s": 0.1,
+  "base_fixed_wall_s": 329,
+  "broken_setup_s": 26.3,
+  "broken_rounds_s": 46,
+  "total_s": 404
+ },
+ "fixed": {
+  "ok": true,
+  "stage": "build",
+  "timings": {
+   "seed_s": 72.5,
+   "cache_lock_wait_s": 9.0,
+   "cache_get_s": 11,
+   "build_s": 236,
+   "store_s": 0.9
+  },
+  "reuse": {
+   "packages_reused": [
+    "mathlib",
+    "plausible",
+    "LeanSearchClient",
+    "importGraph",
+    "proofwidgets",
+    "aesop",
+    "Qq",
+    "batteries",
+    "Cli"
+   ],
+   "packages_fetched": [
+    "aeneas"
+   ],
+   "project_build_seeded_from": "20b2b49852c3be0e88263b26c7b302fb4fd66aac"
+  },
+  "orphaned_pins": [],
+  "jobs": 2516,
+  "errors": [],
+  "tail": ""
+ },
+ "base": {
+  "ok": true,
+  "stage": "build",
+  "timings": {
+   "seed_s": 72.3,
+   "cache_lock_wait_s": 0.0,
+   "cache_get_s": 9,
+   "build_s": 226,
+   "store_s": 0.3
+  },
+  "reuse": {
+   "packages_reused": [
+    "aeneas",
+    "mathlib",
+    "plausible",
+    "LeanSearchClient",
+    "importGraph",
+    "proofwidgets",
+    "aesop",
+    "Qq",
+    "batteries",
+    "Cli"
+   ],
+   "packages_fetched": [],
+   "project_build_seeded_from": "20b2b49852c3be0e88263b26c7b302fb4fd66aac"
+  },
+  "orphaned_pins": [],
+  "jobs": 2513,
+  "errors": [],
+  "tail": ""
+ },
+ "overlay": [
+  "SrcTranslated/Funs.lean",
+  "SrcTranslated/Types.lean",
+  "aeneas-config.yml",
+  "lake-manifest.json",
+  "lakefile.toml"
+ ],
+ "external_models_overlaid": [],
+ "extraction_errors": [],
+ "broken_rounds": [
+  {
+   "round": 1,
+   "ok": false,
+   "errors_n": 1,
+   "build_s": 14,
+   "jobs": 2515
+  },
+  {
+   "round": 2,
+   "ok": false,
+   "errors_n": 1,
+   "build_s": 8,
+   "jobs": 2515
+  },
+  {
+   "round": 3,
+   "ok": false,
+   "errors_n": 29,
+   "build_s": 17,
+   "jobs": 2515
+  },
+  {
+   "round": 4,
+   "ok": true,
+   "errors_n": 0,
+   "build_s": 7,
+   "jobs": 2515
+  }
+ ],
+ "broken_green_after_sorry": true,
+ "broken_proofs": [
+  "Spqr/Specs/V1/Chunked/States/Serialize/DecodeChunk.lean::decode_chunk_spec",
+  "Spqr/Specs/V1/Chunked/States/Serialize/DecodeVarint.lean::decode_varint_spec",
+  "Spqr/Specs/V1/Chunked/States/Serialize/Message/Deserialize.lean::Message.deserialize_spec"
+ ],
+ "broken_proofs_detail": [
+  {
+   "file": "Spqr/Specs/V1/Chunked/States/Serialize/DecodeVarint.lean",
+   "line": 319,
+   "decl": "decode_varint_spec",
+   "where": "body",
+   "kind": "unknown-identifier",
+   "msg": "Unknown identifier `at2_post`",
+   "round": 1,
+   "decl_kind": "theorem"
+  },
+  {
+   "file": "Spqr/Specs/V1/Chunked/States/Serialize/DecodeChunk.lean",
+   "line": 106,
+   "decl": "decode_chunk_spec",
+   "where": "body",
+   "kind": "unknown-identifier",
+   "msg": "Unknown identifier `at3_post`",
+   "round": 2,
+   "decl_kind": "theorem"
+  },
+  {
+   "file": "Spqr/Specs/V1/Chunked/States/Serialize/Message/Deserialize.lean",
+   "line": 132,
+   "decl": "Message.deserialize_spec",
+   "where": "body",
+   "kind": "type-mismatch",
+   "msg": "Type mismatch\n  Eq.symm hat1\nhas type\n  1 + n₁ = ↑«at»\nbut is expected to have type\n  1 + n₁ = ↑at1",
+   "round": 3,
+   "decl_kind": "theorem"
+  }
+ ],
+ "statement_errors": [],
+ "cascades": [],
+ "header_errors": [],
+ "statement_broken": [],
+ "needs_statement_change": false,
+ "file_errors": [],
+ "blocked_modules": [],
+ "blocked_files": [],
+ "verdict": "break confirmed",
+ "comparison": {
+  "predicted_n": 3,
+  "actual_n": 3,
+  "true_positive": [
+   "Spqr/Specs/V1/Chunked/States/Serialize/DecodeChunk.lean::decode_chunk_spec",
+   "Spqr/Specs/V1/Chunked/States/Serialize/DecodeVarint.lean::decode_varint_spec",
+   "Spqr/Specs/V1/Chunked/States/Serialize/Message/Deserialize.lean::Message.deserialize_spec"
+  ],
+  "false_positive": [],
+  "false_negative": []
+ }
+}

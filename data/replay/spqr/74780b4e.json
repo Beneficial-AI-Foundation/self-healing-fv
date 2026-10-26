@@ -1,0 +1,601 @@
+{
+ "case_id": "spqr/74780b4e",
+ "change_pr_url": "https://github.com/Beneficial-AI-Foundation/SparsePostQuantumRatchet-verify/pull/657",
+ "replayed_at": "2026-10-26T06:10:12+00:00",
+ "machine": {
+  "cpus": 18
+ },
+ "timing": {
+  "export_s": 0.2,
+  "base_fixed_wall_s": 259,
+  "broken_setup_s": 19.9,
+  "broken_rounds_s": 108,
+  "total_s": 389
+ },
+ "fixed": {
+  "ok": true,
+  "stage": "build",
+  "timings": {
+   "seed_s": 73.7,
+   "cache_lock_wait_s": 11.4,
+   "cache_get_s": 14,
+   "build_s": 160,
+   "store_s": 0.5
+  },
+  "reuse": {
+   "packages_reused": [
+    "mathlib",
+    "plausible",
+    "LeanSearchClient",
+    "importGraph",
+    "proofwidgets",
+    "aesop",
+    "Qq",
+    "batteries",
+    "Cli"
+   ],
+   "packages_fetched": [
+    "aeneas"
+   ],
+   "project_build_seeded_from": "b5a4cb90b41a1577134fa8398d1bc87fea32b899"
+  },
+  "orphaned_pins": [],
+  "jobs": 2591,
+  "errors": [],
+  "tail": ""
+ },
+ "base": {
+  "ok": true,
+  "stage": "build",
+  "timings": {
+   "seed_s": 73.7,
+   "cache_lock_wait_s": 0.0,
+   "cache_get_s": 11,
+   "build_s": 166,
+   "store_s": 1.1
+  },
+  "reuse": {
+   "packages_reused": [
+    "mathlib",
+    "plausible",
+    "LeanSearchClient",
+    "importGraph",
+    "proofwidgets",
+    "aesop",
+    "Qq",
+    "batteries",
+    "Cli"
+   ],
+   "packages_fetched": [
+    "aeneas"
+   ],
+   "project_build_seeded_from": "b5a4cb90b41a1577134fa8398d1bc87fea32b899"
+  },
+  "orphaned_pins": [],
+  "jobs": 2594,
+  "errors": [],
+  "tail": ""
+ },
+ "overlay": [
+  "SrcTranslated/Funs.lean",
+  "SrcTranslated/Types.lean",
+  "aeneas-config.yml",
+  "translation-patches/build-generated_dir.patch",
+  "translation-patches/build-main.patch",
+  "translation-patches/gf-MulAssign_ref-mul_assign.patch",
+  "translation-patches/gf-div_impl.patch",
+  "translation-patches/gf-mul2_u16.patch",
+  "translation-patches/lib-crate_attrs.patch",
+  "translation-patches/lib-initial_state.patch",
+  "translation-patches/lib-msg_preamble.patch",
+  "translation-patches/lib-recv.patch",
+  "translation-patches/lib-send.patch",
+  "translation-patches/polynomial-Poly-deserialize.patch",
+  "translation-patches/polynomial-PolyConst.patch",
+  "translation-patches/polynomial-PolyDecoder-from_pb.patch",
+  "translation-patches/polynomial-PolyEncoder-from_pb.patch",
+  "translation-patches/polynomial-compute_at.patch",
+  "translation-patches/polynomial-from_complete_points.patch",
+  "translation-patches/polynomial-lagrange_sum.patch",
+  "translation-patches/pq_ratchet-include.patch",
+  "translation-patches/states-recv.patch",
+  "translation-patches/states-send.patch",
+  "translation-patches/states_serialize-encode_varint.patch"
+ ],
+ "external_models_overlaid": [
+  "SrcTranslated/FunsExternal.lean"
+ ],
+ "extraction_errors": [],
+ "broken_rounds": [
+  {
+   "round": 1,
+   "ok": false,
+   "errors_n": 7,
+   "build_s": 12,
+   "jobs": 2593
+  },
+  {
+   "round": 2,
+   "ok": false,
+   "errors_n": 68,
+   "build_s": 70,
+   "jobs": 2593
+  },
+  {
+   "round": 3,
+   "ok": false,
+   "errors_n": 23,
+   "build_s": 15,
+   "jobs": 2593
+  },
+  {
+   "round": 4,
+   "ok": false,
+   "errors_n": 20,
+   "build_s": 6,
+   "jobs": 2593
+  },
+  {
+   "round": 5,
+   "ok": false,
+   "errors_n": 19,
+   "build_s": 5,
+   "jobs": 2593
+  }
+ ],
+ "broken_green_after_sorry": false,
+ "broken_proofs": [
+  "Spqr/Specs/Chain/Chain/New.lean::new_spec",
+  "Spqr/Specs/Chain/Chain/RecvKey.lean::recv_key_spec",
+  "Spqr/Specs/Chain/Chain/RecvKey32.lean::recv_key_spec_32",
+  "Spqr/Specs/Chain/ChainEpochDirection/FromPb.lean::from_pb_spec",
+  "Spqr/Specs/Chain/KeyHistory/Get.lean::body_spec",
+  "Spqr/Specs/Encoding/Gf/GF16/DivImpl.lean::div_impl_loop_body_spec",
+  "Spqr/Specs/Encoding/Gf/GF16/DivImpl.lean::div_impl_loop_spec",
+  "Spqr/Specs/Encoding/Polynomial/Poly/Deserialize.lean::deserialize_spec",
+  "Spqr/Specs/Encoding/Polynomial/Poly/LagrangeInterpolate.lean::lagrange_interpolate_formula",
+  "Spqr/Specs/Encoding/Polynomial/Poly/LagrangeInterpolatePrepare.lean::lagrange_interpolate_prepare_spec",
+  "Spqr/Specs/Encoding/Polynomial/Poly/LagrangeInterpolatePt.lean::lagrange_interpolate_pt_spec",
+  "Spqr/Specs/Encoding/Polynomial/PolyDecoder/IntoPb.lean::into_pb_spec",
+  "Spqr/Specs/Encoding/Polynomial/PolyEncoder/IntoPb.lean::into_pb_spec_bytes",
+  "Spqr/Specs/Lib/Version/TryFrom.lean::try_from_spec",
+  "Spqr/Specs/V1/Chunked/States/Serialize/MessageType/TryFrom.lean::try_from_spec"
+ ],
+ "broken_proofs_detail": [
+  {
+   "file": "Spqr/Specs/Lib/Version/TryFrom.lean",
+   "line": 62,
+   "decl": "try_from_spec",
+   "where": "body",
+   "kind": "tactic-failed",
+   "msg": "`grind` failed\ncase grind.3.1.1.2\nvalue : U8\nexpected : core.result.Result Version String\nhp :\n  (match ↑value with\n    | 0 => core.result.Result.Ok V0\n    | 1 => core.result.Result.Ok V1\n    | x => core.result.Result.Err \"Expected 0 or 1\") =\n    expected\nvalue_1 : U8\nh : value = 0#8#uscalar → False\nh_1 : value = 1#8#uscalar → False\nh_2 :\n  ¬(do\n        let a ← core.fmt.rt.Argument.new_display { fmt := core.fmt.num.imp.DisplayU8.fmt } value\n        let a1 ←\n          core.fmt.Arguments.new\n              (Array.make (UScalar.ofNatCore 24 try_from_spec._proof_1_35)\n                [UScalar.ofNat",
+   "round": 2,
+   "decl_kind": "theorem"
+  },
+  {
+   "file": "Spqr/Specs/V1/Chunked/States/Serialize/MessageType/TryFrom.lean",
+   "line": 71,
+   "decl": "try_from_spec",
+   "where": "body",
+   "kind": "tactic-failed",
+   "msg": "`grind` failed\ncase grind.8.1.1.1.2.1.1.1.1\nvalue : U8\nexpected : core.result.Result MessageType String\nhp :\n  (match ↑value with\n    | 0 => core.result.Result.Ok None\n    | 1 => core.result.Result.Ok Hdr\n    | 2 => core.result.Result.Ok Ek\n    | 3 => core.result.Result.Ok EkCt1Ack\n    | 4 => core.result.Result.Ok Ct1Ack\n    | 5 => core.result.Result.Ok Ct1\n    | 6 => core.result.Result.Ok Ct2\n    | x => core.result.Result.Err \"Expected a number between 0 and 6\") =\n    expected\nvalue_1 : U8\nh : value = 0#8#uscalar → False\nh_1 : value = 1#8#uscalar → False\nh_2 : value = 2#8#uscalar → False\nh_3 ",
+   "round": 2,
+   "decl_kind": "theorem"
+  },
+  {
+   "file": "Spqr/Specs/Chain/ChainEpochDirection/FromPb.lean",
+   "line": 34,
+   "decl": "from_pb_spec",
+   "where": "body",
+   "kind": "unsolved-goals",
+   "msg": "unsolved goals\ncase h1\npb : proto.pq_ratchet.chain.epoch.EpochDirection\nb : Bool\n_ : [> let b ← alloc.vec.Vec.is_empty Global pb.next <]\nb_post : b = (↑pb.next).isEmpty\nh✝¹ : ¬b = true\nh✝ : (pb.next.len != 32#usize) = true\n⊢ core.result.Result.Err Error.StateDecode =\n    core.result.Result.Ok { ctr := pb.ctr, next := pb.next, prev := { data := pb.prev } }",
+   "round": 2,
+   "decl_kind": "theorem"
+  },
+  {
+   "file": "Spqr/Specs/Encoding/Polynomial/PolyDecoder/IntoPb.lean",
+   "line": 311,
+   "decl": "into_pb_spec",
+   "where": "body",
+   "kind": "tactic-failed",
+   "msg": "Tactic `unfold` failed to unfold `core.slice.Slice.iter` in\n  (do\n      let v1 ← into_pb_loop0 { start := 0#usize, «end» := s1.len } self.pts (alloc.vec.Vec.new (alloc.vec.Vec U8))\n      ok { pts_needed := i, polys := 16#u32, pts := v1, is_complete := self.is_complete }) ⦃\n    result =>\n    ↑result.pts_needed = ↑self.pts_needed ∧\n      result.polys = 16#u32 ∧\n        result.is_complete = self.is_complete ∧\n          result.pts.length = 16 ∧\n            ∀ j < 16,\n              result.pts[j]!.length = 4 * alloc.vec.Vec.length (↑self.pts)[j]! ∧\n                ∀ k < alloc.vec.Vec.length (↑self.pt",
+   "round": 2,
+   "decl_kind": "theorem"
+  },
+  {
+   "file": "Spqr/Specs/Chain/Chain/New.lean",
+   "line": 66,
+   "decl": "new_spec",
+   "where": "body",
+   "kind": "unsolved-goals",
+   "msg": "unsolved goals\ninitial_key : Slice U8\ndir : proto.pq_ratchet.Direction\nparams : proto.pq_ratchet.ChainParams\ns : Slice U8\n_✝¹¹ : [> let s ← lift (Array.repeat 32#usize 0#u8).to_slice <]\ns_post : s = (Array.repeat 32#usize 0#u8).to_slice\ns1 : Slice U8\n_✝¹⁰ :\n  [> let s1 ←\n    lift\n      (Array.make 33#usize\n          [83#u8, 105#u8, 103#u8, 110#u8, 97#u8, 108#u8, 32#u8, 80#u8, 81#u8, 32#u8, 82#u8, 97#u8, 116#u8, 99#u8,\n            104#u8, 101#u8, 116#u8, 32#u8, 86#u8, 49#u8, 32#u8, 67#u8, 104#u8, 97#u8, 105#u8, 110#u8, 32#u8, 32#u8,\n            83#u8, 116#u8, 97#u8, 114#u8, 116#u8]\n          ne",
+   "round": 2,
+   "decl_kind": "theorem"
+  },
+  {
+   "file": "Spqr/Specs/Chain/KeyHistory/Get.lean",
+   "line": 107,
+   "decl": "body_spec",
+   "where": "body",
+   "kind": "tactic-failed",
+   "msg": "failed to synthesize instance of type class\n  Membership ?m.657 ℕ\n\nHint: Type class instance resolution failures can be inspected with the `set_option trace.Meta.synthInstance true` command.",
+   "round": 2,
+   "decl_kind": "theorem"
+  },
+  {
+   "file": "Spqr/Specs/Encoding/Polynomial/Poly/Deserialize.lean",
+   "line": 178,
+   "decl": "deserialize_spec",
+   "where": "body",
+   "kind": "unsolved-goals",
+   "msg": "unsolved goals\nserialized : Slice U8\nh_overflow : serialized.length / 2 + 1 ≤ Usize.max\nb : Bool\n_✝¹ : [> let b ← core.slice.Slice.is_empty serialized <]\nb_post : (b = true) = (serialized.length = 0)\nh✝¹ : ¬b = true\ni1 : Usize\n_✝ : [> let i1 ← serialized.len % 2#usize <]\ni1_post : ↑i1 = ↑serialized.len % 2\nh✝ : ¬i1 = 1#usize\ni2 : Usize\n_ : [> let i2 ← serialized.len / 2#usize <]\ni2_post : ↑i2 = ↑serialized.len / 2\n⊢ (do\n      let coefficients1 ← deserialize_loop serialized serialized.len (alloc.vec.Vec.new GF16) 0#usize\n      Result.ok (core.result.Result.Ok { coefficients := coefficients1 }))",
+   "round": 2,
+   "decl_kind": "theorem"
+  },
+  {
+   "file": "Spqr/Specs/Encoding/Gf/GF16/DivImpl.lean",
+   "line": 79,
+   "decl": "div_impl_loop_body_spec",
+   "where": "body",
+   "kind": "unsolved-goals",
+   "msg": "unsolved goals\niter : Range I32\nsquare out : GF16\no : Option I32\niter1 : Range I32\n_ : [> let(o, iter1) ← core.iter.range.IteratorRange.next core.iter.range.StepI32 iter <]\no_post :\n  match o with\n  | none => ¬↑iter.start < ↑iter.end ∧ iter1 = iter\n  | some v => ↑iter.start < ↑iter.end ∧ v = iter.start ∧ ↑iter1.start = ↑iter.start + 1 ∧ iter1.end = iter.end\nval✝ : IScalar IScalarTy.I32\nh✝ : o = some val✝\n⊢ (do\n      let (i, i1) ← mul2_u16 square.value square.value out.value\n      ok (ControlFlow.cont (iter1, { value := i }, { value := i1 }))) ⦃\n    cf =>\n    match cf with\n    | ControlFlow.don",
+   "round": 2,
+   "decl_kind": "theorem"
+  },
+  {
+   "file": "Spqr/Specs/Encoding/Gf/GF16/DivImpl.lean",
+   "line": 114,
+   "decl": "div_impl_loop_spec",
+   "where": "body",
+   "kind": "syntax",
+   "msg": "Invalid `⟨...⟩` notation: The expected type\n  Data.Coinductive.DWP WP.effectWP\n    (do\n      let (i, i1) ← mul2_u16 sq'.value sq'.value out'.value\n      ok (ControlFlow.cont (iter1, { value := i }, { value := i1 })))\n    (fun value x =>\n      (fun r =>\n          match r with\n          | ControlFlow.done y => y.toGF216 = out.toGF216 * square.toGF216 ^ (2 ^ (↑iter.end - ↑iter.start).toNat - 1)\n          | ControlFlow.cont x' =>\n            x'.1.end = iter.end ∧\n              ↑iter.start ≤ ↑x'.1.start ∧\n                ↑x'.1.start ≤ ↑iter.end ∧\n                  x'.2.1.toGF216 = square.toGF216 ^ ",
+   "round": 2,
+   "decl_kind": "theorem"
+  },
+  {
+   "file": "Spqr/Specs/Encoding/Polynomial/PolyEncoder/IntoPb.lean",
+   "line": 432,
+   "decl": "into_pb_spec_bytes",
+   "where": "body",
+   "kind": "tactic-failed",
+   "msg": "`simp` made no progress\n\nNote: The target expression is not type-correct under the `instances` transparency level, which may have triggered the failure. This is usually caused by unfolding of semireducible definitions in prior tactic steps. Use `set_option linter.tacticCheckInstances true` to investigate the source of the issue.\nFull error:\n  Application type mismatch: The argument\n    fun result =>\n      result.idx = self.idx ∧\n        ↑result.pts = [] ∧\n          result.polys.length = polys.length ∧\n            ∀ j < polys.length,\n              result.polys[j]!.length = 2 * (↑polys)[j]!.degr",
+   "round": 2,
+   "decl_kind": "theorem"
+  },
+  {
+   "file": "Spqr/Specs/Encoding/Polynomial/Poly/LagrangeInterpolatePrepare.lean",
+   "line": 272,
+   "decl": "lagrange_interpolate_prepare_spec",
+   "where": "body",
+   "kind": "tactic-failed",
+   "msg": "Tactic `assumption` failed\n\npts : Slice Pt\nh_len : pts.length + 1 ≤ Usize.max\ni1 : Usize\n_✝⁵ : [> let i1 ← pts.len + 1#usize <]\ni1_post : ↑i1 = ↑pts.len + 1\nv : alloc.vec.Vec GF16\n_✝⁴ : [> let v ← alloc.vec.from_elem GF16.Insts.CoreCloneClone ZERO i1 <]\nv_post : ↑v = List.replicate (↑i1) ZERO\nv_post1 : v.length = ↑i1\n_✝³ : GF16\nindex_mut_back : GF16 → alloc.vec.Vec GF16\n_✝² : [> let(_✝³, index_mut_back) ← v.index_mut_usize pts.len <]\n__post : _✝³ = (↑v)[↑pts.len]\nindex_mut_back_post : index_mut_back = v.set pts.len\np : Poly\n_✝¹ :\n  [> let p ←\n    lagrange_interpolate_prepare_loop { start := 0#",
+   "round": 2,
+   "decl_kind": "theorem"
+  },
+  {
+   "file": "Spqr/Specs/Chain/Chain/RecvKey.lean",
+   "line": 68,
+   "decl": "recv_key_spec",
+   "where": "body",
+   "kind": "tactic-failed",
+   "msg": "Step failed: could not find a local assumption or a theorem to apply",
+   "round": 3,
+   "decl_kind": "theorem"
+  },
+  {
+   "file": "Spqr/Specs/Encoding/Polynomial/Poly/LagrangeInterpolatePt.lean",
+   "line": 75,
+   "decl": "lagrange_interpolate_pt_spec",
+   "where": "body",
+   "kind": "tactic-failed",
+   "msg": "`grind` failed\ncase grind.1.1\npts : Slice Pt\ni : Usize\nhi : ↑i < pts.length\ntemplate : Poly\nh_len : (↑pts).length < Usize.max\nh_template_len : (↑template.coefficients).length = (↑pts).length + 1\n_ : template.coefficients[(↑pts).length]! = GF16.ONE\n__1 : ∀ m ≤ (↑pts).length, template.coefficients[m]!.toGF216 = (prodLinearFactors (↑pts) 0 (↑pts).length).coeff m\nh_template_eq : template.toGF216Poly = prodLinearFactors (↑pts) 0 (↑pts).length\nh_template_pos : 0 < template.degree\nh_root_template : template.evalAt pts[i]!.x = 0\nresult1 : Poly\nh_r1_len : result1.degree = template.degree\nh_r1_id :\n  re",
+   "round": 3,
+   "decl_kind": "theorem"
+  },
+  {
+   "file": "Spqr/Specs/Encoding/Polynomial/Poly/LagrangeInterpolate.lean",
+   "line": 308,
+   "decl": "lagrange_interpolate_formula",
+   "where": "body",
+   "kind": "tactic-failed",
+   "msg": "Could not unify the theorem with the target:\n- theorem: Std.bind\n    (alloc.vec.Vec.index (core.slice.index.SliceIndexRangeFromUsizeSlice GF16) working1.coefficients\n      { start := 1#usize })\n    ?k ⦃\n  ?Pₖ ⦄\n- target: (do\n    let s ← alloc.vec.Vec.as_slice Global working1.coefficients\n    let s1 ← core.slice.index.SliceIndexRangeFromUsizeSlice.index { start := 1#usize } s\n    let v ← alloc.vec.Vec.extend_from_slice GF16.Insts.CoreCloneClone out.coefficients s1\n    let v1 ← lagrange_interpolate_loop0 { start := 1#usize, «end» := pts.len } pts v template working1\n    ok { coefficients := v1 }",
+   "round": 3,
+   "decl_kind": "theorem"
+  },
+  {
+   "file": "Spqr/Specs/Chain/Chain/RecvKey32.lean",
+   "line": 54,
+   "decl": "recv_key_spec_32",
+   "where": "body",
+   "kind": "tactic-failed",
+   "msg": "Step failed: could not find a local assumption or a theorem to apply",
+   "round": 4,
+   "decl_kind": "theorem"
+  }
+ ],
+ "statement_errors": [
+  {
+   "file": "Spqr/Specs/V1/Chunked/States/Serialize/DecodeVarint.lean",
+   "line": 157,
+   "decl": "decode_varint_loop_body_spec",
+   "where": "statement",
+   "kind": "type-mismatch",
+   "msg": "Application type mismatch: The argument\n  from1\nhas type\n  alloc.vec.Vec U8\nbut is expected to have type\n  Slice U8\nin the application\n  decode_varint_loop.body from1",
+   "round": 2
+  },
+  {
+   "file": "Spqr/Specs/V1/Chunked/States/Serialize/DecodeVarint.lean",
+   "line": 230,
+   "decl": "decode_varint_loop_spec",
+   "where": "statement",
+   "kind": "type-mismatch",
+   "msg": "Application type mismatch: The argument\n  from1\nhas type\n  alloc.vec.Vec U8\nbut is expected to have type\n  Slice U8\nin the application\n  decode_varint_loop from1",
+   "round": 2
+  },
+  {
+   "file": "Spqr/Specs/V1/Chunked/States/Serialize/DecodeVarint.lean",
+   "line": 309,
+   "decl": "decode_varint_spec",
+   "where": "statement",
+   "kind": "type-mismatch",
+   "msg": "Application type mismatch: The argument\n  from1\nhas type\n  alloc.vec.Vec U8\nbut is expected to have type\n  Slice U8\nin the application\n  decode_varint from1",
+   "round": 2
+  },
+  {
+   "file": "Spqr/Specs/Encoding/Polynomial/PolyDecoder/IntoPb.lean",
+   "line": 164,
+   "decl": "body_spec#2",
+   "where": "statement",
+   "kind": "type-mismatch",
+   "msg": "Application type mismatch: The argument\n  iter\nhas type\n  core.slice.iter.Iter (sorted_vec.SortedSet Pt)\nbut is expected to have type\n  Std.Array (sorted_vec.SortedSet Pt) 16#usize\nin the application\n  body iter",
+   "round": 2
+  },
+  {
+   "file": "Spqr/Specs/Encoding/Polynomial/PolyDecoder/IntoPb.lean",
+   "line": 170,
+   "decl": "body_spec#2",
+   "where": "statement",
+   "kind": "other",
+   "msg": "Invalid field notation: Type of\n  iter1\nis not known; cannot resolve field `i`\n\nHint: Consider replacing the field projection with a call to one of the following:\n  • `Lean.ProjectionFunctionInfo.i`\n  • `String.Legacy.Iterator.i`\n  • `Lean.Meta.Grind.CanonArgKey.i`\n  • `Lean.Meta.Grind.CaseTrace.i`\n  • `Lean.Server.Watchdog.RequestQueueMap.i`\n  • `core.slice.iter.Iter.i`\n  • `core.slice.iter.IterMut.i`",
+   "round": 2
+  },
+  {
+   "file": "Spqr/Specs/Encoding/Polynomial/PolyDecoder/IntoPb.lean",
+   "line": 171,
+   "decl": "body_spec#2",
+   "where": "statement",
+   "kind": "other",
+   "msg": "Invalid field notation: Type of\n  iter1\nis not known; cannot resolve field `slice`\n\nHint: Consider replacing the field projection with a call to one of the following:\n  • `ByteSlice.slice`\n  • `List.slice`\n  • `String.slice`\n  • `String.Pos.slice`\n  • `String.Slice.slice`\n  • `Array.slice`\n  • `Slice.slice`\n  • `String.Slice.Pos.slice`\n  • `alloc.vec.Vec.slice`\n  • `Lean.Elab.Term.Quotation.HeadCheck.slice`\n  • `core.slice.iter.Iter.slice`\n  • `core.slice.iter.IterMut.slice`",
+   "round": 2
+  },
+  {
+   "file": "Spqr/Specs/Encoding/Polynomial/PolyDecoder/IntoPb.lean",
+   "line": 222,
+   "decl": "loop_spec#2",
+   "where": "statement",
+   "kind": "type-mismatch",
+   "msg": "Application type mismatch: The argument\n  iter\nhas type\n  core.slice.iter.Iter (sorted_vec.SortedSet Pt)\nbut is expected to have type\n  core.ops.range.Range Usize\nin the application\n  into_pb_loop0 iter",
+   "round": 2
+  },
+  {
+   "file": "Spqr/Specs/Encoding/Polynomial/Poly/Deserialize.lean",
+   "line": 45,
+   "decl": "body_spec",
+   "where": "statement",
+   "kind": "type-mismatch",
+   "msg": "Application type mismatch: The argument\n  iter\nhas type\n  core.ops.range.Range Usize\nbut is expected to have type\n  Usize\nin the application\n  body serialized iter",
+   "round": 2
+  },
+  {
+   "file": "Spqr/Specs/Encoding/Polynomial/Poly/Deserialize.lean",
+   "line": 103,
+   "decl": "loop_spec",
+   "where": "statement",
+   "kind": "type-mismatch",
+   "msg": "Application type mismatch: The argument\n  iter\nhas type\n  core.ops.range.Range Usize\nbut is expected to have type\n  Slice U8\nin the application\n  deserialize_loop iter",
+   "round": 2
+  },
+  {
+   "file": "Spqr/Specs/Encoding/Polynomial/PolyEncoder/IntoPb.lean",
+   "line": 274,
+   "decl": "body_spec#3",
+   "where": "statement",
+   "kind": "type-mismatch",
+   "msg": "Application type mismatch: The argument\n  iter\nhas type\n  core.slice.iter.Iter Poly\nbut is expected to have type\n  Std.Array Poly 16#usize\nin the application\n  body iter",
+   "round": 2
+  },
+  {
+   "file": "Spqr/Specs/Encoding/Polynomial/PolyEncoder/IntoPb.lean",
+   "line": 280,
+   "decl": "body_spec#3",
+   "where": "statement",
+   "kind": "other",
+   "msg": "Invalid field notation: Type of\n  iter1\nis not known; cannot resolve field `i`\n\nHint: Consider replacing the field projection with a call to one of the following:\n  • `Lean.ProjectionFunctionInfo.i`\n  • `Matrix.TransvectionStruct.i`\n  • `String.Legacy.Iterator.i`\n  • `Lean.Meta.Grind.CanonArgKey.i`\n  • `Lean.Meta.Grind.CaseTrace.i`\n  • `Lean.Server.Watchdog.RequestQueueMap.i`\n  • `core.slice.iter.Iter.i`\n  • `core.slice.iter.IterMut.i`",
+   "round": 2
+  },
+  {
+   "file": "Spqr/Specs/Encoding/Polynomial/PolyEncoder/IntoPb.lean",
+   "line": 281,
+   "decl": "body_spec#3",
+   "where": "statement",
+   "kind": "other",
+   "msg": "Invalid field notation: Type of\n  iter1\nis not known; cannot resolve field `slice`\n\nHint: Consider replacing the field projection with a call to one of the following:\n  • `ByteSlice.slice`\n  • `List.slice`\n  • `String.slice`\n  • `String.Pos.slice`\n  • `String.Slice.slice`\n  • `Array.slice`\n  • `Slice.slice`\n  • `String.Slice.Pos.slice`\n  • `alloc.vec.Vec.slice`\n  • `Lean.Elab.Term.Quotation.HeadCheck.slice`\n  • `core.slice.iter.Iter.slice`\n  • `core.slice.iter.IterMut.slice`",
+   "round": 2
+  },
+  {
+   "file": "Spqr/Specs/Encoding/Polynomial/PolyEncoder/IntoPb.lean",
+   "line": 335,
+   "decl": "loop_spec#3",
+   "where": "statement",
+   "kind": "type-mismatch",
+   "msg": "Application type mismatch: The argument\n  iter\nhas type\n  core.slice.iter.Iter Poly\nbut is expected to have type\n  core.ops.range.Range Usize\nin the application\n  into_pb_loop1 iter",
+   "round": 2
+  },
+  {
+   "file": "Spqr/Specs/IncrementalMlkem768/Generate.lean",
+   "line": 64,
+   "decl": "generate_spec",
+   "where": "statement",
+   "kind": "unknown-identifier",
+   "msg": "Unknown identifier `rand.rng.Rng`",
+   "round": 2
+  },
+  {
+   "file": "Spqr/Specs/IncrementalMlkem768/Generate.lean",
+   "line": 65,
+   "decl": "generate_spec",
+   "where": "statement",
+   "kind": "unknown-identifier",
+   "msg": "Unknown identifier `rand_core.CryptoRng`",
+   "round": 2
+  },
+  {
+   "file": "Spqr/Specs/Lib/MsgVersion.lean",
+   "line": 34,
+   "decl": "msg_version_spec",
+   "where": "statement",
+   "kind": "unknown-identifier",
+   "msg": "Unknown identifier `msg_version`\n\nNote: It is not possible to treat `msg_version` as an implicitly bound variable here because the `autoImplicit` option is set to `false`.",
+   "round": 2
+  },
+  {
+   "file": "Spqr/Specs/Encoding/Polynomial/ConstPolysToPolys/CallMut.lean",
+   "line": 38,
+   "decl": "call_mut_spec",
+   "where": "statement",
+   "kind": "unknown-identifier",
+   "msg": "Unknown constant `spqr.encoding.polynomial.const_polys_to_polys.closure`",
+   "round": 2
+  },
+  {
+   "file": "Spqr/Specs/Encoding/Polynomial/ConstPolysToPolys/CallMut.lean",
+   "line": 40,
+   "decl": "call_mut_spec",
+   "where": "statement",
+   "kind": "unknown-identifier",
+   "msg": "Unknown identifier `call_mut`\n\nNote: It is not possible to treat `call_mut` as an implicitly bound variable here because the `autoImplicit` option is set to `false`.",
+   "round": 2
+  }
+ ],
+ "cascades": [],
+ "header_errors": [],
+ "statement_broken": [
+  "Spqr/Specs/Encoding/Polynomial/ConstPolysToPolys/CallMut.lean::call_mut_spec",
+  "Spqr/Specs/Encoding/Polynomial/Poly/Deserialize.lean::body_spec",
+  "Spqr/Specs/Encoding/Polynomial/Poly/Deserialize.lean::loop_spec",
+  "Spqr/Specs/Encoding/Polynomial/PolyDecoder/IntoPb.lean::body_spec#2",
+  "Spqr/Specs/Encoding/Polynomial/PolyDecoder/IntoPb.lean::loop_spec#2",
+  "Spqr/Specs/Encoding/Polynomial/PolyEncoder/IntoPb.lean::body_spec#3",
+  "Spqr/Specs/Encoding/Polynomial/PolyEncoder/IntoPb.lean::loop_spec#3",
+  "Spqr/Specs/IncrementalMlkem768/Generate.lean::generate_spec",
+  "Spqr/Specs/Lib/MsgVersion.lean::msg_version_spec",
+  "Spqr/Specs/V1/Chunked/States/Serialize/DecodeVarint.lean::decode_varint_loop_body_spec",
+  "Spqr/Specs/V1/Chunked/States/Serialize/DecodeVarint.lean::decode_varint_loop_spec",
+  "Spqr/Specs/V1/Chunked/States/Serialize/DecodeVarint.lean::decode_varint_spec"
+ ],
+ "needs_statement_change": true,
+ "file_errors": [],
+ "blocked_modules": [
+  "Spqr",
+  "Spqr.Specs.Encoding.Decoder.AddChunk",
+  "Spqr.Specs.Encoding.Encoder.EncodeBytes",
+  "Spqr.Specs.Encoding.Encoder.NextChunk",
+  "Spqr.Specs.Encoding.Polynomial.ConstPolysToPolys",
+  "Spqr.Specs.Encoding.Polynomial.ConstPolysToPolys.CallOnce",
+  "Spqr.Specs.Encoding.Polynomial.ConstPolysToPolys.SliceIterMapCollect",
+  "Spqr.Specs.Encoding.Polynomial.Poly.FromCompletePoints",
+  "Spqr.Specs.Encoding.Polynomial.PolyDecoder.AddChunk",
+  "Spqr.Specs.Encoding.Polynomial.PolyDecoder.FromPb",
+  "Spqr.Specs.Encoding.Polynomial.PolyEncoder.ChunkAt",
+  "Spqr.Specs.Encoding.Polynomial.PolyEncoder.EncodeBytes",
+  "Spqr.Specs.Encoding.Polynomial.PolyEncoder.EncodeBytesBase",
+  "Spqr.Specs.Encoding.Polynomial.PolyEncoder.FromPb",
+  "Spqr.Specs.Encoding.Polynomial.PolyEncoder.NextChunk",
+  "Spqr.Specs.Encoding.Polynomial.PolyEncoder.PointAt",
+  "Spqr.Specs.V1.Chunked.SendEk.Serialize.KeysSampled.FromPb",
+  "Spqr.Specs.V1.Chunked.SendEk.Serialize.KeysSampled.IntoPb",
+  "Spqr.Specs.V1.Chunked.States.Serialize.DecodeChunk",
+  "Spqr.Specs.V1.Chunked.States.Serialize.Message.Deserialize",
+  "scripts.Audit"
+ ],
+ "blocked_files": [
+  "Spqr.lean",
+  "Spqr/Specs/Encoding/Decoder/AddChunk.lean",
+  "Spqr/Specs/Encoding/Encoder/EncodeBytes.lean",
+  "Spqr/Specs/Encoding/Encoder/NextChunk.lean",
+  "Spqr/Specs/Encoding/Polynomial/ConstPolysToPolys.lean",
+  "Spqr/Specs/Encoding/Polynomial/ConstPolysToPolys/CallOnce.lean",
+  "Spqr/Specs/Encoding/Polynomial/ConstPolysToPolys/SliceIterMapCollect.lean",
+  "Spqr/Specs/Encoding/Polynomial/Poly/FromCompletePoints.lean",
+  "Spqr/Specs/Encoding/Polynomial/PolyDecoder/AddChunk.lean",
+  "Spqr/Specs/Encoding/Polynomial/PolyDecoder/FromPb.lean",
+  "Spqr/Specs/Encoding/Polynomial/PolyEncoder/ChunkAt.lean",
+  "Spqr/Specs/Encoding/Polynomial/PolyEncoder/EncodeBytes.lean",
+  "Spqr/Specs/Encoding/Polynomial/PolyEncoder/EncodeBytesBase.lean",
+  "Spqr/Specs/Encoding/Polynomial/PolyEncoder/FromPb.lean",
+  "Spqr/Specs/Encoding/Polynomial/PolyEncoder/NextChunk.lean",
+  "Spqr/Specs/Encoding/Polynomial/PolyEncoder/PointAt.lean",
+  "Spqr/Specs/V1/Chunked/SendEk/Serialize/KeysSampled/FromPb.lean",
+  "Spqr/Specs/V1/Chunked/SendEk/Serialize/KeysSampled/IntoPb.lean",
+  "Spqr/Specs/V1/Chunked/States/Serialize/DecodeChunk.lean",
+  "Spqr/Specs/V1/Chunked/States/Serialize/Message/Deserialize.lean",
+  "scripts/Audit.lean"
+ ],
+ "verdict": "break confirmed",
+ "comparison": {
+  "predicted_n": 45,
+  "actual_n": 27,
+  "true_positive": [
+   "Spqr/Specs/Chain/Chain/New.lean::new_spec",
+   "Spqr/Specs/Chain/Chain/RecvKey.lean::recv_key_spec",
+   "Spqr/Specs/Chain/Chain/RecvKey32.lean::recv_key_spec_32",
+   "Spqr/Specs/Chain/KeyHistory/Get.lean::body_spec",
+   "Spqr/Specs/Encoding/Gf/GF16/DivImpl.lean::div_impl_loop_body_spec",
+   "Spqr/Specs/Encoding/Gf/GF16/DivImpl.lean::div_impl_loop_spec",
+   "Spqr/Specs/Encoding/Polynomial/ConstPolysToPolys/CallMut.lean::call_mut_spec",
+   "Spqr/Specs/Encoding/Polynomial/Poly/Deserialize.lean::body_spec",
+   "Spqr/Specs/Encoding/Polynomial/Poly/Deserialize.lean::deserialize_spec",
+   "Spqr/Specs/Encoding/Polynomial/Poly/Deserialize.lean::loop_spec",
+   "Spqr/Specs/Encoding/Polynomial/Poly/LagrangeInterpolate.lean::lagrange_interpolate_formula",
+   "Spqr/Specs/Encoding/Polynomial/Poly/LagrangeInterpolatePrepare.lean::lagrange_interpolate_prepare_spec",
+   "Spqr/Specs/Encoding/Polynomial/Poly/LagrangeInterpolatePt.lean::lagrange_interpolate_pt_spec",
+   "Spqr/Specs/Encoding/Polynomial/PolyDecoder/IntoPb.lean::body_spec#2",
+   "Spqr/Specs/Encoding/Polynomial/PolyDecoder/IntoPb.lean::into_pb_spec",
+   "Spqr/Specs/Encoding/Polynomial/PolyDecoder/IntoPb.lean::loop_spec#2",
+   "Spqr/Specs/Encoding/Polynomial/PolyEncoder/IntoPb.lean::body_spec#3",
+   "Spqr/Specs/Encoding/Polynomial/PolyEncoder/IntoPb.lean::into_pb_spec_bytes",
+   "Spqr/Specs/Encoding/Polynomial/PolyEncoder/IntoPb.lean::loop_spec#3",
+   "Spqr/Specs/IncrementalMlkem768/Generate.lean::generate_spec",
+   "Spqr/Specs/Lib/MsgVersion.lean::msg_version_spec",
+   "Spqr/Specs/Lib/Version/TryFrom.lean::try_from_spec",
+   "Spqr/Specs/V1/Chunked/States/Serialize/DecodeVarint.lean::decode_varint_loop_body_spec",
+   "Spqr/Specs/V1/Chunked/States/Serialize/DecodeVarint.lean::decode_varint_loop_spec",
+   "Spqr/Specs/V1/Chunked/States/Serialize/DecodeVarint.lean::decode_varint_spec",
+   "Spqr/Specs/V1/Chunked/States/Serialize/MessageType/TryFrom.lean::try_from_spec"
+  ],
+  "false_positive": [
+   "Spqr/Specs/Chain/Chain/Epoch/CallMut.lean::call_mut_spec",
+   "Spqr/Specs/Encoding/Polynomial/ConstPolysToPolys.lean::const_polys_to_polys_spec",
+   "Spqr/Specs/Encoding/Polynomial/ConstPolysToPolys/CallOnce.lean::call_once_spec",
+   "Spqr/Specs/Encoding/Polynomial/ConstPolysToPolys/SliceIterMapCollect.lean::collect_const_polys_spec",
+   "Spqr/Specs/Encoding/Polynomial/ConstPolysToPolys/SliceIterMapCollect.lean::iterToList_trans",
+   "Spqr/Specs/Encoding/Polynomial/Poly/Deserialize.lean::deserialize_empty_is_err",
+   "Spqr/Specs/Encoding/Polynomial/PolyDecoder/FromPb.lean::body_spec",
+   "Spqr/Specs/Encoding/Polynomial/PolyDecoder/FromPb.lean::body_spec#2",
+   "Spqr/Specs/Encoding/Polynomial/PolyDecoder/FromPb.lean::from_pb_spec",
+   "Spqr/Specs/Encoding/Polynomial/PolyDecoder/FromPb.lean::loop_spec",
+   "Spqr/Specs/Encoding/Polynomial/PolyDecoder/FromPb.lean::loop_spec#2",
+   "Spqr/Specs/Encoding/Polynomial/PolyEncoder/FromPb.lean::body_spec",
+   "Spqr/Specs/Encoding/Polynomial/PolyEncoder/FromPb.lean::body_spec#2",
+   "Spqr/Specs/Encoding/Polynomial/PolyEncoder/FromPb.lean::body_spec#3",
+   "Spqr/Specs/Encoding/Polynomial/PolyEncoder/FromPb.lean::from_pb_spec",
+   "Spqr/Specs/Encoding/Polynomial/PolyEncoder/FromPb.lean::loop_spec",
+   "Spqr/Specs/Encoding/Polynomial/PolyEncoder/FromPb.lean::loop_spec#2",
+   "Spqr/Specs/V1/Chunked/States/Serialize/DecodeChunk.lean::decode_chunk_spec",
+   "Spqr/Specs/V1/Chunked/States/Serialize/Message/Deserialize.lean::Message.deserialize_spec"
+  ],
+  "false_negative": [
+   "Spqr/Specs/Chain/ChainEpochDirection/FromPb.lean::from_pb_spec"
+  ]
+ }
+}
