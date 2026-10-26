@@ -1,0 +1,71 @@
+# Target config for curve25519-dalek-lean-verify (DESIGN.md §3.5).
+# The [lean] and [protected] sections are read by the gate; [agent] and [budget] by the pipeline.
+
+name = "dalek-lean-verify"
+github = "Beneficial-AI-Foundation/curve25519-dalek-lean-verify"
+
+[lean]
+# Modules `lake build` must build (the required targets, G3), and the roots of the audited
+# module inventory: every project module they import, except extracted code, is frozen (§4.2).
+build_targets = ["Curve25519Dalek"]
+root_modules = ["Curve25519Dalek"]
+source_roots = ["Curve25519Dalek/"]
+lean_num_threads = 8
+
+[protected]
+# Files the candidate diff may not touch at all (§4.2).
+extracted = ["Curve25519Dalek/Funs.lean", "Curve25519Dalek/Types.lean"]
+trusted_models = ["Curve25519Dalek/FunsExternal.lean", "Curve25519Dalek/TypesExternal.lean"]
+build_config = ["lakefile.toml", "lakefile.lean", "lean-toolchain", "lake-manifest.json",
+                "aeneas-config.yml", "functions.json", ".github/"]
+
+[agent]
+adapter = "claude-code"
+model = "claude-opus-5-5"
+# Tool profile (DESIGN.md §7.3): "minimal" needs tool calling; "lsp" also Lean language-server tools.
+# An adapter that cannot meet it refuses to start.
+tool_profile = "lsp"
+
+[budget]
+# Prototype caps. Defaults are to be set from pilot runs (§3.3 S4, §8.5); these are guesses.
+# Turns and minutes mean the same for every agent and model. per_run_minutes is one deadline for
+# the whole run (preparation, attempts, builds, gate). The dollar caps apply only to models with a
+# price entry below; they are best effort until the metering proxy exists (§9.5, SCI-1717).
+per_theorem_usd = 5.0
+per_theorem_minutes = 25
+per_theorem_turns = 80
+per_run_usd = 20.0
+per_run_minutes = 120
+# Attempts per theorem: 1 patches the old proof; later ones start fresh, told why the last failed.
+attempts_per_theorem = 2
+
+[repair]
+# The no-model sweep (§3.3 S4) before any agent: leftover tactics, timeouts, unsolved goals.
+sweep = true
+
+# USD per million tokens, used to compute cost from token counts for every adapter.
+# Anthropic first-party list prices from https://platform.claude.com/docs/en/about-claude/pricing
+# (read 2026-10-26). They reproduce Claude Code's own reported cost exactly on the 2026-10-23 pilot
+# runs (Opus 5.5 and Sonnet 5.5). Claude Haiku 5.5 is priced per request by prompt length (over
+# 100K tokens costs more), which session totals cannot resolve, so it is left out: its cost is
+# reported as unknown. Add a model here before relying on its dollar cap.
+[prices."claude-opus-5-5"]
+input = 4.0
+output = 20.0
+cache_read = 0.20
+cache_write_5m = 5.0
+cache_write_1h = 8.0
+
+[prices."claude-sonnet-5-5"]
+input = 2.0
+output = 10.0
+cache_read = 0.10
+cache_write_5m = 2.50
+cache_write_1h = 4.0
+
+[prices."claude-fable-5-1"]
+input = 10.0
+output = 50.0
+cache_read = 0.25
+cache_write_5m = 12.50
+cache_write_1h = 20.0

@@ -1,0 +1,59 @@
+# Target config for SymCrypt's verified Rust (microsoft/SymCrypt, branch feature/verifiedcrypto),
+# DESIGN.md §3.5. Held out from tuning (§8.5). The [lean] and [protected] sections are read by the
+# gate; [agent], [budget], [prices], [repair] and [replay] by the pipeline.
+
+name = "symcrypt"
+github = "microsoft/SymCrypt"
+
+[lean]
+# The Lake project is SymCRust/lean inside the repo. Workspaces hold the repo as SymCrypt/ next to
+# an aeneas/ checkout, which the lakefile requires by relative path (../../../aeneas/backends/lean).
+repo_lean_root = "SymCRust/lean"
+workspace_project = "SymCrypt/SymCRust/lean"
+build_targets = ["Symcrust"]
+root_modules = ["Symcrust"]
+source_roots = ["Symcrust/", "Spec/", "Intrinsics/"]
+lean_num_threads = 8
+
+[protected]
+extracted = ["Symcrust/Code/Funs.lean", "Symcrust/Code/Types.lean",
+             "Symcrust/Code/FunsExternal_Template.lean", "Symcrust/Code/TypesExternal_Template.lean"]
+# Hand-written models of external code and the intrinsics' axioms: the trusted base.
+trusted_models = ["Symcrust/Code/FunsExternal.lean", "Symcrust/Code/TypesExternal.lean", "Intrinsics/"]
+build_config = ["lakefile.lean", "lakefile.toml", "lean-toolchain", "lake-manifest.json"]
+
+[agent]
+adapter = "claude-code"
+model = "claude-opus-5-5"
+tool_profile = "lsp"
+
+[budget]
+# Same prototype caps as dalek (guesses, to be set from pilot data).
+per_theorem_usd = 5.0
+per_theorem_minutes = 25
+per_theorem_turns = 80
+per_run_usd = 20.0
+per_run_minutes = 120
+attempts_per_theorem = 2
+
+[repair]
+sweep = true
+
+[replay]
+# Generated held-out cases (SCI-1714) share one base workspace under work/.
+generated_base = "symcrypt-upgrade/base"
+
+# Same list prices as targets/dalek-lean-verify.toml (source and verification there).
+[prices."claude-opus-5-5"]
+input = 4.0
+output = 20.0
+cache_read = 0.20
+cache_write_5m = 5.0
+cache_write_1h = 8.0
+
+[prices."claude-sonnet-5-5"]
+input = 2.0
+output = 10.0
+cache_read = 0.10
+cache_write_5m = 2.50
+cache_write_1h = 4.0

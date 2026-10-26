@@ -4,7 +4,7 @@ lake-packages/
 build/
 
 # Local clones of target repos and replay workspaces
-work/
+work
 repos/
 
 # Working outputs of the miner and replay harness (local paths, build logs).
