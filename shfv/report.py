@@ -65,6 +65,17 @@ def short_name(n: str) -> str:
     return n.rsplit(".", 1)[-1] if n else n
 
 
+def distinct_short_names(names: list[str]) -> list[str]:
+    """Shortest name suffixes that still tell the names apart (`Mul.mul_spec`, `Scalar52.mul_spec`)."""
+    out = []
+    for n in names:
+        parts, k = n.split("."), 1
+        while k < len(parts) and any(m != n and m.split(".")[-k:] == parts[-k:] for m in names):
+            k += 1
+        out.append(".".join(parts[-k:]))
+    return out
+
+
 def link(r: dict, file: str, line: int | None, label: str) -> str:
     inp = r["inputs"]
     commit = inp.get("change_commit") or inp.get("base_commit")
@@ -249,7 +260,7 @@ def render(r: dict) -> str:
                        f"{len(lemmas)} lemma{'s' * (len(lemmas) != 1)} that {'was' if len(lemmas) == 1 else 'were'} "
                        "already unproved (`sorry`) at the base commit, exactly as "
                        f"{'it' if len(inherited) == 1 else 'they'} did there; the repair adds none: "
-                       + ", ".join(f"`{short_name(s)}`" for s in lemmas[:8]) + (" …" if len(lemmas) > 8 else ""))
+                       + ", ".join(f"`{s}`" for s in distinct_short_names(lemmas)[:8]) + (" …" if len(lemmas) > 8 else ""))
         incomplete = (r.get("gate") or {}).get("kernel_replay_incomplete") or []
         if incomplete:
             out.append("")
