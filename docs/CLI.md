@@ -105,7 +105,7 @@ uv run shfv render runs/dalek-lean-verify-e65b46d0/latest/report.json
 
 The report then names both versions: the code that produced the run, and the code that re-rendered it.
 
-The exit status of `shfv repair` is 0 when the run completed, whether accepted or escalated, and 1 when it failed.
+The exit status of `shfv repair` is 0 when the run completed, whatever its verdict, and 1 when it failed. The final line counts theorems by outcome.
 
 ## 4. Read the report
 
@@ -113,7 +113,8 @@ The exit status of `shfv repair` is 0 when the run completed, whether accepted o
 
 | Verdict | Meaning |
 |---|---|
-| ✅ **accepted** | Every broken proof was repaired and the gate accepted the whole change. |
+| ✅ **accepted** | Every broken proof was repaired and the gate accepted the whole change. Not reachable yet: acceptance needs the kernel replay (G5), which is not implemented. |
+| 🟡 **passed every check that ran, not accepted yet** (`passed-without-kernel-replay`) | Every broken proof was repaired and every implemented check passed, but G5 has not run. This is the best result the prototype gives today. |
 | ⚠️ **needs a human** (`escalated`) | At least one theorem was not repaired. The report says why for each one. |
 | ⛔ **failed** | The run itself failed (setup, build environment, or gate unavailable). It says nothing about the proofs. |
 
@@ -125,7 +126,9 @@ Per theorem, the outcome is one of:
 | `statement-must-change` | The statement no longer type-checks. A person who owns the spec must decide the new statement. The report shows the Lean error, the statement, and how the extracted function it uses changed. |
 | `proof-hard` | No accepted repair within the budget. The reason is given: the agent gave up, a cap was reached, the file did not build, or the gate rejected the candidate and which checks failed. |
 | `blocked-on` | Waits on another theorem that must be fixed first. |
+| `passed-checks` | The repair passed every gate check that ran; not accepted until the kernel replay runs. |
 | `infrastructure-failure` | The agent or build environment failed before saying anything about the theorem. |
+| `gate-unavailable` | The gate could not decide (see section 6). Nothing is accepted, and nothing is held against the repair. |
 
 The **Gate** table lists each check (section 6) with ✅/❌ and the first violations. The **candidate diff** is exactly what the bot would commit. In replays, **Compared with the human fix** shows whether the human changed the statement, how big each edit was, and how alike the two edits are. An edit 90% or more like the human's is flagged for review as possible recall of the public fix. The **agent's own notes** are model output: they are shown quoted, with links and @-mentions disabled, and they never decide anything.
 
@@ -191,7 +194,23 @@ uv run gate compare  --config $CFG --base B.json --broken K.json --candidate C.j
 
 `snapshot --apply --clean` makes the gate's own fresh copy of the stubbed broken state. The copy has the dependency packages but none of the project's own build output. The gate applies the diff to it strictly (any mismatch is an error) and rebuilds the project from scratch. You cannot hand the gate a different tree, because `compare` checks that the candidate is exactly the stubbed broken state plus that diff.
 
-`V.json` holds the verdict (`accepted` or `rejected`), the failing check ids, and per-theorem results. The checks:
+`V.json` holds the verdict, the failing check ids, the reasons the gate could not decide (if any), and per-theorem results. The verdicts:
+
+| Verdict | Meaning |
+|---|---|
+| `accepted` | Every check passed, G5 included, and every broken theorem is repaired. |
+| `passed-without-kernel-replay` | Every check that ran passed, but G5 did not run. Not accepted. |
+| `rejected` | A check failed, the case is ineligible (a frozen declaration is missing from the stubbed broken state), or a broken theorem is still unrepaired. |
+| `gate-unavailable` | The gate could not decide, so it does not. |
+
+**The gate fails closed.** Before any check counts, it checks its inputs. The verdict is `gate-unavailable` unless:
+- the base snapshot built green, observes every audited module, and fingerprinted without errors;
+- every theorem written in the base sources has a record, by an independent textual parse, so nothing can silently drop out of the frozen set;
+- every broken theorem has a base record;
+- all three snapshots were made by this gate version for this target config, with the same toolchain for broken and candidate;
+- the candidate's build and fingerprinting completed. A timeout, or a failure outside the project's own modules, is the environment's fault, not the candidate's.
+
+The checks:
 
 | Check | Passes when |
 |---|---|
@@ -199,9 +218,9 @@ uv run gate compare  --config $CFG --base B.json --broken K.json --candidate C.j
 | **G1 statements** | Every frozen declaration has the same fingerprint (kind, elaborated type, and body for definitions) in the stubbed broken state and in the candidate. The fingerprints ignore binder names, so renaming a bound variable does not count as a change, but any change of meaning does. |
 | **G2 trust base** | Each declaration's axioms stay within the three standard Lean axioms plus what it had at the base. So no new `sorry`, no new axioms, and no `native_decide` where the base had none. Every added lemma is used by a repaired theorem. |
 | **G3 clean build** | The fresh copy builds green and covers every audited module. |
-| **G5 kernel replay** | Not run in this prototype (`lean4checker`). |
+| **G5 kernel replay** | Required for acceptance; not implemented yet (`lean4checker`). Until it is, no verdict is `accepted`. |
 
-Exit status of `scope` and `compare`: 0 passed or accepted, 1 failed or rejected, 2 the gate could not run (never counted as a pass). `uv run gate version` prints a hash of the gate's sources, which is recorded in every snapshot and verdict.
+Exit status of `scope` and `compare`: 0 passed or accepted; 1 not accepted (rejected, or passed without the kernel replay); 2 the gate could not run or could not decide (never counted as a pass). `uv run gate version` prints a hash of the gate's sources, which is recorded in every snapshot and verdict.
 
 ## 7. Configuration and budgets
 
@@ -218,7 +237,7 @@ A target repo is described by `targets/<repo>.toml`. Only `dalek-lean-verify` ex
 |---|---|
 | `no case record or replay record` | The case id must match a file in `data/replay/<repo>/`. |
 | The first run of a case is slow | It is building the replay workspaces and fetching the Mathlib cache. Later runs reuse them. |
-| `gate-unavailable` in the report, or exit status 2 | A gate step could not run, for example a snapshot that failed to build. The detail is in `report.json` under `error`. Nothing is accepted in that case. |
+| `gate-unavailable` in the report, or exit status 2 | The gate could not run, or refused to decide. The reasons are listed in the report's Gate section and in `report.json` (`gate.unavailable`, or `error`). Common causes: the base didn't build, a snapshot made by an older gate version or another config, a build timeout. Nothing is accepted in that case. |
 | `infrastructure-failure` on the first attempt | Usually Claude Code is not logged in, or the `claude` CLI is missing. Run `claude` once interactively. |
 | Laptop busy during a run | Lower `lean_num_threads` in the target config. |
 | Disk filling up | Delete old `work/<case>/run-*` directories (only present with `--keep`). The replay workspaces can be rebuilt. |
@@ -228,4 +247,5 @@ A target repo is described by `targets/<repo>.toml`. Only `dalek-lean-verify` ex
 - **Replays only, one target repo.** It covers curve25519-dalek-lean-verify, on the toolchains of the replayed cases. GitHub Actions deployment and live CI are V1 (DESIGN.md §9).
 - **One agent attempt per theorem, Claude Code only.** There is no automation sweep, no retry schedule, and no Codex adapter yet (DESIGN.md §3.3, §7).
 - **Complete-case acceptance.** A change is accepted only if every broken theorem is repaired (DESIGN.md §4.3).
+- **No acceptance yet.** G5 (`lean4checker`) is required and not implemented, so the best verdict is `passed-without-kernel-replay`.
 - **Not run yet:** `lean4checker` (G5), the audit of statement changes made by the triggering change itself (DESIGN.md §4.7), and the sandbox and metering proxy for the agent (DESIGN.md §3.4).
