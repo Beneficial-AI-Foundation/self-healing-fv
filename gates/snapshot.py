@@ -90,29 +90,53 @@ def run_build(tree: Path, cfg: dict, log: Path | None) -> dict:
             "failed_modules": sorted(failed), "timeout": rc == -1, "tail": "" if rc == 0 else out[-3000:]}
 
 
-def stmtcanon(tree: Path, cfg: dict, modules: list[str]) -> tuple[dict[str, dict], dict]:
+IMPORT_CONFLICT_RE = re.compile(r"import .* failed, environment already contains|environment already contains")
+
+
+def _stmtcanon_batch(tree: Path, cfg: dict, modules: list[str]) -> proc.Result:
     env = {**os.environ, "LEAN_NUM_THREADS": str(cfg["lean"].get("lean_num_threads", 8))}
+    return proc.run(["lake", "env", "lean", "--run", str(STMTCANON), "--import", ",".join(modules),
+                     "--module", ",".join(modules)], tree, env,
+                    timeout=60 * cfg["lean"].get("stmtcanon_timeout_minutes", 30))
+
+
+def stmtcanon(tree: Path, cfg: dict, modules: list[str]) -> tuple[dict[str, dict], dict]:
+    """Fingerprint the declarations of `modules`, loading them all into one environment if possible.
+    Modules that each build can still be impossible to load together (two dependencies declaring
+    the same constant, seen in a broken state of dalek PR 535). Then the module set is split in
+    halves, recursively, and each group is fingerprinted in its own environment. A declaration's
+    record depends only on its own module and what that module imports, which load together
+    (the module built), so it does not depend on the group. The split is deterministic, so the
+    broken and candidate snapshots split the same module set the same way."""
     t0 = time.time()
-    p = proc.run(["lake", "env", "lean", "--run", str(STMTCANON), "--import", ",".join(modules),
-                  "--module", ",".join(modules)], tree, env,
-                 timeout=60 * cfg["lean"].get("stmtcanon_timeout_minutes", 30))
-    if p.timed_out:
-        return {}, {"ok": False, "seconds": round(time.time() - t0), "records": 0, "timeout": True,
-                    "stderr": "StmtCanon timed out"}
     records: dict[str, dict] = {}
-    duplicates = 0
-    for line in p.stdout.splitlines():
-        if not line.startswith("{"):
+    info: dict = {"ok": True, "batches": 0, "duplicate_lines": 0}
+    todo = [list(modules)]
+    while todo:
+        group = todo.pop()
+        p = _stmtcanon_batch(tree, cfg, group)
+        info["batches"] += 1
+        if p.timed_out:
+            return {}, {"ok": False, "seconds": round(time.time() - t0), "records": 0, "timeout": True,
+                        "stderr": "StmtCanon timed out"}
+        if p.returncode != 0 and IMPORT_CONFLICT_RE.search(p.stderr + p.stdout) and len(group) > 1:
+            half = len(group) // 2
+            todo += [group[:half], group[half:]]
+            info["split"] = True
             continue
-        r = json.loads(line)
-        if r["name"] in records:
-            duplicates += 1
-            continue
-        records[r["name"]] = r
-    info = {"ok": p.returncode == 0, "seconds": round(time.time() - t0), "records": len(records),
-            "duplicate_lines": duplicates, "errors": sum("error" in r for r in records.values())}
-    if p.returncode != 0:
-        info["stderr"] = (p.stderr or p.stdout)[-3000:]
+        for line in p.stdout.splitlines():
+            if not line.startswith("{"):
+                continue
+            r = json.loads(line)
+            if r["name"] in records:
+                info["duplicate_lines"] += 1
+                continue
+            records[r["name"]] = r
+        if p.returncode != 0:
+            info["ok"] = False
+            info["stderr"] = (p.stderr or p.stdout)[-3000:]
+    info.update(seconds=round(time.time() - t0), records=len(records),
+                errors=sum("error" in r for r in records.values()))
     return records, info
 
 
@@ -129,9 +153,14 @@ def fresh_copy(src: Path, dest: Path) -> None:
             shutil.copytree(pkgs, dest / ".lake" / "packages", symlinks=True)
 
 
+GATE_CONFIG_SECTIONS = ("name", "lean", "protected")
+
+
 def config_hash(cfg: dict) -> str:
-    """Hash of the target config's content (not its file formatting)."""
-    return hashlib.sha256(json.dumps(cfg, sort_keys=True).encode()).hexdigest()[:16]
+    """Hash of the parts of the target config the gate uses (name, [lean], [protected]); budgets,
+    prices and the agent choice belong to the pipeline and do not invalidate snapshots."""
+    gate_part = {k: cfg.get(k) for k in GATE_CONFIG_SECTIONS}
+    return hashlib.sha256(json.dumps(gate_part, sort_keys=True).encode()).hexdigest()[:16]
 
 
 def inputs_hash(cfg: dict, tree: Path) -> str:
