@@ -20,10 +20,11 @@ From the repo root:
 
 ```
 uv sync
-uv run pytest            # about 1 minute; builds a small Lean project, checks the gate
+uv run shfv doctor       # checks elan, lake, uv, Claude Code, the Lean LSP MCP server, the target clone
+uv run pytest            # about 2 minutes; builds a small Lean project, checks the gate and the pipeline
 ```
 
-If the tests pass, the Lean toolchain and the gate work on your machine.
+If both pass, the Lean toolchain, the gate and the pipeline work on your machine. `doctor` does not check that Claude Code is logged in, because that would spend tokens: run `claude` once interactively if unsure.
 
 The replay workspaces live under `work/`, or under `$SHFV_WORK` if you set it. The first run of a case builds them: it fetches the Mathlib cache and builds the base, broken and fixed states, which takes a few minutes. Later runs reuse them.
 
@@ -43,33 +44,39 @@ The `outcome` column tells you what to expect:
 ## 3. Run a repair
 
 ```
-uv run shfv repair --case dalek-lean-verify/e65b46d0 --agent claude-code
+uv run shfv repair --case dalek-lean-verify/e65b46d0
 ```
 
-You see one line per stage, with the elapsed time on the left. While the agent works, one line updates in place with its latest tool call. This is the real output of the first run of this case, with `--gate-human-fix` added (see the options below):
+You see one line per stage, with the elapsed time on the left. While the agent works, one line updates in place with its latest tool call. This is the real output of a run of this case on 2026-10-26 (commit `81fca54`, before the automation sweep existed; today the sweep runs before the agent, see step 3 below):
 
 ```
 dalek-lean-verify/e65b46d0 · PR 782 "Chore: update Aeneas  (#782)" · cause: aeneas
-  04:06  1 proof(s) broken, 0 statement(s) no longer type-check · frozen declarations observed in broken state: 1328/1328  (245s)
-  04:21  [1/1] to_radix_2w_size_hint_spec → agent attempt 1 (claude-code, claude-opus-5-5)
-  04:59      → done, 8 turns, $0.26, 37s · file builds: yes
-  04:59  gate: scope → clean rebuild → statements → trust base
-  09:44      → scope ✓ · clean rebuild ✓ · statements unchanged ✓ · no new axioms/sorry ✓ · lean4checker – not run → ACCEPTED
-  09:44  gate the human fix as a reference candidate (replay only)
-  16:41      → scope ✓ · clean rebuild ✓ · statements unchanged ✓ · no new axioms/sorry ✓ · lean4checker – not run → ACCEPTED
-ACCEPTED · 1/1 proofs repaired · 0 escalated · $0.26 · 16m42s → runs/dalek-lean-verify-e65b46d0/report.md
+  02:49  audit of the change itself: no-change
+  02:49  1 proof(s) broken, 0 statement(s) no longer type-check · frozen declarations observed in broken state: 1328/1328  (112s)
+  03:06  [1/1] to_radix_2w_size_hint_spec → agent attempt 1 (claude-code, claude-opus-5-5)
+  03:53      → done, 10 turns, $0.28 (API-equivalent, from token counts at list prices), 46s · file builds: yes
+  03:53  gate: scope → clean rebuild → statements → trust base
+  09:10      → scope ✓ · clean rebuild ✓ · statements unchanged ✓ · no new axioms/sorry ✓ · lean4checker ✓ → ACCEPTED
+ACCEPTED · repaired 1 · $0.28 · 9m10s → runs/dalek-lean-verify-e65b46d0/20261026T071152Z-claude-opus-5-5/report.md
 ```
 
-The first 4 minutes were the two snapshots, which later runs of the case reuse from the cache. (This run predates run ids; today the last line names `runs/dalek-lean-verify-e65b46d0/<run id>/report.md`, see section 5.)
+The first 3 minutes were the snapshots, which later runs of the case reuse from the cache.
 
 What happens:
-1. **Prepare.** The pipeline rebuilds the case's *broken state*: the proofs from before the change, plus the change's extracted code and toolchain pins. Then it takes two gate snapshots: the base commit, and the *stubbed broken state*, in which each failing proof is replaced by `sorry`. The snapshots are cached, so later runs of the same case skip this step.
-2. **Escalate what cannot be repaired.** A theorem whose *statement* no longer type-checks is reported as `statement-must-change`, and no agent is run for it. The bot never changes a statement.
-3. **Repair.** Each broken proof gets one fresh agent session, dependencies first. The agent sees the error messages and the rules: edit only that proof, optionally add helper lemmas, and no `sorry` or axioms. Each session is capped by turns, cost and time.
-4. **Gate.** The candidate goes through the gate (section 6). The gate alone decides.
-5. **Report.** The pipeline writes the run record and the PR comment.
+1. **Prepare.** The pipeline rebuilds the case's *broken state*: the proofs from before the change, plus the change's extracted code and toolchain pins. It takes gate snapshots of the base commit, of the *stubbed broken state* (each failing proof replaced by `sorry`), and of the change's head. The snapshots are cached and reused only while their inputs are unchanged.
+2. **Audit the change itself.** Independently of any repair, the gate compares the base with the change's head: statements, definitions and trust assumptions the *human change* altered (section 4). This is how a weakened spec with a green proof gets noticed.
+3. **Escalate what cannot be repaired.** A theorem whose *statement* (or a definition whose *body*) no longer type-checks is reported as `statement-must-change`, and no agent is run for it. The bot never changes a statement or a definition.
+4. **Repair**, one broken proof at a time, dependencies first:
+   - an **automation sweep** without any model: delete a leftover tactic that Lean says has no goals, raise `maxHeartbeats` on a timeout, or append a standard closer to unsolved goals;
+   - if that fails, **agent attempt 1** patches the old proof. The agent sees the error messages and the rules: edit only that proof, optionally add helper lemmas, no `sorry` or axioms;
+   - after each attempt, a **pre-gate**: the file must build and the gate's scope check (G0) must hold. A failed attempt is rolled back completely;
+   - **attempt 2** is a fresh session, told why attempt 1 failed and asked for a fresh proof. No retry after a timeout or cost cap, or when the agent reports that the statement itself seems false.
 
-A typical run takes 10–20 minutes. Most of that is building and fingerprinting the whole project. The agent itself took between half a minute and a few minutes on the cases so far.
+   The agent ends with a structured diagnosis (outcome, failure scope, whether it suspects the statement). It is advisory and never decides anything. A theorem whose broken dependency was not repaired is not attempted (`blocked-on`).
+5. **Gate.** The candidate goes through the gate (section 6), on a fresh clean build with a kernel replay. The gate alone decides.
+6. **Report.** The pipeline writes the run record and the PR comment.
+
+A typical run takes 10–20 minutes. Most of that is building and fingerprinting the whole project. The agent itself took between half a minute and a few minutes per theorem on the cases so far.
 
 ### Useful options
 
@@ -80,7 +87,12 @@ A typical run takes 10–20 minutes. Most of that is building and fingerprinting
 | `--gate-human-fix` / `--no-gate-human-fix` | Also run the human's historical fix through the gate, as if the bot had proposed it. This checks the gate against real data. It is on by default for escalations, and costs one more clean rebuild (2–7 minutes). |
 | `--attempt-anyway` | Run the agent even on theorems whose statement no longer type-checks. This is for demos, to show that the bot will not change the statement. |
 | `--keep` | Keep the candidate and gate workspaces under `work/<case>/run-<run id>/` for inspection. They are deleted by default. |
-| `--repo PATH`, `--config PATH`, `--work PATH`, `--runs PATH` | Locations of the target clone, the target config, the workspaces and the output. |
+| `--agent NAME` | The agent adapter. Default: the target config's `[agent].adapter` (`claude-code`). |
+| `--audit-focus TEXT` | Show the audit's before/after first for declarations whose name contains `TEXT` (e.g. `clamped`). |
+| `--config PATH` | The *target config*: a TOML file describing the repo being repaired (section 7). Default: `targets/<repo>.toml`, from the case id. |
+| `--repo PATH` | The local clone of the target repo. Default: `~/baif/<repo name>`. |
+| `--work PATH` | Where the replay workspaces and build products live. Default: `work/`, or `$SHFV_WORK`. |
+| `--runs PATH` | Where reports are written: `<runs>/<case>/<run id>/`. Default: `runs/`. |
 
 ### Recipes
 
@@ -113,8 +125,7 @@ The exit status of `shfv repair` is 0 when the run completed, whatever its verdi
 
 | Verdict | Meaning |
 |---|---|
-| ✅ **accepted** | Every broken proof was repaired and the gate accepted the whole change. Not reachable yet: acceptance needs the kernel replay (G5), which is not implemented. |
-| 🟡 **passed every check that ran, not accepted yet** (`passed-without-kernel-replay`) | Every broken proof was repaired and every implemented check passed, but G5 has not run. This is the best result the prototype gives today. |
+| ✅ **accepted** | Every broken proof was repaired and the gate accepted the whole change, kernel replay included. |
 | ⚠️ **needs a human** (`escalated`) | At least one theorem was not repaired. The report says why for each one. |
 | ⛔ **failed** | The run itself failed (setup, build environment, or gate unavailable). It says nothing about the proofs. |
 
@@ -126,11 +137,12 @@ Per theorem, the outcome is one of:
 | `statement-must-change` | The statement no longer type-checks. A person who owns the spec must decide the new statement. The report shows the Lean error, the statement, and how the extracted function it uses changed. |
 | `proof-hard` | No accepted repair within the budget. The reason is given: the agent gave up, a cap was reached, the file did not build, or the gate rejected the candidate and which checks failed. |
 | `blocked-on` | Waits on another theorem that must be fixed first. |
-| `passed-checks` | The repair passed every gate check that ran; not accepted until the kernel replay runs. |
 | `infrastructure-failure` | The agent or build environment failed before saying anything about the theorem. |
 | `gate-unavailable` | The gate could not decide (see section 6). Nothing is accepted, and nothing is held against the repair. |
 
-The **Gate** table lists each check (section 6) with ✅/❌ and the first violations. The **candidate diff** is exactly what the bot would commit. In replays, **Compared with the human fix** shows whether the human changed the statement, how big each edit was, and how alike the two edits are. An edit 90% or more like the human's is flagged for review as possible recall of the public fix. The **agent's own notes** are model output: they are shown quoted, with links and @-mentions disabled, and they never decide anything.
+Right after the summary, **Changes made by the triggering change itself (audit)** says whether the human change altered any frozen statement, definition or trust assumption: `no-change`, `changed` (trust changes first: theorems that newly depend on `sorry`, new axioms, changed trusted models; then the statements, collapsed, with before and after), or `incomplete` (something could not be compared; never read as "no change"). The bot does not judge these changes; it shows them to a spec owner.
+
+The **Gate** table lists each check (section 6) with ✅/❌ and the first violations. **The repair the bot proposes** is the diff as it applies to the change's head; if the gate did not accept it, it is labelled an **unaccepted suggestion**. **Cost** is computed from token counts at the list prices in the target config: an API-equivalent estimate of the agent's model calls only (builds are not included). It says "unknown" when the model has no price entry, and "at least" when a session was stopped before reporting full usage. In replays, **Compared with the human fix** shows whether the human changed the statement, how big each edit was, and how alike the two edits are. An edit 90% or more like the human's is flagged for review as possible recall of the public fix. The **agent's own notes** are model output: they are shown quoted, with links and @-mentions disabled, and they never decide anything.
 
 ## 5. What is on disk
 
@@ -199,7 +211,6 @@ uv run gate compare  --config $CFG --base B.json --broken K.json --candidate C.j
 | Verdict | Meaning |
 |---|---|
 | `accepted` | Every check passed, G5 included, and every broken theorem is repaired. |
-| `passed-without-kernel-replay` | Every check that ran passed, but G5 did not run. Not accepted. |
 | `rejected` | A check failed, the case is ineligible (a frozen declaration is missing from the stubbed broken state), or a broken theorem is still unrepaired. |
 | `gate-unavailable` | The gate could not decide, so it does not. |
 
@@ -218,9 +229,11 @@ The checks:
 | **G1 statements** | Every frozen declaration has the same fingerprint (kind, elaborated type, and body for definitions) in the stubbed broken state and in the candidate. The fingerprints ignore binder names, so renaming a bound variable does not count as a change, but any change of meaning does. |
 | **G2 trust base** | Each declaration's axioms stay within the three standard Lean axioms plus what it had at the base. So no new `sorry`, no new axioms, and no `native_decide` where the base had none. Every added lemma is used by a repaired theorem. |
 | **G3 clean build** | The fresh copy builds green and covers every audited module. |
-| **G5 kernel replay** | Required for acceptance; not implemented yet (`lean4checker`). Until it is, no verdict is `accepted`. |
+| **G5 kernel replay** | Every module the diff changed is re-checked by the Lean kernel: the toolchain's own `leanchecker` (Lean v4.28 and later), else `lean4checker` built once at the toolchain's tag and cached in `~/.cache/self-healing-fv`. This catches declarations added with kernel checking switched off. No checker means `gate-unavailable`. |
 
-Exit status of `scope` and `compare`: 0 passed or accepted; 1 not accepted (rejected, or passed without the kernel replay); 2 the gate could not run or could not decide (never counted as a pass). `uv run gate version` prints a hash of the gate's sources, which is recorded in every snapshot and verdict.
+Exit status of `scope` and `compare`: 0 passed or accepted; 1 not accepted; 2 the gate could not run or could not decide (never counted as a pass).
+
+The audit is also a gate command: `gate audit --config T.toml --base B.json --head H.json` compares a base snapshot with a snapshot of the change's head (exit 0 no-change, 1 changed, 2 incomplete). `uv run gate version` prints a hash of the gate's sources, which is recorded in every snapshot and verdict.
 
 ## 7. Configuration and budgets
 
@@ -229,7 +242,10 @@ A target repo is described by `targets/<repo>.toml`. Only `dalek-lean-verify` ex
 - `[lean]`: the build targets, the root modules (every project module they import is audited), and `lean_num_threads`, which defaults to 8 so the machine stays usable.
 - `[protected]`: files the bot may never touch.
 - `[agent]`: the default adapter and model.
-- `[budget]`: caps per theorem (cost in USD, minutes, turns) and per run (cost, minutes). They are prototype guesses, to be set from pilot data. The reported cost is Claude Code's own API-equivalent estimate.
+- `[agent]`: the adapter, the default model, and the tool profile (`minimal` or `lsp`). An adapter that cannot meet the profile refuses to start.
+- `[budget]`: caps per theorem (cost in USD, minutes, turns), per run (cost, minutes; one deadline for the whole run), and `attempts_per_theorem`. Turns and minutes mean the same for every model. They are prototype guesses, to be set from pilot data.
+- `[prices."<model>"]`: USD per million tokens (input, output, cache read, 5-minute and 1-hour cache writes). Cost is computed from these for every adapter; the agent harness's own figure is only a cross-check. A model without an entry has cost "unknown" and no dollar cap.
+- `[repair]`: `sweep = true` runs the no-model sweep before the agent.
 
 ## 8. Troubleshooting
 
@@ -245,7 +261,6 @@ A target repo is described by `targets/<repo>.toml`. Only `dalek-lean-verify` ex
 ## 9. Limits of this prototype
 
 - **Replays only, one target repo.** It covers curve25519-dalek-lean-verify, on the toolchains of the replayed cases. GitHub Actions deployment and live CI are V1 (DESIGN.md §9).
-- **One agent attempt per theorem, Claude Code only.** There is no automation sweep, no retry schedule, and no Codex adapter yet (DESIGN.md §3.3, §7).
+- **Claude Code only.** The adapter interface is ready for others (Codex is next), but only one adapter exists (DESIGN.md §7).
 - **Complete-case acceptance.** A change is accepted only if every broken theorem is repaired (DESIGN.md §4.3).
-- **No acceptance yet.** G5 (`lean4checker`) is required and not implemented, so the best verdict is `passed-without-kernel-replay`.
-- **Not run yet:** `lean4checker` (G5), the audit of statement changes made by the triggering change itself (DESIGN.md §4.7), and the sandbox and metering proxy for the agent (DESIGN.md §3.4).
+- **Not built yet:** the sandbox and metering proxy for the agent (DESIGN.md §3.4, §9.5). Until then the cost caps are Claude Code's own enforcement plus the pipeline's accounting, not a hard limit.

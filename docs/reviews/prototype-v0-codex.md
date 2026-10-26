@@ -1,6 +1,6 @@
 # Independent review of the prototype (v0 slice)
 
-Reviewer: Codex. Date: 2026-10-26. Reviewed: branch `dana/sci-1715-prototype-slice` at commit `0960d24`. Line numbers refer to that commit. Request and response as received, with headings formatted. Triage: [prototype-v0-codex-triage.md](prototype-v0-codex-triage.md).
+Reviewer: Codex. Date: 2026-10-26. Reviewed: branch `dana/sci-1715-prototype-slice` at commit `0960d24` (`69f85e1` after the branch was rebased onto `main` on 2026-10-26). Line numbers refer to that commit. Request and response as received, with headings formatted. Triage: [prototype-v0-codex-triage.md](prototype-v0-codex-triage.md).
 
 ## Request
 

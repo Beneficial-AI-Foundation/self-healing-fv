@@ -1,6 +1,6 @@
 # Triage of the Codex review of the prototype (v0 slice)
 
-Review: [prototype-v0-codex.md](prototype-v0-codex.md), of commit `0960d24`. Triage date: 2026-10-26. Verdicts: **Accept** (we will make the change), **Accept, different fix** (the problem is real, the fix differs), **Reject** (with a reason).
+Review: [prototype-v0-codex.md](prototype-v0-codex.md), of commit `0960d24` (`69f85e1` after the rebase onto `main`). Triage date: 2026-10-26. Verdicts: **Accept** (we will make the change), **Accept, different fix** (the problem is real, the fix differs), **Reject** (with a reason).
 
 Every cited `file:line` was checked against `0960d24`, and the evidence holds. Codex could not run the Lean test suites in its sandbox; locally all 42 tests pass, and the two dalek-scale tests pass with `SHFV_DALEK_TREE` set.
 
@@ -110,3 +110,33 @@ This makes the Codex adapter a self-contained addition.
 6. **Actions pilot** (13, SCI-1717).
 
 Example reports are exported only after step 1, so the published ones never say "accepted" for a candidate that has not passed every required check.
+
+## Status (2026-10-26)
+
+Commits on `dana/sci-1715-prototype-slice` after the rebase onto `main`.
+
+| # | Status | Commits |
+|---|---|---|
+| 1 | Done: the gate refuses untrustworthy inputs (`gate-unavailable`); Codex's reproduction is a test | `07e75bd`, `c9fc87e` |
+| 2 | Done: G5 kernel replay (bundled `leanchecker`, or `lean4checker` at the toolchain's tag); the design-review probe is a planted test | `07e75bd` (interim), `2cddb4d` |
+| 3 | Done: `gate audit`, run in every case; on PR 535 it flags the weakened `*_clamped` specs | `52d86c5`, `293b3d2` |
+| 4 | Done: theorem-only stubs; PR 535 re-replayed | `51a1925` |
+| 5 | Done: snapshots bound to config, gate version and input hashes | `07e75bd`, `8579c50` |
+| 6 | Done: attempts roll back completely, diff kept as a suggestion | `10def0a` |
+| 7 | Done: order from the base snapshot; `blocked-on` names the blocker; accurate prompt context | `10def0a` |
+| 8 | Done: run deadline over every stage; cost from tokens with a per-model price table (Dana's note 2); partial and unknown cost | `10def0a` |
+| 9 | Done: bounded subprocesses with SIGTERM then SIGKILL, stderr drained, partial record on Ctrl-C | `07e75bd`, `10def0a` |
+| 10 | Done: infrastructure failures are `gate-unavailable`; every theorem gets a final outcome | `07e75bd` |
+| 11 | Done: automation sweep, pre-gate G0, a second fresh attempt with feedback | `1e5687d` |
+| 12 | Done: fake-agent pipeline tests | `10def0a`, `1e5687d` |
+| 13 | Open: GitHub Actions pilot (SCI-1717) | |
+| 14 | Done: `model`, `version()` and capability checks in the adapter interface; adapter from config | `10def0a`, `ff2b88f` |
+| 15 | Done: delivery diff against the real broken sources, labelled by acceptance | `ff2b88f` |
+| 16 | Done: `shfv doctor`, pinned `lean-lsp-mcp@0.31.0`, counts by outcome; run from a source checkout | `07e75bd`, `ff2b88f` |
+| – | Done: missing planted violations | `07e75bd`, `2cddb4d` |
+
+Also from Dana's review notes: structured final output from the agent (`81fca54`).
+
+Found while fixing, on real data:
+- Modules that each build can fail to load together (dalek PR 535); the snapshot now splits them (`8579c50`).
+- The same lemma declared in two files resolves to one constant; the inventory check accounts for it (`c9fc87e`).
