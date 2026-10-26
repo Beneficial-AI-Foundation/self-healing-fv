@@ -13,10 +13,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def _run(*cmd: str) -> str | None:
+def _run(*cmd: str, strip: bool = True) -> str | None:
     try:
         p = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True, timeout=30)
-        return p.stdout.strip() if p.returncode == 0 else None
+        return (p.stdout.strip() if strip else p.stdout) if p.returncode == 0 else None
     except (OSError, subprocess.TimeoutExpired):
         return None
 
@@ -24,10 +24,11 @@ def _run(*cmd: str) -> str | None:
 def tool_code() -> dict:
     """The self-healing-fv commit, and whether the code differed from it (uncommitted changes to
     tracked files or new untracked files; ignored files such as runs/ and work/ do not count)."""
-    status = _run("git", "status", "--porcelain")
+    status = _run("git", "status", "--porcelain", strip=False)  # each line is "XY path": keep column 1
+    lines = [l for l in (status or "").splitlines() if l.strip()]
     return {"commit": _run("git", "rev-parse", "HEAD"), "branch": _run("git", "rev-parse", "--abbrev-ref", "HEAD"),
-            "dirty": None if status is None else bool(status),
-            "dirty_files": None if not status else [l[3:] for l in status.splitlines()][:50]}
+            "dirty": None if status is None else bool(lines),
+            "dirty_files": [l[3:] for l in lines][:50] or None}
 
 
 def file_hash(path: Path) -> str:
