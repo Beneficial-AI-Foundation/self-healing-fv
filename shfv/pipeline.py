@@ -316,8 +316,10 @@ class Run:
                              and (n == name or n.endswith("." + name))), name)
                 errs = [e for e in self.replay.get("statement_errors", []) if e["file"] == f and e["decl"] == name]
                 d = decl_text((self.base / f).read_text(), name)
+                is_def = key in set(self.replay.get("definition_broken", []))
                 stmt_broken.append({"name": full, "key": name, "file": f, "line": errs[0]["line"] if errs else d["line"],
                                     "errors": [e["msg"] for e in errs], "statement": d["stmt"].strip() if d else None,
+                                    "definition": (d["stmt"] + d["proof"]).strip() if d and is_def else None,
                                     "stubbed": False})
             # The replay may have stubbed a theorem before finding that its statement fails (round 2):
             # that theorem is statement-broken, never a proof-repair target.
@@ -335,6 +337,7 @@ class Run:
                 for s in stmt_broken:
                     report["escalations"].append({"theorem": s["name"], "file": s["file"], "line": s["line"],
                                                   "outcome": "statement-must-change", "statement": s["statement"],
+                                                  "definition": s.get("definition"),
                                                   "errors": s["errors"], "rename_only": None,  # TODO(§3.3 S2)
                                                   "extraction_change": self.extraction_change(s["errors"])})
                 self.p.step(f"escalate: {', '.join(s['key'] for s in stmt_broken)} → statement-must-change "

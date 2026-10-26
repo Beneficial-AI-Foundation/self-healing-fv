@@ -9,7 +9,7 @@ For a case record from mining/mine_history.py, builds three states with `lake bu
           files laid over it ("proofs before + extraction after", DESIGN.md).
 
 A failing module blocks every module that imports it, so the broken state is built in rounds:
-after each round, every declaration whose *proof body* has an error is replaced by `sorry`
+after each round, every theorem whose *proof* has an error is replaced by `sorry` (never a definition)
 and the build is rerun, until it is green or only non-sorryable errors (statement-level or
 file-level) remain. The union of sorried declarations is the ground-truth broken set;
 statement-level errors are reported separately, and modules importing a still-failing module
@@ -46,7 +46,10 @@ MAX_ROUNDS = 20
 # A single Lean file elaborating longer than this is hung (a whole project builds in minutes).
 # Heartbeat limits do not cover kernel checking or some tactic loops (SPQR #635 ran for 80+ min).
 FILE_TIMEOUT_S = 900
-SORRYABLE = ("theorem", "lemma", "def", "abbrev", "instance")
+# Only theorem proofs are stubbed (DESIGN.md §3.3 S2). Replacing a definition's body with `sorry`
+# would change the meaning of everything that uses it; a definition whose body fails is frozen
+# (§3.2), so it is reported with the statement breaks and the case escalates.
+SORRYABLE = ("theorem", "lemma")
 # Position is optional: Lake reports e.g. `error: Foo.lean: bad import 'X'` without one.
 DIAG_RE = re.compile(r"^(error|warning|info): (?:\./)?(\S+?\.lean)(?::(\d+):(\d+))?: ?(.*)$")
 NEW_ITEM_RE = re.compile(r"^(error|warning|info|trace)\b|^[✖⚠✔ℹ] |^Some required|^Build completed")
@@ -495,6 +498,7 @@ def analyze_broken(broken: Path, project: Path, cfg: dict, miner: Miner, logdir:
     mod_of = {lean_path(cfg, rel): mod for mod, rel in mods.items()}  # repo-relative path -> module
 
     rounds, sorried, stmt_errors, file_errors, cascades, header_errors = [], {}, [], [], [], []
+    def_errors: list[dict] = []
     extraction_errors, external_overlaid, setup_failed, unparsed = [], [], False, False
     timeouts = []  # hung files: which declaration hangs is unknown, so all their proofs are sorried
     for rnd in range(1, MAX_ROUNDS + 1):
@@ -567,6 +571,10 @@ def analyze_broken(broken: Path, project: Path, cfg: dict, miner: Miner, logdir:
             if where == "body" and decls[name]["kind"] in SORRYABLE:
                 to_sorry.setdefault(e["file"], set()).add(name)
                 sorried.setdefault(f"{e['file']}::{name}", {**entry, "decl_kind": decls[name]["kind"]})
+            elif where == "body":  # a definition's body (def, abbrev, instance, ...): never stubbed
+                entry.update(where="definition", decl_kind=decls[name]["kind"])
+                stmt_errors.append(entry)
+                def_errors.append(entry)
             elif where == "statement":
                 stmt_errors.append(entry)
             elif where == "header":
@@ -597,6 +605,8 @@ def analyze_broken(broken: Path, project: Path, cfg: dict, miner: Miner, logdir:
         "cascades": cascades,  # kernel errors explained by an upstream failure, not breaks
         "header_errors": header_errors,  # attribute / set_option lines of a declaration
         "statement_broken": sorted(stmt_broken),
+        # Definitions whose body no longer elaborates (also in statement_broken: frozen, never stubbed).
+        "definition_broken": sorted({f"{e['file']}::{e['decl']}" for e in def_errors}),
         # Repairable by proof edits alone? If not, the bot must escalate (gates forbid statement changes).
         "needs_statement_change": bool(stmt_broken),
         "file_errors": file_errors,

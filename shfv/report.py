@@ -200,14 +200,18 @@ def render(r: dict) -> str:
     for e in escal:
         out.append(f"#### Escalated: {link(r, e['file'], e.get('line'), short_name(e['theorem']))} · `{e['outcome']}`")
         out.append("")
-        out.append(f"**Why:** {OUTCOME_TEXT.get(e['outcome'], e['outcome'])}. Lean reports:")
+        why = ("the body of this definition no longer type-checks against the new extracted code; definitions "
+               "are frozen like statements, so changing it is a spec decision" if e.get("definition")
+               else OUTCOME_TEXT.get(e["outcome"], e["outcome"]))
+        out.append(f"**Why:** {why}. Lean reports:")
         out.append("")
         out.append(fence("\n\n".join(e.get("errors") or ["(no error text)"])[:3000]))
         if e.get("statement"):
             out.append("")
-            out.append("**The statement as it stands** (unchanged by the bot):")
+            out.append("**The definition as it stands** (unchanged by the bot):" if e.get("definition")
+                       else "**The statement as it stands** (unchanged by the bot):")
             out.append("")
-            out.append(fence(e["statement"], "lean"))
+            out.append(fence(e.get("definition") or e["statement"], "lean"))
         for x in e.get("extraction_change", []):
             out.append("")
             out.append(f"**What changed in the extracted code:** `{short_name(x['name'])}`")
