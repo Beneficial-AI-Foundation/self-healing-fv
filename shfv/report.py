@@ -332,11 +332,13 @@ def render(r: dict) -> str:
                        f"{diff_size(hf.get(e['theorem'], {}).get('bot_diff'))} | "
                        f"{a.get('turns', 0)} turns · {usd(a.get('cost_usd'))} · {fmt_s(a.get('seconds'))} |")
         out.append("")
-    if g and g.get("diff"):
-        out.append("<details><summary>The candidate diff (gate input: relative to the stubbed broken state, "
-                   "in which each broken proof is <code>sorry</code>)</summary>")
+    delivery = r.get("delivery_diff")
+    if g and delivery:
+        label = ("The repair the bot proposes (applies to the change's head)" if v == "accepted" else
+                 "Unaccepted suggestion: the agent's edits, which did not pass the gate")
+        out.append(f"<details><summary>{label}</summary>")
         out.append("")
-        out.append(fence(g["diff"], "diff", limit=20000))
+        out.append(fence(delivery, "diff", limit=20000))
         out.append("")
         out.append("</details>")
         out.append("")

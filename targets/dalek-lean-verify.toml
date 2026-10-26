@@ -22,6 +22,9 @@ build_config = ["lakefile.toml", "lakefile.lean", "lean-toolchain", "lake-manife
 [agent]
 adapter = "claude-code"
 model = "claude-opus-5-5"
+# Tool profile (DESIGN.md §7.3): "minimal" needs tool calling; "lsp" also Lean language-server tools.
+# An adapter that cannot meet it refuses to start.
+tool_profile = "lsp"
 
 [budget]
 # Prototype caps. Defaults are to be set from pilot runs (§3.3 S4, §8.5); these are guesses.

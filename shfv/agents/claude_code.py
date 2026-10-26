@@ -20,7 +20,7 @@ from .. import costs
 from .base import Attempt, Budget, Progress, RepairTask
 from .prompt import GIVE_UP, build_prompt
 
-LEAN_LSP_MCP = "lean-lsp-mcp"  # TODO(review finding 16): pin a version
+LEAN_LSP_MCP = "lean-lsp-mcp@0.31.0"  # pinned (review finding 16); `shfv doctor` checks it starts
 LSP_TOOLS = [  # local tools only: remote search (leansearch, loogle, leanfinder, hammer) stays off (§7.3)
     "lean_goal", "lean_term_goal", "lean_diagnostic_messages", "lean_hover_info", "lean_multi_attempt",
     "lean_local_search", "lean_file_outline", "lean_declaration_file", "lean_completions",

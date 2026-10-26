@@ -22,7 +22,7 @@ from pathlib import Path
 from . import provenance
 from . import report as report_mod
 from .agents.claude_code import ClaudeCode
-from .pipeline import ROOT, Run, fmt_s
+from .pipeline import ROOT, Run, check_capabilities, fmt_s
 
 ADAPTERS = {"claude-code": ClaudeCode}  # TODO(§7.1, V1): codex, minimal loop
 EXAMPLES = ROOT / "docs" / "examples" / "reports"
@@ -101,12 +101,44 @@ def write_index(to: Path) -> None:
     (to / "README.md").write_text("\n".join(lines) + "\n")
 
 
+def doctor(config: Path) -> int:
+    """Check what a run needs before spending anything (review finding 16)."""
+    from gates import proc
+    from .agents.claude_code import LEAN_LSP_MCP
+    with open(config, "rb") as f:
+        cfg = tomllib.load(f)
+    clone = Path.home() / "baif" / cfg["github"].split("/")[-1]
+    checks = [
+        ("elan (Lean toolchains)", ["elan", "--version"]),
+        ("lake", ["lake", "--version"]),
+        ("uv", ["uv", "--version"]),
+        ("Claude Code", ["claude", "--version"]),
+        (f"Lean LSP MCP server ({LEAN_LSP_MCP})", ["uvx", LEAN_LSP_MCP, "--help"]),
+        ("git", ["git", "--version"]),
+    ]
+    ok = True
+    for label, cmd in checks:
+        try:
+            r = proc.run(cmd, ROOT, timeout=180)
+            good = r.returncode == 0
+            detail = (r.stdout or r.stderr).strip().splitlines()[0][:80] if (r.stdout or r.stderr).strip() else ""
+        except OSError as e:
+            good, detail = False, str(e)
+        ok &= good
+        print(f"{'✓' if good else '✗'} {label}: {detail if good else 'missing or failing: ' + detail}")
+    print(f"{'✓' if clone.is_dir() else '✗'} target clone: {clone}" + ("" if clone.is_dir() else " (pass --repo to shfv repair)"))
+    work = Path(os.environ.get("SHFV_WORK", ROOT / "work"))
+    print(f"{'✓' if work.is_dir() else '•'} replay workspaces: {work}" + ("" if work.is_dir() else " (created on first run)"))
+    print("• Claude Code login is not checked (it would spend tokens): run `claude` once interactively if unsure.")
+    return 0 if ok and clone.is_dir() else 1
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="shfv", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
     r = sub.add_parser("repair", help="replay one historical case through the pipeline")
     r.add_argument("--case", required=True, help="<repo>/<sha8>, as in data/replay/")
-    r.add_argument("--agent", default="claude-code", choices=sorted(ADAPTERS))
+    r.add_argument("--agent", choices=sorted(ADAPTERS), help="agent adapter (default: the target config's [agent].adapter)")
     r.add_argument("--model", help="override the target config's model")
     r.add_argument("--config", type=Path, help="target config (default: targets/<repo>.toml)")
     r.add_argument("--repo", type=Path, help="local clone of the target repo (default: ~/baif/<github name>)")
@@ -124,6 +156,8 @@ def main(argv: list[str] | None = None) -> int:
     g.add_argument("report", type=Path)
     g.add_argument("--audit-focus", help="show these declarations' audit before/after first (substring)")
     g.add_argument("--work", type=Path, default=Path(os.environ.get("SHFV_WORK", ROOT / "work")))
+    d = sub.add_parser("doctor", help="check the setup: Lean toolchain manager, uv, Claude Code, MCP server, target clone")
+    d.add_argument("--config", type=Path, default=ROOT / "targets" / "dalek-lean-verify.toml")
     e = sub.add_parser("export", help="copy runs' reports into docs/examples/reports with an index")
     e.add_argument("runs", type=Path, nargs="+", help="run directories (runs/<case>/<run id>)")
     e.add_argument("--to", type=Path, default=EXAMPLES)
@@ -134,6 +168,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if a.cmd == "export":
         return export(a.runs, a.to, a.allow_uncommitted)
+    if a.cmd == "doctor":
+        return doctor(a.config)
 
     repo_name = a.case.split("/")[0]
     config = a.config or ROOT / "targets" / f"{repo_name}.toml"
@@ -141,7 +177,11 @@ def main(argv: list[str] | None = None) -> int:
         cfg = tomllib.load(f)
     clone = a.repo or Path.home() / "baif" / cfg["github"].split("/")[-1]
     model = a.model or cfg["agent"]["model"]
-    agent = ADAPTERS[a.agent](model=model, lean_threads=cfg["lean"].get("lean_num_threads", 8))
+    adapter = a.agent or cfg["agent"].get("adapter", "claude-code")
+    if adapter not in ADAPTERS:
+        ap.error(f"unknown adapter {adapter!r} (known: {', '.join(sorted(ADAPTERS))})")
+    agent = ADAPTERS[adapter](model=model, lean_threads=cfg["lean"].get("lean_num_threads", 8))
+    check_capabilities(agent, cfg["agent"].get("tool_profile", "lsp"))
     run = Run(a.case, config, agent, clone, a.work, a.runs, attempt_anyway=a.attempt_anyway,
               gate_human_fix=a.gate_human_fix, keep=a.keep, label=a.label)
     if (tool := provenance.tool_code()).get("dirty"):

@@ -82,6 +82,19 @@ def replace_body(src: str, name: str, body: str) -> str:
     return src[:d["body_start"]] + body + src[d["end"]:]
 
 
+PROFILES = {"minimal": ["tool_calling"], "lsp": ["tool_calling", "lsp_tools"]}  # DESIGN.md §7.3
+
+
+def check_capabilities(agent: AgentAdapter, profile: str) -> None:
+    """An adapter that cannot meet the tool profile refuses to start (§7.1), rather than run with less."""
+    if profile not in PROFILES:
+        raise SystemExit(f"unknown tool profile {profile!r} (known: {', '.join(PROFILES)})")
+    caps = getattr(agent, "capabilities", {}) or {}
+    missing = [c for c in PROFILES[profile] if not caps.get(c)]
+    if missing:
+        raise SystemExit(f"adapter {agent.name} lacks {', '.join(missing)} for tool profile {profile!r}")
+
+
 def broken_deps(broken: list[dict], base_records: dict) -> dict[str, set[str]]:
     """For each broken theorem, the other broken theorems its *base* proof uses. The base snapshot
     is used because in the stubbed broken state those proofs are `sorry` and use nothing."""
@@ -256,6 +269,28 @@ class Run:
                 self._restub(cand, b)
         return cand
 
+    def delivery_diff(self, cand: Path, broken: list[dict]) -> str:
+        """The repair as it would apply to the change's head: the real broken sources (the base
+        proofs with the new extraction), not the stubbed state the gate works on (review
+        finding 15). Theorems left unrepaired keep their original failing proof."""
+        base_proof = {}
+        for b in broken:
+            if b.get("stubbed", True):
+                d = decl_text((self.base / b["file"]).read_text(), b["key"])
+                if d:
+                    base_proof[(b["file"], b["key"])] = d["proof"]
+
+        def unstub(path: str, text: str) -> str:
+            for (f, key), proof in base_proof.items():
+                d = decl_text(text, key) if f == path else None
+                if d and d["proof"].strip() == STUB:
+                    text = replace_body(text, key, proof)
+            return text
+        before, after = tree_sources(self.broken), tree_sources(cand)
+        changed = sorted(p for p in set(before) | set(after) if before.get(p) != after.get(p))
+        return patch.make_diff({p: unstub(p, before[p]) for p in changed if p in before},
+                               {p: unstub(p, after[p]) for p in changed if p in after})
+
     def _restub(self, cand: Path, b: dict) -> None:
         """Put the stub back on a theorem whose attempt failed, so later theorems and the gate see
         the stubbed broken state for it, as before the attempt."""
@@ -404,6 +439,7 @@ class Run:
                 g = self.run_gate("candidate", B, K, cand)
                 self.timing["gate_s"] = time.time() - t0
                 report["gate"] = summarize_gate(g)
+                report["delivery_diff"] = self.delivery_diff(cand, targets)
                 self.p.gate_line(report["gate"])
                 self.finish_outcomes(report, g["verdict"])
             human = self.gate_human_fix if self.gate_human_fix is not None else bool(stmt_broken)

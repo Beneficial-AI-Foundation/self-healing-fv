@@ -182,6 +182,10 @@ def test_success_in_dependency_order(toy_case, monkeypatch):
     assert outcomes(rep) == {"double_spec": "repaired", "double_even": "repaired"}
     assert rep["verdict"] == "accepted"
     assert rep["audit"]["outcome"] == "no-change", rep["audit"]  # only extracted code and proofs changed
+    # The proposed repair applies to the change's head (original failing proofs), not to the stubs.
+    d = rep["delivery_diff"]
+    assert ":= by sorry" not in d, d
+    assert "+  simp" in d and "-  have _h := double_spec x" in d, d
     t = rep["totals"]
     assert t["cost_status"] == "computed" and abs(t["cost_usd"] - 2 * COST) < 1e-9
     assert t["resolved_models"] == ["fake-model-v1"]
@@ -251,3 +255,9 @@ def test_gate_unavailable_never_becomes_a_repair_outcome(toy_case, monkeypatch):
     rep, _, _ = run_case(toy_case, monkeypatch, GOOD, "unavail", expect_error=True)
     assert rep["verdict"] == "failed" and rep["error"]["outcome"] == "gate-unavailable"
     assert set(outcomes(rep).values()) == {"gate-unavailable"}  # no `candidate` left behind
+
+
+def test_adapter_without_lsp_tools_cannot_run_the_lsp_profile():
+    with pytest.raises(SystemExit, match="lsp_tools"):
+        pipeline.check_capabilities(FakeAgent({}), "lsp")
+    pipeline.check_capabilities(FakeAgent({}), "minimal")  # tool calling is enough
