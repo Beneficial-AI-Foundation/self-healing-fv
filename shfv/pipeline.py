@@ -543,6 +543,19 @@ class Run:
                         report["repairs"].append({"theorem": b["name"], "file": b["file"], "decl": b["key"],
                                                   "attempts": [], "outcome": "blocked-on",
                                                   "reason": "case is ineligible: a statement must change first"})
+            elif report["broken"]["unobserved_modules"] and not self.attempt_anyway:
+                # Ineligible (§3.3 S2): modules of the broken state cannot be checked (file-level errors,
+                # e.g. a removed import), so under complete-case acceptance nothing could be accepted.
+                # Spend nothing on repairs; the report shows which modules and why.
+                bad = report["broken"]["unobserved_modules"]
+                self.p.step(f"ineligible: {len(bad)} module(s) of the broken state cannot be checked, e.g. {bad[0]}; "
+                            "no repair attempted")
+                for b in ordered:
+                    report["repairs"].append({"theorem": b["name"], "file": b["file"], "decl": b["key"],
+                                              "attempts": [], "outcome": "blocked-on",
+                                              "reason": f"case is ineligible: {len(bad)} module(s) of the broken state "
+                                                        f"cannot be checked (e.g. {bad[0]})"})
+                targets = []
             t0 = time.time()
             if targets:
                 cand = self.repair(targets, Bj["records"], report)
