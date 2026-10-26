@@ -9,7 +9,9 @@
                     added declaration is used by a repaired theorem
   G3 clean build    the candidate snapshot is the stubbed broken state plus exactly this diff,
                     built from a fresh copy without project build output, green, fully covered
-  G5 kernel replay  not implemented yet (TODO §4.3: lean4checker)
+  G5 kernel replay  every module the diff changed was replayed through the Lean kernel
+                    (gates/kernel.py) and accepted; no checker for the toolchain means the gate
+                    cannot decide
 
 The gate fails closed. Before any check counts, the inputs must be trustworthy: the base snapshot
 built green, covers every audited module and every theorem written in its sources, and has a
@@ -34,7 +36,6 @@ from .snapshot import config_hash
 
 BASE3 = {"propext", "Classical.choice", "Quot.sound"}
 SORRY = "sorryAx"
-G5_IMPLEMENTED = False  # TODO(§4.3 G5): lean4checker kernel replay
 
 
 def _fp(r: dict) -> tuple:
@@ -183,8 +184,24 @@ def compare(cfg: dict, base: dict, broken: dict, cand: dict, diff: str) -> dict:
     checks["G3"] = {"id": "G3", "ok": not v3, "violations": v3,
                     "info": {"build_seconds": b.get("seconds"), "targets": cfg["lean"]["build_targets"]}}
 
-    checks["G5"] = {"id": "G5", "ok": None, "status": "not run", "required": True,
-                    "violations": [], "info": {"todo": "lean4checker kernel replay (DESIGN.md §4.3 G5)"}}
+    kr = cand.get("kernel_replay") or {}
+    v5 = []
+    if cand.get("build", {}).get("ok") and not kr.get("ran"):
+        unavailable.append(f"kernel replay (G5) could not run: {kr.get('error', 'no record of it')}")
+    elif kr.get("ran"):
+        missing = sorted(set(kr.get("required_modules", [])) - set(kr.get("modules", {})))
+        if missing:
+            unavailable.append(f"kernel replay (G5) did not cover {', '.join(missing)}")
+        for m, r in sorted(kr.get("modules", {}).items()):
+            if r.get("timeout"):
+                unavailable.append(f"kernel replay (G5) timed out on {m}")
+            elif not r.get("ok"):
+                v5.append({"check": "G5", "msg": f"the Lean kernel rejects a declaration in {m}",
+                           "file": m.replace(".", "/") + ".lean", "output": r.get("output", "")[-600:]})
+    checks["G5"] = {"id": "G5", "ok": not v5 if kr.get("ran") else None, "status": "ran" if kr.get("ran") else "not run",
+                    "required": True, "violations": v5,
+                    "info": {"checker": kr.get("checker"), "modules": sorted(kr.get("modules", {})),
+                             "seconds": kr.get("seconds")}}
 
     # --- per broken theorem, and the verdict.
     still_stubbed = [b["name"] for b in bset if b["name"] and b["name"] in cand_sorry]
@@ -200,7 +217,7 @@ def compare(cfg: dict, base: dict, broken: dict, cand: dict, diff: str) -> dict:
         verdict = "gate-unavailable"
     elif failed or not eligible or not bset or still_stubbed:
         verdict = "rejected"
-    elif not G5_IMPLEMENTED:
+    elif checks["G5"]["ok"] is not True:  # defensive: G5 must have run and passed to accept
         verdict = "passed-without-kernel-replay"
     else:
         verdict = "accepted"

@@ -20,7 +20,7 @@ import pytest
 from .conftest import TOY_CONFIG
 
 FIXTURE = Path(__file__).parent / "fixture"
-PASSED = "passed-without-kernel-replay"  # the best verdict until G5 exists (review finding 2)
+ACCEPTED = "accepted"
 REPO = Path(__file__).resolve().parents[2]
 SPECS = "Toy/Specs.lean"
 NEW_DOUBLE = "def double (x : Nat) : Nat := List.sum [x, x]"
@@ -94,20 +94,20 @@ def assert_rejected(verdict, *checks):
 
 # ------------------------------------------------------------------ positive control
 
-def test_valid_repair_passes_every_check_but_is_not_accepted_without_kernel_replay(env):
+def test_valid_repair_is_accepted(env):
     rc, v, scope = run_candidate(env, "valid", specs_edit(repaired))
     assert scope["ok"], scope["violations"]
-    assert v["verdict"] == PASSED and not v["failed_checks"] and not v["unavailable"], v
-    assert rc == 1  # not accepted: G5 is required (DESIGN.md §4.3)
+    assert v["verdict"] == ACCEPTED and not v["failed_checks"] and not v["unavailable"], v
+    assert rc == 0
     assert [t["name"] for t in v["theorems"]] == ["double_spec"] and v["theorems"][0]["repaired"]
-    assert v["checks"]["G5"]["status"] == "not run" and v["checks"]["G5"]["required"]
+    assert v["checks"]["G5"]["ok"] and v["checks"]["G5"]["info"]["modules"] == ["Toy.Specs"]
 
 
 def test_valid_repair_with_used_helper_passes(env):
     helper = "theorem sum_two (x : Nat) : List.sum [x, x] = x + x := by simp\n\n"
     proof = "theorem double_spec (x : Nat) : double x = 2 * x := by\n  unfold double\n  rw [sum_two]\n  omega\n"
     rc, v, _ = run_candidate(env, "helper", specs_edit(lambda t: t.replace(STUB, helper + proof)))
-    assert v["verdict"] == PASSED, v["checks"]
+    assert v["verdict"] == ACCEPTED, v["checks"]
     assert v["checks"]["G2"]["info"]["added"] == ["sum_two"]
 
 
@@ -329,3 +329,24 @@ def test_alpha_rename_keeps_fingerprint(env):
         "theorem le_add (x y : Nat) : x ≤ x + y", "theorem le_add (a b : Nat) : a ≤ a + b")))
     assert_rejected(v, "G0")
     assert v["checks"]["G1"]["ok"] and v["checks"]["G3"]["ok"]
+
+
+def test_unchecked_theorem_from_inside_a_proof_is_caught_by_the_kernel_replay(env):
+    # The design-review probe (docs/reviews/design-v0-codex.md, blocker 1): a proof body adds a
+    # theorem with kernel checking switched off. It builds, its statement is unchanged (G1) and
+    # it depends on no axiom (G2); only G0's token ban and G5's kernel replay catch it.
+    probe = ("theorem double_spec (x : Nat) : double x = 2 * x := by\n"
+             "  run_tac do\n"
+             "    Lean.withOptions (fun o => o.setBool `debug.skipKernelTC true) do\n"
+             "      Lean.addDecl (.thmDecl {\n"
+             "        name := `double_spec.uncheckedHelper\n"
+             "        levelParams := []\n"
+             "        type := Lean.mkConst ``False\n"
+             "        value := Lean.mkConst ``True.intro\n"
+             "      })\n"
+             "  exact (double_spec.uncheckedHelper).elim\n")
+    rc, v, _ = run_candidate(env, "kernel-probe", specs_edit(lambda t: ("import Lean\n" + t).replace(STUB, probe)))
+    assert_rejected(v, "G0", "G5")
+    assert v["checks"]["G1"]["ok"] and v["checks"]["G3"]["ok"]
+    assert not any(x["decl"] == "double_spec" for x in v["checks"]["G2"]["violations"])  # no axiom to see
+    assert "kernel" in v["checks"]["G5"]["violations"][0]["output"]

@@ -178,9 +178,9 @@ def test_success_in_dependency_order(toy_case, monkeypatch):
     rep, agent, _ = run_case(toy_case, monkeypatch, GOOD, "ok")
     assert [c[0] for c in agent.calls] == ["double_spec", "double_even"]  # leaves first, from base `uses`
     assert agent.calls[1][1] == ["double_spec"] and agent.calls[1][2] == []  # prompt context is accurate
-    assert rep["gate"]["verdict"] == "passed-without-kernel-replay", rep["gate"]
-    assert outcomes(rep) == {"double_spec": "passed-checks", "double_even": "passed-checks"}
-    assert rep["verdict"] == "passed-without-kernel-replay"
+    assert rep["gate"]["verdict"] == "accepted", rep["gate"]
+    assert outcomes(rep) == {"double_spec": "repaired", "double_even": "repaired"}
+    assert rep["verdict"] == "accepted"
     t = rep["totals"]
     assert t["cost_status"] == "computed" and abs(t["cost_usd"] - 2 * COST) < 1e-9
     assert t["resolved_models"] == ["fake-model-v1"]

@@ -24,7 +24,7 @@ import subprocess
 import time
 from pathlib import Path
 
-from . import leandecls, patch, proc, version
+from . import kernel, leandecls, patch, proc, version
 
 STMTCANON = Path(__file__).resolve().parent / "StmtCanon.lean"
 DIAG_RE = re.compile(r"^(error|warning): (?:\./)?(\S+?\.lean)(?::(\d+):(\d+))?: ?(.*)$")
@@ -194,7 +194,10 @@ def snapshot(cfg: dict, tree: Path, *, clean: bool = False, apply_diff: Path | N
             for p in (f["old"], f["new"]):
                 if p and (workdir / p).is_file():
                     touched[p] = (workdir / p).read_text()
+        changed_paths = []
         for path, text in patch.apply(touched, diff).items():
+            if text is not None:
+                changed_paths.append(path)
             target = workdir / path
             if text is None:
                 target.unlink(missing_ok=True)
@@ -235,5 +238,12 @@ def snapshot(cfg: dict, tree: Path, *, clean: bool = False, apply_diff: Path | N
     result["stmtcanon"] = info
     result["records"] = records
     result["sources"] = {module_file(m): (tree / module_file(m)).read_text() for m in audited}
+    if apply_diff is not None:
+        # G5: kernel replay of the modules the diff changed (the rest is rebuilt from unchanged
+        # sources). Needs a green build: a failed one is already a G3 rejection.
+        replay_mods = sorted({module_of(p) for p in changed_paths if p.endswith(".lean")} & set(mods))
+        result["kernel_replay"] = kernel.replay(tree, replay_mods, cfg) if build["ok"] else \
+            {"ran": False, "error": "the candidate did not build", "modules": {}}
+        result["kernel_replay"]["required_modules"] = replay_mods
     result["seconds"] = round(time.time() - t0)
     return result

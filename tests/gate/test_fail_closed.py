@@ -38,7 +38,9 @@ def case(cand_axioms=BASE3):
     broken = snap({"M.lean": "theorem T : True := by sorry\n"}, {"T": rec(BASE3 + ["sorryAx"], ["T"])})
     new = {"M.lean": "theorem T : True := by\n  trivial\n"}
     diff = patch.make_diff(broken["sources"], new)
-    cand = snap(new, {"T": rec(cand_axioms)}, clean=True, applied_diff_sha256=hashlib.sha256(diff.encode()).hexdigest())
+    cand = snap(new, {"T": rec(cand_axioms)}, clean=True, applied_diff_sha256=hashlib.sha256(diff.encode()).hexdigest(),
+                kernel_replay={"ran": True, "checker": "test", "required_modules": ["M"],
+                               "modules": {"M": {"ok": True, "output": ""}}})
     return base, broken, cand, diff
 
 
@@ -46,10 +48,31 @@ def verdict(base, broken, cand, diff):
     return compare.compare(CFG, base, broken, cand, diff)
 
 
-def test_valid_repair_passes_but_is_not_accepted_without_kernel_replay():
+def test_valid_repair_is_accepted_with_kernel_replay():
     v = verdict(*case())
-    assert v["verdict"] == "passed-without-kernel-replay" and not v["failed_checks"] and not v["unavailable"]
-    assert v["checks"]["G5"]["required"] and v["checks"]["G5"]["status"] == "not run"
+    assert v["verdict"] == "accepted" and not v["failed_checks"] and not v["unavailable"], v
+    assert v["checks"]["G5"]["ok"] and v["checks"]["G5"]["status"] == "ran"
+
+
+def test_no_kernel_replay_means_no_decision():
+    base, broken, cand, diff = case()
+    cand["kernel_replay"] = {"ran": False, "error": "no checker for this toolchain", "modules": {}}
+    v = verdict(base, broken, cand, diff)
+    assert v["verdict"] == "gate-unavailable" and any("could not run" in u for u in v["unavailable"])
+
+
+def test_kernel_replay_must_cover_every_changed_module():
+    base, broken, cand, diff = case()
+    cand["kernel_replay"]["modules"] = {}
+    v = verdict(base, broken, cand, diff)
+    assert v["verdict"] == "gate-unavailable" and any("did not cover M" in u for u in v["unavailable"])
+
+
+def test_kernel_rejection_is_a_g5_failure():
+    base, broken, cand, diff = case()
+    cand["kernel_replay"]["modules"]["M"] = {"ok": False, "output": "(kernel) declaration type mismatch"}
+    v = verdict(base, broken, cand, diff)
+    assert v["verdict"] == "rejected" and v["failed_checks"] == ["G5"]
 
 
 def incomplete_base():
