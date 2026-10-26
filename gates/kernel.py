@@ -8,11 +8,13 @@ other module is rebuilt clean from sources identical to the stubbed broken state
 
 The checker is the toolchain's own `leanchecker` when it ships one (Lean v4.28 and later), else
 `lean4checker` (https://github.com/leanprover/lean4checker) built at the tag matching the
-toolchain and cached. No checker means G5 cannot run, and the gate cannot accept.
+toolchain (or the latest earlier patch release of it, built with the tree's toolchain) and cached.
+No checker means G5 cannot run, and the gate cannot accept.
 """
 from __future__ import annotations
 
 import os
+import re
 import time
 from pathlib import Path
 
@@ -37,20 +39,52 @@ def find_checker(tree: Path) -> tuple[str | None, str]:
     tag = toolchain_tag(tree)
     if not tag:
         return None, "no lean-toolchain file"
-    built = CACHE / tag / ".lake" / "build" / "bin" / "lean4checker"
-    if built.is_file():
-        return str(built), f"lean4checker {tag} (cached build)"
-    CACHE.mkdir(parents=True, exist_ok=True)
     src = CACHE / tag
+    built = src / ".lake" / "build" / "bin" / "lean4checker"
+    if built.is_file():
+        return str(built), f"{_label(src, tag)} (cached build)"
+    CACHE.mkdir(parents=True, exist_ok=True)
     if not src.exists():
-        clone = proc.run(["git", "clone", "--quiet", "--depth", "1", "--branch", tag, LEAN4CHECKER_REPO, str(src)],
+        ref, why = checker_ref(tag)
+        if ref is None:
+            return None, why
+        clone = proc.run(["git", "clone", "--quiet", "--depth", "1", "--branch", ref, LEAN4CHECKER_REPO, str(src)],
                          CACHE, timeout=600)
         if clone.returncode != 0:
-            return None, f"could not fetch lean4checker {tag}: {clone.stderr.strip()[-300:]}"
+            return None, f"could not fetch lean4checker {ref}: {clone.stderr.strip()[-300:]}"
+        if ref != tag:  # build the earlier patch release against this tree's exact toolchain
+            (src / "lean-toolchain").write_text((tree / "lean-toolchain").read_text())
+            (src / ".shfv-ref").write_text(ref)
     b = proc.run(["lake", "build"], src, timeout=1800)
     if b.returncode != 0 or not built.is_file():
-        return None, f"could not build lean4checker {tag}: {(b.stdout + b.stderr).strip()[-300:]}"
-    return str(built), f"lean4checker {tag} (built)"
+        return None, f"could not build {_label(src, tag)}: {(b.stdout + b.stderr).strip()[-300:]}"
+    return str(built), f"{_label(src, tag)} (built)"
+
+
+def checker_ref(tag: str) -> tuple[str | None, str]:
+    """The lean4checker tag to build for toolchain `tag`: the same tag, else the latest earlier
+    patch release of the same minor version (lean4checker does not tag every Lean patch release,
+    e.g. there is no v4.25.2). It is then built with the tree's toolchain, so it reads that
+    toolchain's .olean files. No such tag means G5 cannot run."""
+    ls = proc.run(["git", "ls-remote", "--tags", LEAN4CHECKER_REPO], CACHE, timeout=120)
+    if ls.returncode != 0:
+        return None, f"could not list lean4checker tags: {ls.stderr.strip()[-300:]}"
+    tags = {line.split("refs/tags/")[-1].removesuffix("^{}") for line in ls.stdout.splitlines() if "refs/tags/" in line}
+    if tag in tags:
+        return tag, ""
+    m = re.fullmatch(r"v(\d+)\.(\d+)\.(\d+)", tag)
+    if m:
+        major, minor, patch_ = map(int, m.groups())
+        earlier = [(int(p), t) for t in tags if (mt := re.fullmatch(rf"v{major}\.{minor}\.(\d+)", t))
+                   for p in [mt.group(1)] if int(p) < patch_]
+        if earlier:
+            return max(earlier)[1], ""
+    return None, f"no lean4checker tag for {tag} or an earlier patch release of it"
+
+
+def _label(src: Path, tag: str) -> str:
+    ref = src / ".shfv-ref"
+    return f"lean4checker {ref.read_text().strip()} built with {tag}" if ref.exists() else f"lean4checker {tag}"
 
 
 def replay(tree: Path, modules: list[str], cfg: dict) -> dict:
