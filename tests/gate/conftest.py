@@ -20,7 +20,7 @@ from gates.snapshot import STMTCANON, module_of, project_modules
 REPO = Path(__file__).resolve().parents[2]
 FIXTURE = Path(__file__).parent / "fixture"
 TOY_CONFIG = ('name = "toy"\n[lean]\nbuild_targets = ["Toy"]\nroot_modules = ["Toy"]\nsource_roots = ["Toy/"]\n'
-              'lean_num_threads = 4\n[protected]\nextracted = ["Toy/Funs.lean"]\ntrusted_models = []\n'
+              'lean_num_threads = 4\n[protected]\nextracted = ["Toy/Funs.lean"]\ntrusted_models = ["Toy/FunsExternal.lean"]\n'
               'build_config = ["lakefile.toml", "lean-toolchain", "lake-manifest.json"]\n')
 
 

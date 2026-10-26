@@ -25,6 +25,8 @@ OUTCOME_TEXT = {
     "proof-hard": "no accepted repair within the budget",
     "blocked-on": "waits for another theorem to be fixed first",
     "infrastructure-failure": "the run failed before it could say anything about this theorem",
+    "gate-unavailable": "the gate could not decide, so nothing about this theorem was accepted or rejected",
+    "passed-checks": "every gate check that ran passed, but the kernel replay (G5) has not run, so it is not accepted",
 }
 
 
@@ -91,7 +93,8 @@ def gate_table(r: dict, g: dict) -> list[str]:
         if c is None:
             mark, text = "⚪", "not reached (scope check failed first)"
         elif c.get("ok") is None:
-            mark, text = "⚪", desc + ": not run in this prototype"
+            mark, text = "⚪", desc + (": required for acceptance, not implemented yet" if c.get("required")
+                                      else ": not run in this prototype")
         else:
             mark = "✅" if c["ok"] else "❌"
             text = desc.format(inventory=inv, targets=", ".join(c.get("info", {}).get("targets", ["the project"])),
@@ -138,7 +141,7 @@ def render(r: dict) -> str:
     pr = f"[#{inp['change_pr']} \"{subject}\"]({inp['change_pr_url']})" if inp.get("change_pr_url") \
         else f"`{inp['change_commit'][:8]}` \"{subject}\""
     repairs, escal = r.get("repairs", []), r.get("escalations", [])
-    repaired = [e for e in repairs if e.get("outcome") == "repaired"]
+    repaired = [e for e in repairs if e.get("outcome") in ("repaired", "passed-checks")]
     n_proofs = len(r.get("broken", {}).get("proofs", []))
     n_stmts = len(r.get("broken", {}).get("statements", []))
     t = r.get("totals", {})
@@ -150,6 +153,15 @@ def render(r: dict) -> str:
         out.append(f"The change {pr} broke {n_proofs} proof{'s' * (n_proofs != 1)}. The bot repaired "
                    f"{'it' if n_proofs == 1 else 'them'}, and the gate checked the repair mechanically and accepted it: "
                    "no theorem statement or definition changed, no new axioms or `sorry`, and the project rebuilds from scratch.")
+    elif v == "passed-without-kernel-replay":
+        out.append(f"### 🟡 Repair passed every check that ran, not accepted yet: {len(repaired)} of {n_proofs} broken "
+                   f"proof{'s' * (n_proofs != 1)} fixed")
+        out.append("")
+        out.append(f"The change {pr} broke {n_proofs} proof{'s' * (n_proofs != 1)}. The bot repaired "
+                   f"{'it' if n_proofs == 1 else 'them'}, and every gate check that ran passed: no theorem statement or "
+                   "definition changed, no new axioms or `sorry`, and the project rebuilds from scratch. The change is "
+                   "**not accepted** yet: acceptance also needs the kernel replay (`lean4checker`), which this "
+                   "prototype does not run yet.")
     elif v == "failed":
         out.append("### ⛔ The repair run failed (infrastructure)")
         out.append("")
@@ -203,7 +215,7 @@ def render(r: dict) -> str:
             out.append(fence(f"- {x['before']}\n+ {x['after']}", "diff"))
         out.append("")
     for e in repairs:
-        if e.get("outcome") in ("repaired", "candidate"):
+        if e.get("outcome") in ("repaired", "passed-checks"):
             continue
         out.append(f"#### Not repaired: {link(r, e['file'], e.get('line'), short_name(e['theorem']))} · `{e['outcome']}`")
         out.append("")
@@ -217,6 +229,12 @@ def render(r: dict) -> str:
     if g:
         out.append("#### Gate" + (": the bot's candidate" if v != "accepted" else ""))
         out.append("")
+        if g.get("verdict") == "gate-unavailable":
+            out.append("**The gate could not decide**, so nothing was accepted and nothing is held against the "
+                       "repair:")
+            out.append("")
+            out += [f"- {u}" for u in g.get("unavailable", [])[:10]]
+            out.append("")
         out += gate_table(r, g)
         if g.get("heartbeats"):
             out.append("")
@@ -224,7 +242,8 @@ def render(r: dict) -> str:
                 f"`{short_name(h['decl'])}` → {h['maxHeartbeats']}" for h in g["heartbeats"]))
         out.append("")
     if repaired:
-        out.append("#### Repaired")
+        out.append("#### Repaired" if v == "accepted" else "#### Repaired, pending the kernel replay"
+                   if v == "passed-without-kernel-replay" else "#### Repairs that passed the agent's own build")
         out.append("")
         out.append("| Theorem | Edit of the old proof | Agent |")
         out.append("|---|---|---|")
@@ -236,7 +255,8 @@ def render(r: dict) -> str:
                        f"{a.get('turns', 0)} turns · ${a.get('cost_usd', 0):.2f} · {fmt_s(a.get('seconds'))} |")
         out.append("")
     if g and g.get("diff"):
-        out.append("<details><summary>The candidate diff (what the bot would commit)</summary>")
+        out.append("<details><summary>The candidate diff (gate input: relative to the stubbed broken state, "
+                   "in which each broken proof is <code>sorry</code>)</summary>")
         out.append("")
         out.append(fence(g["diff"], "diff", limit=20000))
         out.append("")

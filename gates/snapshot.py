@@ -24,7 +24,7 @@ import subprocess
 import time
 from pathlib import Path
 
-from . import leandecls, patch, version
+from . import leandecls, patch, proc, version
 
 STMTCANON = Path(__file__).resolve().parent / "StmtCanon.lean"
 DIAG_RE = re.compile(r"^(error|warning): (?:\./)?(\S+?\.lean)(?::(\d+):(\d+))?: ?(.*)$")
@@ -67,13 +67,9 @@ def protected(cfg: dict, path: str) -> str | None:
 def run_build(tree: Path, cfg: dict, log: Path | None) -> dict:
     env = {**os.environ, "LEAN_NUM_THREADS": str(cfg["lean"].get("lean_num_threads", 8))}
     t0 = time.time()
-    try:
-        p = subprocess.run(["lake", "build", *cfg["lean"]["build_targets"]], cwd=tree, env=env,
-                           capture_output=True, text=True, errors="replace",
-                           timeout=60 * cfg["lean"].get("build_timeout_minutes", 90))
-        out, rc = p.stdout + p.stderr, p.returncode
-    except subprocess.TimeoutExpired as e:
-        out, rc = f"{e.stdout or ''}{e.stderr or ''}\nTIMEOUT", -1
+    p = proc.run(["lake", "build", *cfg["lean"]["build_targets"]], tree, env,
+                 timeout=60 * cfg["lean"].get("build_timeout_minutes", 90))
+    out, rc = p.stdout + p.stderr + ("\nTIMEOUT" if p.timed_out else ""), p.returncode
     if log:
         log.write_text(out)
     errors, failed = [], set()
@@ -97,9 +93,12 @@ def run_build(tree: Path, cfg: dict, log: Path | None) -> dict:
 def stmtcanon(tree: Path, cfg: dict, modules: list[str]) -> tuple[dict[str, dict], dict]:
     env = {**os.environ, "LEAN_NUM_THREADS": str(cfg["lean"].get("lean_num_threads", 8))}
     t0 = time.time()
-    p = subprocess.run(["lake", "env", "lean", "--run", str(STMTCANON), "--import", ",".join(modules),
-                        "--module", ",".join(modules)], cwd=tree, env=env,
-                       capture_output=True, text=True, errors="replace")
+    p = proc.run(["lake", "env", "lean", "--run", str(STMTCANON), "--import", ",".join(modules),
+                  "--module", ",".join(modules)], tree, env,
+                 timeout=60 * cfg["lean"].get("stmtcanon_timeout_minutes", 30))
+    if p.timed_out:
+        return {}, {"ok": False, "seconds": round(time.time() - t0), "records": 0, "timeout": True,
+                    "stderr": "StmtCanon timed out"}
     records: dict[str, dict] = {}
     duplicates = 0
     for line in p.stdout.splitlines():
@@ -130,10 +129,30 @@ def fresh_copy(src: Path, dest: Path) -> None:
             shutil.copytree(pkgs, dest / ".lake" / "packages", symlinks=True)
 
 
+def config_hash(cfg: dict) -> str:
+    """Hash of the target config's content (not its file formatting)."""
+    return hashlib.sha256(json.dumps(cfg, sort_keys=True).encode()).hexdigest()[:16]
+
+
+def inputs_hash(cfg: dict, tree: Path) -> str:
+    """Hash of everything in `tree` a snapshot depends on: the toolchain and Lake files, the root
+    modules and every .lean file under the source roots (extracted code included)."""
+    h = hashlib.sha256()
+    files = [tree / f for f in ("lean-toolchain", "lake-manifest.json", "lakefile.toml", "lakefile.lean")]
+    files += [tree / module_file(m) for m in cfg["lean"]["root_modules"]]
+    for root in cfg["lean"]["source_roots"]:
+        files += sorted((tree / root).rglob("*.lean"))
+    for f in files:
+        if f.is_file() and ".lake" not in f.relative_to(tree).parts:
+            h.update(str(f.relative_to(tree)).encode() + b"\0" + f.read_bytes() + b"\0")
+    return h.hexdigest()[:16]
+
+
 def snapshot(cfg: dict, tree: Path, *, clean: bool = False, apply_diff: Path | None = None,
              workdir: Path | None = None, log: Path | None = None) -> dict:
     t0 = time.time()
-    result: dict = {"format": 1, "gate_version": version(), "target": cfg["name"], "clean": clean}
+    result: dict = {"format": 2, "gate_version": version(), "target": cfg["name"], "config_sha256": config_hash(cfg),
+                    "clean": clean}
     if apply_diff is not None:
         if workdir is None:
             raise ValueError("--apply needs --workdir")
@@ -159,6 +178,7 @@ def snapshot(cfg: dict, tree: Path, *, clean: bool = False, apply_diff: Path | N
         raise RuntimeError(f"{tree}: --clean, but the project build output .lake/build exists")
     tc = tree / "lean-toolchain"
     result["toolchain"] = tc.read_text().strip() if tc.exists() else None
+    result["inputs_sha256"] = inputs_hash(cfg, tree)
 
     result["build"] = build = run_build(tree, cfg, log)
     mods = project_modules(tree, cfg)

@@ -147,10 +147,12 @@ def main(argv: list[str] | None = None) -> int:
     j, m = report_mod.write(rep, run.out)
     link_latest(run.case_runs, run.out)
     t = rep["totals"]
-    n = len(rep.get("broken", {}).get("proofs", []))
-    fixed = sum(1 for e in rep["repairs"] if e.get("outcome") == "repaired")
-    run.p.final(f"{rep['verdict'].upper()} · {fixed}/{n} proofs repaired · {len(rep['escalations'])} escalated · "
-                f"${t['cost_usd']:.2f} · {fmt_s(t['wall_seconds'])} → {m.relative_to(ROOT) if m.is_relative_to(ROOT) else m}")
+    counts: dict[str, int] = {}
+    for e in rep["repairs"] + rep["escalations"]:
+        counts[e.get("outcome")] = counts.get(e.get("outcome"), 0) + 1
+    by_outcome = " · ".join(f"{k} {v}" for k, v in sorted(counts.items())) or "nothing to repair"
+    run.p.final(f"{rep['verdict'].upper()} · {by_outcome} · ${t['cost_usd']:.2f} · {fmt_s(t['wall_seconds'])} → "
+                f"{m.relative_to(ROOT) if m.is_relative_to(ROOT) else m}")
     if "error" in rep:
         print(f"  {rep['error']['outcome']}: {rep['error']['detail'][:500]}", file=sys.stderr)
     return 0 if rep["verdict"] != "failed" else 1

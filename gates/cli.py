@@ -5,8 +5,10 @@
   gate compare  --config T.toml --base B.json --broken K.json --candidate C.json --diff D.patch --out V.json
   gate diff     --config T.toml --before DIR --after DIR --out D.patch
   gate version
+  gate tree-hash --config T.toml --tree DIR       (hash of a tree's snapshot inputs, for caching)
 
-Exit status of `scope`/`compare`: 0 pass/accepted, 1 fail/rejected, 2 the gate could not run.
+Exit status of `scope`/`compare`: 0 pass/accepted, 1 not accepted (rejected, or passed without the
+kernel replay), 2 the gate could not run or could not decide (gate-unavailable).
 """
 from __future__ import annotations
 
@@ -74,6 +76,9 @@ def main(argv: list[str] | None = None) -> int:
         if name == "compare":
             c.add_argument("--candidate", type=Path, required=True)
     sub.add_parser("version")
+    th = sub.add_parser("tree-hash")
+    th.add_argument("--config", type=Path, required=True)
+    th.add_argument("--tree", type=Path, required=True)
     d = sub.add_parser("diff")
     d.add_argument("--config", type=Path, required=True)
     d.add_argument("--before", type=Path, required=True)
@@ -84,6 +89,10 @@ def main(argv: list[str] | None = None) -> int:
         print(version())
         return 0
     cfg = load_config(a.config)
+    if a.cmd == "tree-hash":
+        print(json.dumps({"inputs_sha256": snapshot.inputs_hash(cfg, a.tree.resolve()),
+                          "config_sha256": snapshot.config_hash(cfg), "gate_version": version()}))
+        return 0
     try:
         if a.cmd == "snapshot":
             if a.apply:
@@ -110,7 +119,7 @@ def main(argv: list[str] | None = None) -> int:
             return 0 if res["ok"] else 1
         res = compare.compare(cfg, base, broken, read_json(a.candidate), diff)
         write_json(res, a.out)
-        return 0 if res["verdict"] == "accepted" else 1
+        return {"accepted": 0, "gate-unavailable": 2}.get(res["verdict"], 1)
     except Exception as e:  # the gate never "passes" on its own failure
         print(f"gate: {type(e).__name__}: {e}", file=sys.stderr)
         return 2

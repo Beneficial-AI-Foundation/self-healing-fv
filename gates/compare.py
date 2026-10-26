@@ -9,46 +9,102 @@
                     added declaration is used by a repaired theorem
   G3 clean build    the candidate snapshot is the stubbed broken state plus exactly this diff,
                     built from a fresh copy without project build output, green, fully covered
-  G5 kernel replay  not run in this slice (TODO §4.3: lean4checker)
+  G5 kernel replay  not implemented yet (TODO §4.3: lean4checker)
 
-Complete-case acceptance (the prototype): accepted only if every check passes, the case is
-eligible (every inventory entry observed in the stubbed broken state, §3.3 S2) and every
-broken theorem is repaired (the candidate has no stubs).
+The gate fails closed. Before any check counts, the inputs must be trustworthy: the base snapshot
+built green, covers every audited module and every theorem written in its sources, and has a
+record for every broken theorem; all three snapshots were made by this gate version for this
+target config; the candidate's build and fingerprinting completed. Otherwise the verdict is
+`gate-unavailable` (§5.1): nothing is accepted, and nothing is held against the candidate either.
+
+Verdicts:
+  accepted                       every check passed, G5 included, and the case is complete
+  passed-without-kernel-replay   every check that ran passed, but G5 did not run: not accepted
+  rejected                       a check failed, the case is ineligible, or a theorem is unrepaired
+  gate-unavailable               the gate could not decide (see `unavailable`)
+
+Complete-case acceptance (the prototype): every broken theorem must be repaired (§4.3).
 """
 from __future__ import annotations
 
 import hashlib
 
-from . import patch, scope, version
+from . import inventory, patch, scope, version
+from .snapshot import config_hash
 
 BASE3 = {"propext", "Classical.choice", "Quot.sound"}
 SORRY = "sorryAx"
+G5_IMPLEMENTED = False  # TODO(§4.3 G5): lean4checker kernel replay
 
 
 def _fp(r: dict) -> tuple:
     return (r.get("kind"), r.get("canon"), r.get("body_canon"))
 
 
+def preconditions(cfg: dict, base: dict, broken: dict, cand: dict) -> list[str]:
+    """Reasons the gate cannot decide. Empty means the snapshots can be trusted as inputs."""
+    out = []
+    want_cfg, want_gate = config_hash(cfg), version()
+    for name, s in (("base", base), ("broken", broken), ("candidate", cand)):
+        if s.get("gate_version") != want_gate:
+            out.append(f"{name} snapshot was made by gate {s.get('gate_version')}, not {want_gate}")
+        if s.get("config_sha256") != want_cfg:
+            out.append(f"{name} snapshot was made for a different target config")
+    if broken.get("toolchain") != cand.get("toolchain"):
+        out.append(f"toolchain differs between broken ({broken.get('toolchain')}) and candidate "
+                   f"({cand.get('toolchain')}) snapshots")
+    b = base.get("build", {})
+    if not b.get("ok"):
+        out.append("base snapshot: the base did not build" + (" (timed out)" if b.get("timeout") else ""))
+    not_obs = sorted(m for m, s in base.get("modules", {}).items() if s != "observed")
+    if not_obs:
+        out.append(f"base snapshot: {len(not_obs)} audited module(s) not observed, e.g. {not_obs[0]}")
+    if not base.get("stmtcanon", {}).get("ok", False):
+        out.append("base snapshot: fingerprinting failed")
+    errs = [n for n, r in base.get("records", {}).items() if "error" in r]
+    if errs:
+        out.append(f"base snapshot: {len(errs)} declaration(s) could not be fingerprinted, e.g. {errs[0]}")
+    n, missing = inventory.missing(base)
+    if missing:
+        out.append(f"base snapshot: {len(missing)} of {n} theorems written in the sources have no record, "
+                   f"e.g. {missing[0]}")
+    # A candidate whose build or fingerprinting did not complete for reasons outside the
+    # candidate (fetch failure, timeout) says nothing about it (§5.1, §9.4).
+    c = cand.get("build", {})
+    if c.get("timeout"):
+        out.append("candidate build timed out")
+    elif not c.get("ok") and not c.get("failed_modules"):
+        out.append("candidate build failed outside the project (no project module has an error)")
+    elif c.get("ok") and not cand.get("stmtcanon", {}).get("ok", False):
+        out.append("fingerprinting the candidate failed" + (" (timed out)" if cand.get("stmtcanon", {}).get("timeout")
+                                                            else ""))
+    return out
+
+
 def compare(cfg: dict, base: dict, broken: dict, cand: dict, diff: str) -> dict:
     checks: dict[str, dict] = {}
+    unavailable = preconditions(cfg, base, broken, cand)
     g0 = scope.check(cfg, base, broken, diff)
     checks["G0"] = g0
     bset = g0["info"]["broken_set"]
     repaired = {b["name"] for b in bset if b["name"]}
+    for b in bset:
+        if not b["name"] or b["name"] not in base["records"]:
+            unavailable.append(f"broken theorem {b['key']} ({b['file']}) has no base record")
 
     # --- eligibility (§3.3 S2): every frozen declaration observed in the stubbed broken state.
-    inventory = {n: r for n, r in base["records"].items() if "error" not in r}
+    inventory_ = {n: r for n, r in base["records"].items() if "error" not in r}
     unobserved = []
-    for name, r in inventory.items():
+    for name, r in inventory_.items():
         status = broken["modules"].get(r["module"], "missing")
         if status != "observed" or name not in broken["records"] or "error" in broken["records"][name]:
             unobserved.append({"decl": name, "module": r["module"],
                                "status": status if status != "observed" else "missing"})
-    eligible = not unobserved and broken.get("stmtcanon", {}).get("ok", False) and bool(inventory)
+    eligible = not unobserved and broken.get("stmtcanon", {}).get("ok", False) and bool(inventory_)
 
     # --- G1 statement identity, against the stubbed broken state.
     v1 = []
-    for name, r in inventory.items():
+    for name, r in inventory_.items():
         k = broken["records"].get(name)
         c = cand["records"].get(name)
         if k is None or "error" in k:
@@ -67,12 +123,12 @@ def compare(cfg: dict, base: dict, broken: dict, cand: dict, diff: str) -> dict:
                 e.update(before=k.get("pp_body"), after=c.get("pp_body"))
             v1.append(e)
     checks["G1"] = {"id": "G1", "ok": not v1 and eligible, "violations": v1,
-                    "info": {"inventory": len(inventory), "unobserved": unobserved[:200],
+                    "info": {"inventory": len(inventory_), "unobserved": unobserved[:200],
                              "unobserved_n": len(unobserved)}}
 
     # --- G2 trust base.
     v2 = []
-    for name, r in inventory.items():
+    for name, r in inventory_.items():
         c = cand["records"].get(name)
         if c is None or "error" in c:
             continue
@@ -117,36 +173,38 @@ def compare(cfg: dict, base: dict, broken: dict, cand: dict, diff: str) -> dict:
     if not cand.get("clean"):
         v3.append({"check": "G3", "msg": "candidate was not built clean (project build output reused)"})
     b = cand.get("build", {})
-    if not b.get("ok"):
-        msg = "build timed out" if b.get("timeout") else "build failed"
+    if not b.get("ok") and b.get("failed_modules"):  # failures elsewhere are preconditions above
         errs = b.get("errors", [])
-        v3.append({"check": "G3", "msg": f"{msg}: {len(errs)} error(s)" + (f", in {', '.join(b.get('failed_modules', [])[:5])}"
-                                                                         if b.get("failed_modules") else ""),
-                   "errors": errs[:10]})
+        v3.append({"check": "G3", "msg": f"build failed: {len(errs)} error(s), in "
+                   f"{', '.join(b['failed_modules'][:5])}", "errors": errs[:10]})
     not_obs = [m for m, s in cand.get("modules", {}).items() if s != "observed"]
     if not_obs and b.get("ok"):
         v3.append({"check": "G3", "msg": f"{len(not_obs)} audited module(s) not observed"})
-    if not cand.get("stmtcanon", {}).get("ok", False):
-        v3.append({"check": "G3", "msg": "fingerprinting the candidate failed"})
     checks["G3"] = {"id": "G3", "ok": not v3, "violations": v3,
                     "info": {"build_seconds": b.get("seconds"), "targets": cfg["lean"]["build_targets"]}}
 
-    checks["G5"] = {"id": "G5", "ok": None, "status": "not run",
+    checks["G5"] = {"id": "G5", "ok": None, "status": "not run", "required": True,
                     "violations": [], "info": {"todo": "lean4checker kernel replay (DESIGN.md §4.3 G5)"}}
 
     # --- per broken theorem, and the verdict.
-    still_stubbed = [b["name"] or b["key"] for b in bset
-                     if b["name"] and any(b["name"] == s for s in cand_sorry)]
+    still_stubbed = [b["name"] for b in bset if b["name"] and b["name"] in cand_sorry]
     theorems = []
     for bt in bset:
         n = bt["name"] or bt["key"]
         fails = sorted({x["check"] for c in checks.values() for x in c["violations"]
                         if x.get("decl") in (bt["name"], bt["key"]) or x.get("file") == bt["file"] and "decl" not in x})
         theorems.append({"name": n, "file": bt["file"], "failed_checks": fails,
-                         "repaired": not fails and n not in still_stubbed})
+                         "repaired": not fails and not unavailable and n not in still_stubbed})
     failed = [cid for cid, c in checks.items() if c["ok"] is False]
-    accepted = not failed and eligible and bool(bset) and not still_stubbed
-    return {"format": 1, "gate_version": version(), "verdict": "accepted" if accepted else "rejected",
-            "failed_checks": failed, "eligible": eligible, "theorems": theorems,
+    if unavailable:
+        verdict = "gate-unavailable"
+    elif failed or not eligible or not bset or still_stubbed:
+        verdict = "rejected"
+    elif not G5_IMPLEMENTED:
+        verdict = "passed-without-kernel-replay"
+    else:
+        verdict = "accepted"
+    return {"format": 2, "gate_version": version(), "verdict": verdict, "failed_checks": failed,
+            "unavailable": unavailable, "eligible": eligible, "theorems": theorems,
             "heartbeats": g0["info"]["heartbeats"], "checks": checks,
-            "acceptance": "complete-case (prototype, §4.3)"}
+            "acceptance": "complete-case (prototype, §4.3); G5 required"}

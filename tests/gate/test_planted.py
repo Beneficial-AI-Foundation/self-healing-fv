@@ -17,7 +17,10 @@ from pathlib import Path
 
 import pytest
 
+from .conftest import TOY_CONFIG
+
 FIXTURE = Path(__file__).parent / "fixture"
+PASSED = "passed-without-kernel-replay"  # the best verdict until G5 exists (review finding 2)
 REPO = Path(__file__).resolve().parents[2]
 SPECS = "Toy/Specs.lean"
 NEW_DOUBLE = "def double (x : Nat) : Nat := List.sum [x, x]"
@@ -33,10 +36,7 @@ def gate(*args: str) -> subprocess.CompletedProcess:
 def env(tmp_path_factory):
     root = tmp_path_factory.mktemp("gate")
     cfg = root / "toy.toml"
-    cfg.write_text(
-        'name = "toy"\n[lean]\nbuild_targets = ["Toy"]\nroot_modules = ["Toy"]\nsource_roots = ["Toy/"]\n'
-        'lean_num_threads = 4\n[protected]\nextracted = ["Toy/Funs.lean"]\ntrusted_models = []\n'
-        'build_config = ["lakefile.toml", "lean-toolchain", "lake-manifest.json"]\n')
+    cfg.write_text(TOY_CONFIG)
     base = root / "base"
     shutil.copytree(FIXTURE, base, ignore=shutil.ignore_patterns(".lake"))
     broken = root / "broken"
@@ -60,6 +60,7 @@ def run_candidate(env, name: str, edit) -> tuple[int, dict | None, dict]:
         shutil.rmtree(cand)
     shutil.copytree(env["broken"], cand, ignore=shutil.ignore_patterns(".lake"))
     for path, text in edit(lambda p: (env["broken"] / p).read_text()).items():
+        (cand / path).parent.mkdir(parents=True, exist_ok=True)
         (cand / path).write_text(text)
     d = root / f"{name}.patch"
     assert gate("diff", "--config", str(cfg), "--before", str(env["broken"]), "--after", str(cand),
@@ -93,19 +94,20 @@ def assert_rejected(verdict, *checks):
 
 # ------------------------------------------------------------------ positive control
 
-def test_valid_repair_is_accepted(env):
+def test_valid_repair_passes_every_check_but_is_not_accepted_without_kernel_replay(env):
     rc, v, scope = run_candidate(env, "valid", specs_edit(repaired))
     assert scope["ok"], scope["violations"]
-    assert rc == 0 and v["verdict"] == "accepted", v["failed_checks"]
+    assert v["verdict"] == PASSED and not v["failed_checks"] and not v["unavailable"], v
+    assert rc == 1  # not accepted: G5 is required (DESIGN.md §4.3)
     assert [t["name"] for t in v["theorems"]] == ["double_spec"] and v["theorems"][0]["repaired"]
-    assert v["checks"]["G5"]["status"] == "not run"
+    assert v["checks"]["G5"]["status"] == "not run" and v["checks"]["G5"]["required"]
 
 
-def test_valid_repair_with_used_helper_is_accepted(env):
+def test_valid_repair_with_used_helper_passes(env):
     helper = "theorem sum_two (x : Nat) : List.sum [x, x] = x + x := by simp\n\n"
     proof = "theorem double_spec (x : Nat) : double x = 2 * x := by\n  unfold double\n  rw [sum_two]\n  omega\n"
     rc, v, _ = run_candidate(env, "helper", specs_edit(lambda t: t.replace(STUB, helper + proof)))
-    assert v["verdict"] == "accepted", v["checks"]
+    assert v["verdict"] == PASSED, v["checks"]
     assert v["checks"]["G2"]["info"]["added"] == ["sum_two"]
 
 
@@ -163,6 +165,16 @@ def test_local_instance_changes_elaboration(env):
     statement_changed(v, "le_add")
 
 
+def test_local_notation_changes_elaboration(env):
+    # As above with a local notation: `x ≤ x + y` now means `x ≤ x + y + 0`, and the unchanged
+    # proof (`omega`) still builds, so only G1 can see that the promise changed.
+    notation = 'local notation:50 (priority := high) a:51 " ≤ " b:51 => LE.le a (b + 0)\n\n'
+    rc, v, _ = run_candidate(env, "notation", specs_edit(lambda t: repaired(t).replace(
+        "theorem le_add", notation + "theorem le_add")))
+    assert_rejected(v, "G0", "G1")
+    statement_changed(v, "le_add")
+
+
 # ------------------------------------------------------------------ trust base
 
 def test_new_axiom(env):
@@ -170,6 +182,23 @@ def test_new_axiom(env):
     rc, v, _ = run_candidate(env, "axiom", specs_edit(lambda t: t.replace(
         STUB, cheat + "theorem double_spec (x : Nat) : double x = 2 * x := cheat x\n")))
     assert_rejected(v, "G0", "G2")
+
+
+def test_new_axiom_through_a_used_helper(env):
+    helper = ("axiom cheat (x : Nat) : List.sum [x, x] = x + x\n\n"
+              "theorem sum_two (x : Nat) : List.sum [x, x] = x + x := cheat x\n\n")
+    proof = "theorem double_spec (x : Nat) : double x = 2 * x := by\n  unfold double\n  rw [sum_two]\n  omega\n"
+    rc, v, _ = run_candidate(env, "axiom-helper", specs_edit(lambda t: t.replace(STUB, helper + proof)))
+    assert_rejected(v, "G0", "G2")
+    assert any(x["decl"] == "double_spec" and "cheat" in x["msg"] for x in v["checks"]["G2"]["violations"])
+
+
+def test_unused_new_axiom(env):
+    rc, v, _ = run_candidate(env, "axiom-unused", specs_edit(lambda t: repaired(t).replace(
+        "theorem double_spec", "axiom spare : False\n\ntheorem double_spec", 1)))
+    assert_rejected(v, "G0", "G2")
+    msgs = {x["msg"] for x in v["checks"]["G2"]["violations"] if x["decl"] == "spare"}
+    assert "adds an axiom" in msgs and any("not used" in m for m in msgs)
 
 
 def sorry_rejected(v, rc):
@@ -247,7 +276,8 @@ def test_native_decide_where_base_did_not(env):
 # ------------------------------------------------------------------ protected files and scope
 
 @pytest.mark.parametrize("path,old,new", [
-    ("Toy/Funs.lean", NEW_DOUBLE, "def double (x : Nat) : Nat := 2 * x"),
+    ("Toy/Funs.lean", NEW_DOUBLE, "def double (x : Nat) : Nat := 2 * x"),                  # extracted code
+    ("Toy/FunsExternal.lean", "axiom ext_seed : Nat", "axiom ext_seed : Nat\naxiom extra : False"),  # trusted model
     ("lakefile.toml", 'name = "Toy"', 'name = "Toy"\n[leanOptions]\nautoImplicit = true'),
     ("lean-toolchain", "v4.28.0-rc1", "v4.28.0"),
 ])
@@ -257,6 +287,17 @@ def test_protected_file(env, path, old, new):
     rc, v, scope = run_candidate(env, "prot-" + path.replace("/", "_"), edit)
     assert not scope["ok"] and any("protected" in x["msg"] for x in scope["violations"])
     assert rc == 2 and v is None  # the gate refuses to build a diff that touches a protected file
+
+
+@pytest.mark.parametrize("path", ["targets/toy.toml", "gates/compare.py", "gates/StmtCanon.lean"])
+def test_target_config_and_gate_are_out_of_reach(env, path):
+    # The target config and the gate live outside the target tree; a diff that tries to create or
+    # change them there is outside the audited sources and is never applied or built.
+    def edit(read):
+        return {SPECS: repaired(read(SPECS)), path: "-- replaced by the candidate\n"}
+    rc, v, scope = run_candidate(env, "reach-" + path.replace("/", "_"), edit)
+    assert not scope["ok"] and any(path in x["msg"] for x in scope["violations"])
+    assert rc == 2 and v is None
 
 
 def test_proof_of_unbroken_theorem_changed(env):

@@ -125,12 +125,14 @@ class Run:
         self.git = Git(self.repo)
 
     def snapshot(self, name: str, tree: Path) -> Path:
+        """A gate snapshot of `tree`, reused only if it was made by this gate version, for this
+        target config, from exactly these inputs (toolchain, Lake files, every Lean source)."""
         out = self.case_dir / "snapshots" / f"{name}.json"
-        version = gate("version").stdout.strip()
+        want = json.loads(gate("tree-hash", "--config", str(self.config), "--tree", str(tree)).stdout)
         if out.exists():
             try:
                 head = json.loads(out.read_text())
-                if head.get("gate_version") == version and head.get("tree") == str(tree):
+                if all(head.get(k) == v for k, v in want.items()) and head.get("tree") == str(tree):
                     return out
             except json.JSONDecodeError:
                 pass
@@ -241,7 +243,9 @@ class Run:
              "--workdir", str(self.scratch / f"{label}-gate-tree"), "--clean", "--out", str(C),
              "--log", str(self.scratch / f"{label}.build.log"))
         V = self.scratch / f"{label}.V.json"
-        gate("compare", *common, "--candidate", str(C), "--out", str(V))
+        gate("compare", *common, "--candidate", str(C), "--out", str(V), check=False)  # 2 = gate-unavailable
+        if not V.exists():
+            raise GateUnavailable("gate compare produced no verdict")
         res["verdict"] = json.loads(V.read_text())
         res["verdict"]["built"] = True
         res["candidate_build_seconds"] = json.loads(C.read_text())["build"]["seconds"]
@@ -365,6 +369,7 @@ class Run:
             report["error"] = {"outcome": "gate-unavailable", "detail": str(e)}
         except Exception as e:  # noqa: BLE001  an infrastructure failure says nothing about the theorems
             report["error"] = {"outcome": "infrastructure-failure", "detail": f"{type(e).__name__}: {e}"}
+        self.close_open_outcomes(report)
         report["totals"] = self.totals(report, time.time() - t_start)
         report["verdict"] = overall(report)
         if not self.keep:
@@ -396,17 +401,34 @@ class Run:
         return out
 
     def finish_outcomes(self, report: dict, verdict: dict) -> None:
-        accepted = verdict.get("verdict") == "accepted"
+        """Map the gate's verdict onto the theorems the agent produced candidates for."""
+        v = verdict.get("verdict")
         failed = verdict.get("failed_checks", [])
         for e in report["repairs"]:
             if e.get("outcome") != "candidate":
                 continue
-            if accepted:
+            if v == "accepted":
                 e["outcome"] = "repaired"
+            elif v == "passed-without-kernel-replay":
+                e["outcome"] = "passed-checks"
+                e["reason"] = "every gate check that ran passed; not accepted until the kernel replay (G5) runs"
+            elif v == "gate-unavailable":
+                e["outcome"] = "gate-unavailable"
+                e["reason"] = "; ".join(verdict.get("unavailable", []))[:500] or "the gate could not decide"
             else:
                 e["outcome"] = "proof-hard"
                 e["reason"] = f"candidate rejected by the gate ({', '.join(failed)})" if failed else \
                     "case not accepted (complete-case acceptance)"
+
+    @staticmethod
+    def close_open_outcomes(report: dict) -> None:
+        """No theorem leaves a run without a final outcome (review finding 10): candidates the
+        gate never decided on are infrastructure failures or gate-unavailable."""
+        err = report.get("error", {})
+        for e in report["repairs"]:
+            if e.get("outcome") in (None, "candidate"):
+                e["outcome"] = err.get("outcome", "infrastructure-failure")
+                e["reason"] = err.get("detail", "the run ended before the gate decided")[:500]
 
     def compare_human(self, items: list[dict], report: dict) -> list[dict]:
         """The bot's repair next to the human fix, per broken theorem (§8.2, §8.5 memorization flag)."""
@@ -511,22 +533,28 @@ def summarize_gate(g: dict) -> dict:
     v = g["verdict"]
     checks = {}
     for cid, c in v.get("checks", {}).items():
-        checks[cid] = {"ok": c.get("ok"), "status": c.get("status"), "violations": c.get("violations", [])[:50],
+        checks[cid] = {"ok": c.get("ok"), "status": c.get("status"), "required": c.get("required"),
+                       "violations": c.get("violations", [])[:50],
                        "info": {k: x for k, x in c.get("info", {}).items() if k not in ("broken_set",)}}
     return {"verdict": v.get("verdict"), "failed_checks": v.get("failed_checks", []), "eligible": v.get("eligible"),
+            "unavailable": v.get("unavailable", []),
             "built": v.get("built"), "theorems": v.get("theorems", []), "heartbeats": v.get("heartbeats", []),
             "checks": checks, "diff": g["diff"], "gate_version": v.get("gate_version"),
             "candidate_build_seconds": g.get("candidate_build_seconds")}
 
 
 def overall(report: dict) -> str:
+    """accepted | passed-without-kernel-replay | escalated | failed (infrastructure or gate)."""
     if "error" in report:
         return "failed"
     outs = [e.get("outcome") for e in report["repairs"]] + [e["outcome"] for e in report["escalations"]]
-    if report.get("gate", {}).get("verdict") == "accepted" and all(o == "repaired" for o in outs):
-        return "accepted"
+    gv = report.get("gate", {}).get("verdict")
     if outs and all(o in ("infrastructure-failure", "gate-unavailable") for o in outs):
         return "failed"
+    if gv == "accepted" and all(o == "repaired" for o in outs):
+        return "accepted"
+    if gv == "passed-without-kernel-replay" and all(o == "passed-checks" for o in outs):
+        return "passed-without-kernel-replay"
     return "escalated"
 
 
