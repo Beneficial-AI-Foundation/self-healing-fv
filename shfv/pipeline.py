@@ -344,6 +344,9 @@ class Run:
             B = self.snapshot("B", self.base)
             K = self.snapshot("K", self.broken)
             self.timing["snapshots_s"] = time.time() - t0
+            t0 = time.time()
+            report["audit"] = self.audit(B)
+            self.timing["audit_s"] = time.time() - t0
             Kj, Bj = json.loads(K.read_text()), json.loads(B.read_text())
             report["toolchain"] = Kj["toolchain"]
             empty = self.scratch / "empty.patch"
@@ -430,6 +433,26 @@ class Run:
             shutil.rmtree(self.scratch / "candidate", ignore_errors=True)
             shutil.rmtree(self.scratch / "human-fix", ignore_errors=True)
         return report
+
+    def audit(self, B: Path) -> dict:
+        """What the triggering change itself did to the frozen declarations (§4.7, path A): the
+        base against the change's head (in replay, the change commit). Independent of repair."""
+        try:
+            H = self.snapshot("H", self.fixed)
+        except GateUnavailable as e:
+            return {"outcome": "incomplete", "error": str(e)[:500]}
+        out = self.case_dir / "snapshots" / "audit.json"
+        g = gate("audit", "--config", str(self.config), "--base", str(B), "--head", str(H), "--out", str(out), check=False)
+        if not out.exists():
+            return {"outcome": "incomplete", "error": (g.stderr or "gate audit produced no result")[-500:]}
+        a = json.loads(out.read_text())
+        s = a["summary"]
+        detail = (f"{s['statements_changed']} statement(s), {s['definitions_changed']} definition(s) changed, "
+                  f"{s['removed']} removed; {s['new_sorry']} newly depend on sorry; "
+                  f"{s['trusted_models_changed']} trusted model(s) changed") if a["outcome"] == "changed" else \
+            "; ".join(a.get("coverage_problems", [])[:2])
+        self.p.step(f"audit of the change itself: {a['outcome']}" + (f" · {detail}" if detail else ""))
+        return a
 
     def extraction_change(self, errors: list[str]) -> list[dict]:
         """Before/after signatures of the extracted functions named in elaboration errors."""

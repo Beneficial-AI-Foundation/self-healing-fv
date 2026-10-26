@@ -35,9 +35,11 @@ def link_latest(case_runs: Path, run_dir: Path) -> None:
     latest.symlink_to(run_dir.name)
 
 
-def render(report_json: Path, work: Path) -> Path:
+def render(report_json: Path, work: Path, audit_focus: str | None = None) -> Path:
     from .pipeline import refresh_comparison
     rep = json.loads(report_json.read_text())
+    if audit_focus:
+        rep["audit_focus"] = audit_focus
     refresh_comparison(rep, work / rep["case_id"].replace("/", "-"))
     # Content comes from the run; presentation from the code rendering it now. Record both.
     rep.setdefault("renders", []).append({"at": provenance.now().isoformat(timespec="seconds"),
@@ -117,8 +119,10 @@ def main(argv: list[str] | None = None) -> int:
                    help="also gate the human fix as a reference candidate (default: on for escalations)")
     r.add_argument("--keep", action="store_true", help="keep the candidate and gate workspaces")
     r.add_argument("--label", help="suffix for the run id, e.g. 'demo'")
+    r.add_argument("--audit-focus", help="show these declarations' audit before/after first (substring, e.g. clamped)")
     g = sub.add_parser("render", help="re-render report.md from a run's report.json")
     g.add_argument("report", type=Path)
+    g.add_argument("--audit-focus", help="show these declarations' audit before/after first (substring)")
     g.add_argument("--work", type=Path, default=Path(os.environ.get("SHFV_WORK", ROOT / "work")))
     e = sub.add_parser("export", help="copy runs' reports into docs/examples/reports with an index")
     e.add_argument("runs", type=Path, nargs="+", help="run directories (runs/<case>/<run id>)")
@@ -126,7 +130,7 @@ def main(argv: list[str] | None = None) -> int:
     e.add_argument("--allow-uncommitted", action="store_true")
     a = ap.parse_args(argv)
     if a.cmd == "render":
-        print(render(a.report, a.work))
+        print(render(a.report, a.work, a.audit_focus))
         return 0
     if a.cmd == "export":
         return export(a.runs, a.to, a.allow_uncommitted)
@@ -144,6 +148,8 @@ def main(argv: list[str] | None = None) -> int:
         run.p.step(f"note: uncommitted changes in the tool ({', '.join(tool['dirty_files'][:3])}…); "
                    "the report will say so")
     rep = run.execute()
+    if a.audit_focus:
+        rep["audit_focus"] = a.audit_focus
     j, m = report_mod.write(rep, run.out)
     link_latest(run.case_runs, run.out)
     t = rep["totals"]

@@ -181,6 +181,7 @@ def test_success_in_dependency_order(toy_case, monkeypatch):
     assert rep["gate"]["verdict"] == "accepted", rep["gate"]
     assert outcomes(rep) == {"double_spec": "repaired", "double_even": "repaired"}
     assert rep["verdict"] == "accepted"
+    assert rep["audit"]["outcome"] == "no-change", rep["audit"]  # only extracted code and proofs changed
     t = rep["totals"]
     assert t["cost_status"] == "computed" and abs(t["cost_usd"] - 2 * COST) < 1e-9
     assert t["resolved_models"] == ["fake-model-v1"]

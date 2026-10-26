@@ -141,6 +141,71 @@ def provenance_lines(r: dict) -> list[str]:
     return out
 
 
+AUDIT_SHOWN = 12  # before/after pairs shown in the comment; the rest are named, all are in report.json
+
+
+def audit_section(r: dict, focus: str | None = None) -> list[str]:
+    """§5.4 part 2: statement, definition and trust changes made by the triggering change itself."""
+    a = r.get("audit")
+    if not a:
+        return []
+    out = ["#### Changes made by the triggering change itself (audit)", ""]
+    if a["outcome"] == "no-change":
+        return out + ["✅ No frozen statement, definition or trust assumption changed (complete comparison).", ""]
+    if a["outcome"] == "incomplete" and not a.get("summary"):
+        return out + [f"⚪ The audit could not run: {a.get('error', 'unknown reason')}", ""]
+    s = a.get("summary", {})
+    if a["outcome"] == "incomplete":
+        out += [f"⚪ **Incomplete:** {a.get('not_compared_n', 0)} declaration(s) could not be compared "
+                f"({'; '.join(a.get('coverage_problems', [])[:2])}). No change was found among the rest, but this is "
+                "not a clean result.", ""]
+        return out
+    out.append(f"⚠️ **The change itself** changed {s['statements_changed']} theorem statement(s) and "
+               f"{s['definitions_changed']} definition(s), and removed or renamed {s['removed']} declaration(s). "
+               "The bot does not judge these; a spec owner should check that none weakens a promise.")
+    out.append("")
+    trust = []
+    new_sorry = [x["decl"] for x in a["axioms_changed"] if "sorryAx" in x["added"]]
+    standard = {"sorryAx", "propext", "Classical.choice", "Quot.sound"}  # sorry listed above; the rest are Lean's own
+    new_ax = [(x["decl"], [y for y in x["added"] if y not in standard]) for x in a["axioms_changed"]]
+    new_ax = [(d, ys) for d, ys in new_ax if ys]
+    if new_sorry:
+        trust.append(f"- **Newly depend on `sorry`** ({len(new_sorry)}): " + ", ".join(f"`{short_name(d)}`" for d in new_sorry[:20]))
+    if new_ax:
+        trust.append(f"- **New axioms in the closure** ({len(new_ax)}): " + "; ".join(
+            f"`{short_name(d)}` (+{', '.join(f'`{y}`' for y in ys)})" for d, ys in new_ax[:15]))
+    if a.get("trusted_models_changed"):
+        trust.append("- **Trusted models changed:** " + ", ".join(f"`{p}`" for p in a["trusted_models_changed"]))
+    if trust:
+        out += ["Trust changes:", ""] + trust + [""]
+    stmts = sorted(a["statements_changed"], key=lambda x: (not (focus and focus.lower() in x["decl"].lower()), x["decl"]))
+    if stmts:
+        out.append(f"<details><summary>Statements changed ({len(stmts)})"
+                   + (f", those matching “{focus}” first" if focus else "") + "</summary>")
+        out.append("")
+        for x in stmts[:AUDIT_SHOWN]:
+            out.append(f"**`{x['decl']}`**")
+            out.append("")
+            out.append(fence(f"before:\n{x['before']}\n\nafter:\n{x['after']}", limit=2500))
+            out.append("")
+        rest = stmts[AUDIT_SHOWN:]
+        if rest:
+            out.append(f"And {len(rest)} more: " + ", ".join(f"`{short_name(x['decl'])}`" for x in rest))
+            out.append("")
+        out.append("</details>")
+        out.append("")
+    if a.get("definitions_changed"):
+        out.append(f"Definitions changed ({len(a['definitions_changed'])}): "
+                   + ", ".join(f"`{short_name(x['decl'])}`" for x in a["definitions_changed"][:40]))
+        out.append("")
+    if a.get("removed"):
+        out.append(f"Removed or renamed ({len(a['removed'])}): "
+                   + ", ".join(f"`{short_name(x['decl'])}`" for x in a["removed"][:40])
+                   + (" …" if len(a["removed"]) > 40 else ""))
+        out.append("")
+    return out
+
+
 def render(r: dict) -> str:
     inp = r["inputs"]
     subject = re.sub(r"\s*\(#\d+\)\s*$", "", inp["change_subject"])
@@ -202,6 +267,8 @@ def render(r: dict) -> str:
     else:
         out.append(f"| **Cost** | $0.00: no agent was run · whole run {fmt_s(t.get('wall_seconds'))} |")
     out.append("")
+
+    out += audit_section(r, r.get("audit_focus"))
 
     # Escalations first: they are what the reader must act on.
     for e in escal:
