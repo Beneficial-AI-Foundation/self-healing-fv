@@ -140,17 +140,26 @@ def stmtcanon(tree: Path, cfg: dict, modules: list[str]) -> tuple[dict[str, dict
     return records, info
 
 
-def fresh_copy(src: Path, dest: Path) -> None:
-    """Sources of `src` plus its dependency packages (copy-on-write); no project build output."""
+def workspace_project(cfg: dict) -> str:
+    """Where the Lake project sits inside a workspace tree ("" when the tree is the project). A
+    workspace can hold siblings the project depends on by relative path (SymCrypt requires
+    `../../../aeneas/backends/lean`), so the gate copies and hashes the whole workspace."""
+    return cfg["lean"].get("workspace_project", "")
+
+
+def fresh_copy(src: Path, dest: Path, project: str = "") -> None:
+    """The whole workspace (copy-on-write, so dependency builds and sibling dependencies come
+    along), minus the project's own build output: the candidate is rebuilt from scratch (G3)."""
     if dest.exists():
         shutil.rmtree(dest)
-    shutil.copytree(src, dest, symlinks=True, ignore=shutil.ignore_patterns(".lake", ".git"))
-    pkgs = src / ".lake" / "packages"
-    if pkgs.is_dir():
-        (dest / ".lake").mkdir()
-        r = subprocess.run(["cp", "-c", "-R", str(pkgs), str(dest / ".lake" / "packages")], capture_output=True)
-        if r.returncode != 0:
-            shutil.copytree(pkgs, dest / ".lake" / "packages", symlinks=True)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    r = subprocess.run(["cp", "-c", "-R", str(src), str(dest)], capture_output=True)
+    if r.returncode != 0:
+        shutil.copytree(src, dest, symlinks=True, ignore=shutil.ignore_patterns(".git"))
+    shutil.rmtree(dest / project / ".lake" / "build", ignore_errors=True)
+    for g in dest.rglob(".git"):
+        if g.is_dir():
+            shutil.rmtree(g, ignore_errors=True)
 
 
 GATE_CONFIG_SECTIONS = ("name", "lean", "protected")
@@ -188,17 +197,17 @@ def snapshot(cfg: dict, tree: Path, *, clean: bool = False, apply_diff: Path | N
         diff = apply_diff.read_text()
         result["applied_diff_sha256"] = hashlib.sha256(diff.encode()).hexdigest()
         result["source_tree"] = str(tree)
-        fresh_copy(tree, workdir)
+        fresh_copy(tree, workdir, workspace_project(cfg))
         touched = {}
         for f in patch.parse(diff):
             for p in (f["old"], f["new"]):
-                if p and (workdir / p).is_file():
-                    touched[p] = (workdir / p).read_text()
+                if p and (workdir / workspace_project(cfg) / p).is_file():
+                    touched[p] = (workdir / workspace_project(cfg) / p).read_text()
         changed_paths = []
         for path, text in patch.apply(touched, diff).items():
             if text is not None:
                 changed_paths.append(path)
-            target = workdir / path
+            target = workdir / workspace_project(cfg) / path
             if text is None:
                 target.unlink(missing_ok=True)
             else:
@@ -206,6 +215,8 @@ def snapshot(cfg: dict, tree: Path, *, clean: bool = False, apply_diff: Path | N
                 target.write_text(text)
         tree = workdir
     result["tree"] = str(tree)
+    result["workspace_project"] = workspace_project(cfg)
+    tree = tree / workspace_project(cfg)  # from here on, `tree` is the Lake project
     if clean and (tree / ".lake" / "build").exists():
         raise RuntimeError(f"{tree}: --clean, but the project build output .lake/build exists")
     tc = tree / "lean-toolchain"

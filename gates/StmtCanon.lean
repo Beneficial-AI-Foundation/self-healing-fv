@@ -89,9 +89,11 @@ def kindOf : ConstantInfo → String
   | .ctorInfo _   => "constructor"
   | .recInfo _    => "recursor"
 
-/-- `pre` followed by one or more digits, e.g. `proof_12`. -/
+/-- `pre` followed by digits, optionally in several groups: `match_1`, `match_1_1`. -/
 def isNumbered (s pre : String) : Bool :=
-  s.startsWith pre && s.length > pre.length && ((s.drop pre.length).all Char.isDigit)
+  s.startsWith pre && s.length > pre.length &&
+    ((s.drop pre.length).all fun ch => ch.isDigit || ch == '_') &&
+    ((s.drop pre.length).take 1).all Char.isDigit
 
 /-- Auxiliary constants whose existence/statement legitimately changes when
     only a PROOF changes: `foo.proof_1`, `foo.match_1`, `foo.eq_1`,
@@ -101,14 +103,26 @@ def isNumbered (s pre : String) : Bool :=
     are part of the supplied file.
     Changed from upstream: patterns are exact (upstream's `startsWith "eq_"`,
     `"inj"`, `"sizeOf"` also matched user names such as `eq_of_lt` or
-    `injective`, which then silently dropped out of the frozen set). -/
-def isAuxiliary (n : Name) : Bool :=
+    `injective`, which then silently dropped out of the frozen set). Lean's
+    own `isInternalDetail` is not used for the same reason: it treats any
+    component starting with `_` as internal, which drops user theorems about
+    Rust identifiers such as `__m128i` or `_mm_xor_si128` (SymCrypt). A
+    component starting with `_` (Lean's `_unary`, `_proof_1`, `_cstage1`, ...)
+    therefore marks a constant as auxiliary only if it has no declaration
+    range: Lean records source ranges for declarations written in source, not
+    for the auxiliaries it generates. Without an environment (`userRoot`),
+    the name alone decides. -/
+def isAuxiliary (n : Name) (env? : Option Environment := none) : Bool :=
   let user := (privateToUserName? n).getD n
-  user.isInternalDetail || user.isInaccessibleUserName ||
+  let written := match env? with
+    | some env => (declRangeExt.find? env n).isSome
+    | none => false
+  user.isInaccessibleUserName ||
   user.components.any fun c =>
-    let s := c.toString
+    let s := c.toString (escape := false)  -- `«_aux_…»` must compare as `_aux_…`
+    c.isNum ||
     isNumbered s "proof_" || isNumbered s "match_" || isNumbered s "eq_" ||
-    s.startsWith "_" ||
+    (s.startsWith "_" && (!written || s.startsWith "_aux")) ||  -- `_aux…`: notation/macro helpers
     ["eq_def", "eq_unfold", "below", "brecOn", "binductionOn", "noConfusion",
      "noConfusionType", "casesOn", "recOn", "rec", "ibelow", "sizeOf_spec", "inj",
      "injEq", "ctorIdx", "congr_simp", "induct", "mutual_induct", "induct_unfolding",
@@ -127,7 +141,7 @@ def moduleDecls (env : Environment) (mod : Name) : Array Name :=
   match env.getModuleIdx? mod with
   | none => #[]
   | some idx =>
-    (env.header.moduleData[idx.toNat]!.constNames.filter fun n => !isAuxiliary n)
+    (env.header.moduleData[idx.toNat]!.constNames.filter fun n => !isAuxiliary n env)
 
 /-! ### Closure facts, memoized over the whole constant graph -/
 

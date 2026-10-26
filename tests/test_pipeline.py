@@ -162,7 +162,7 @@ def run_case(toy_case, monkeypatch, script, label, per_run_usd=10.0, model="fake
              expect_error=False):
     cfg = toy_case["root"] / f"toy-{label}.toml"
     cfg.write_text(CONFIG.format(per_run_usd=per_run_usd))
-    monkeypatch.setattr(pipeline, "load_case", lambda cid: (toy_case["record"], toy_case["replay"]))
+    monkeypatch.setattr(pipeline, "load_case", lambda cid, path=None: (toy_case["record"], toy_case["replay"]))
     agent = FakeAgent(script, model=model, partial=partial)
     run = Run(toy_case["case_id"], cfg, agent, toy_case["repo"], toy_case["work"], toy_case["root"] / "runs",
               gate_human_fix=False, label=label)

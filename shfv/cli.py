@@ -150,6 +150,7 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--gate-human-fix", action=argparse.BooleanOptionalAction, default=None,
                    help="also gate the human fix as a reference candidate (default: on for escalations)")
     r.add_argument("--keep", action="store_true", help="keep the candidate and gate workspaces")
+    r.add_argument("--replay-record", type=Path, help="replay record to use instead of data/replay/<repo>/<case>.json")
     r.add_argument("--label", help="suffix for the run id, e.g. 'demo'")
     r.add_argument("--audit-focus", help="show these declarations' audit before/after first (substring, e.g. clamped)")
     g = sub.add_parser("render", help="re-render report.md from a run's report.json")
@@ -183,7 +184,7 @@ def main(argv: list[str] | None = None) -> int:
     agent = ADAPTERS[adapter](model=model, lean_threads=cfg["lean"].get("lean_num_threads", 8))
     check_capabilities(agent, cfg["agent"].get("tool_profile", "lsp"))
     run = Run(a.case, config, agent, clone, a.work, a.runs, attempt_anyway=a.attempt_anyway,
-              gate_human_fix=a.gate_human_fix, keep=a.keep, label=a.label)
+              gate_human_fix=a.gate_human_fix, keep=a.keep, label=a.label, replay_path=a.replay_record)
     if (tool := provenance.tool_code()).get("dirty"):
         run.p.step(f"note: uncommitted changes in the tool ({', '.join(tool['dirty_files'][:3])}…); "
                    "the report will say so")

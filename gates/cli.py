@@ -96,7 +96,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     cfg = load_config(a.config)
     if a.cmd == "tree-hash":
-        print(json.dumps({"inputs_sha256": snapshot.inputs_hash(cfg, a.tree.resolve()),
+        print(json.dumps({"inputs_sha256": snapshot.inputs_hash(cfg, a.tree.resolve() / snapshot.workspace_project(cfg)),
                           "config_sha256": snapshot.config_hash(cfg), "gate_version": version()}))
         return 0
     try:
@@ -119,7 +119,8 @@ def main(argv: list[str] | None = None) -> int:
             write_json(res, a.out)
             return {"no-change": 0, "changed": 1}.get(res["outcome"], 2)
         if a.cmd == "diff":
-            text = patch.make_diff(tree_texts(a.before), tree_texts(a.after))
+            wp = snapshot.workspace_project(cfg)  # diffs are project-relative, like G0's paths
+            text = patch.make_diff(tree_texts(a.before / wp), tree_texts(a.after / wp))
             a.out.parent.mkdir(parents=True, exist_ok=True)
             a.out.write_text(text)
             return 0

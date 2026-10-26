@@ -66,7 +66,12 @@ def short_name(n: str) -> str:
 
 
 def link(r: dict, file: str, line: int | None, label: str) -> str:
-    url = f"https://github.com/{r['inputs']['repo']}/blob/{r['inputs']['change_commit']}/{file}"
+    inp = r["inputs"]
+    commit = inp.get("change_commit") or inp.get("base_commit")
+    if not commit:
+        return f"`{label}`"
+    root = inp.get("repo_lean_root") or ""
+    url = f"https://github.com/{inp['repo']}/blob/{commit}/{root + '/' if root else ''}{file}"
     return f"[`{label}`]({url}#L{line})" if line else f"[`{label}`]({url})"
 
 
@@ -210,7 +215,8 @@ def render(r: dict) -> str:
     inp = r["inputs"]
     subject = re.sub(r"\s*\(#\d+\)\s*$", "", inp["change_subject"])
     pr = f"[#{inp['change_pr']} \"{subject}\"]({inp['change_pr_url']})" if inp.get("change_pr_url") \
-        else f"`{inp['change_commit'][:8]}` \"{subject}\""
+        else (f"`{inp['change_commit'][:8]}` \"{subject}\"" if inp.get("change_commit")
+              else f"the generated change \"{subject}\" (held-out case, no commit history)")
     repairs, escal = r.get("repairs", []), r.get("escalations", [])
     repaired = [e for e in repairs if e.get("outcome") in ("repaired", "passed-checks")]
     n_proofs = len(r.get("broken", {}).get("proofs", []))

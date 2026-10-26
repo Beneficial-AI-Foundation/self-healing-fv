@@ -58,15 +58,31 @@ def gate(*args: str, check: bool = True) -> proc.Result:
     return p
 
 
-def load_case(case_id: str) -> tuple[dict, dict]:
+def generated_record(case_id: str, replay: dict) -> dict:
+    """A case record for a generated held-out case (SCI-1714: e.g. SymCrypt with an upgraded Aeneas),
+    which has a replay record but no commit history: no change commit, no human fix."""
+    base, new = replay.get("base_pins") or {}, replay.get("upgraded_pins") or {}
+    pins = {k: [base.get(k), new[k]] for k in new if base.get(k) != new[k]}
+    causes = ["aeneas"] + (["lean-mathlib"] if "lean" in pins else [])
+    short = lambda v: (v or "?").split(":")[-1][:8]
+    subject = "upgrade " + ", ".join(f"{k} {short(a)} → {short(b)}" for k, (a, b) in pins.items()) + " (generated)"
+    return {"case_id": case_id, "generated": True, "base_commit": replay.get("base_commit"), "change_commit": None,
+            "change_pr": None, "change_pr_url": None, "change_subject": subject, "cause": "aeneas",
+            "causes": causes, "pin_changes": pins, "fix": {}, "proofs_in_change_commit": {}}
+
+
+def load_case(case_id: str, replay_path: Path | None = None) -> tuple[dict, dict]:
     repo_name, sha8 = case_id.split("/")
+    rp = replay_path or ROOT / "data" / "replay" / repo_name / f"{sha8}.json"
+    if rp.exists() and json.loads(rp.read_text()).get("generated"):
+        replay = json.loads(rp.read_text())
+        return generated_record(case_id, replay), replay
     record = None
     for src in (ROOT / "data" / "raw" / f"{repo_name}.jsonl", ROOT / "data" / "mined" / f"{repo_name}.jsonl"):
         if src.exists():
             record = next((json.loads(l) for l in open(src) if json.loads(l)["case_id"] == case_id), None)
             if record:
                 break
-    rp = ROOT / "data" / "replay" / repo_name / f"{sha8}.json"
     if record is None or not rp.exists():
         raise SystemExit(f"{case_id}: no case record or replay record (see data/README.md)")
     return record, json.loads(rp.read_text())
@@ -116,14 +132,18 @@ def leaves_first(broken: list[dict], base_records: dict) -> list[dict]:
 class Run:
     def __init__(self, case_id: str, config: Path, agent: AgentAdapter, repo: Path, work: Path, runs: Path,
                  attempt_anyway: bool = False, gate_human_fix: bool | None = None, keep: bool = False,
-                 label: str | None = None):
+                 label: str | None = None, replay_path: Path | None = None):
         self.case_id, self.agent, self.repo = case_id, agent, repo.expanduser()
         with open(config, "rb") as f:
             self.cfg = tomllib.load(f)
         self.config = config.resolve()
         self.work, self.attempt_anyway, self.keep = work.resolve(), attempt_anyway, keep
         self.gate_human_fix = gate_human_fix
-        self.record, self.replay = load_case(case_id)
+        self.record, self.replay = load_case(case_id, replay_path)
+        self.generated = bool(self.record.get("generated"))
+        # The Lake project inside a workspace tree, and inside the repo (records use repo paths).
+        self.wp = self.cfg["lean"].get("workspace_project", "")
+        self.replay = repo_to_project(self.replay, self.cfg["lean"].get("repo_lean_root", ""))
         self.case_dir = self.work / case_id.replace("/", "-")
         # One directory per run, never reused: runs/<case>/<run id>/, plus runs/<case>/latest.
         self.started = provenance.now()
@@ -139,6 +159,16 @@ class Run:
     # ------------------------------------------------------------------ S1/S2
     def prepare(self) -> None:
         r = self.record
+        if self.generated:
+            # Generated cases: workspaces come from the data tooling (SCI-1714), never rebuilt here.
+            base = self.work / self.cfg["replay"]["generated_base"]
+            broken = self.case_dir / "broken"
+            for t in (base, broken):
+                if not (t / self.wp / ".lake" / "build").exists():
+                    raise RuntimeError(f"{t}: generated-case workspace missing or not built (see SCI-1714)")
+            self.base_root, self.broken_root, self.fixed_root = base, broken, None
+            self.base, self.broken, self.fixed = base / self.wp, broken / self.wp, None
+            return
         trees = [self.case_dir / s for s in ("base", "broken", "fixed")]
         ok = all((t / ".lake" / "build").exists() for t in trees)
         if ok:  # the stubbed broken state must match the replay ground truth
@@ -149,8 +179,8 @@ class Run:
         if not ok:
             self.p.step("replay workspaces missing or stale: rebuilding with replay/replay_case.py")
             replay_case.replay(r, self.repo, self.work, skip_base=False)
-        self.base, self.broken, self.fixed = trees
-        self.git = Git(self.repo)
+        self.base_root, self.broken_root, self.fixed_root = trees
+        self.base, self.broken, self.fixed = (t / self.wp for t in trees)
 
     def snapshot(self, name: str, tree: Path) -> Path:
         """A gate snapshot of `tree`, reused only if it was made by this gate version, for this
@@ -175,14 +205,14 @@ class Run:
         transaction on the candidate tree: kept if the agent finished and the file builds, otherwise
         rolled back completely (review finding 6), with its diff kept as an unaccepted suggestion.
         A theorem whose broken dependency was not repaired is not attempted (`blocked-on`)."""
-        cand = self.scratch / "candidate"
-        cand.parent.mkdir(parents=True, exist_ok=True)
-        replay_case.clone_lake_dir(self.broken, cand)  # copy-on-write, includes .lake
+        cand_root = self.scratch / "candidate"
+        cand_root.parent.mkdir(parents=True, exist_ok=True)
+        replay_case.clone_lake_dir(self.broken_root, cand_root)  # copy-on-write, includes .lake and siblings
+        cand = cand_root / self.wp  # the Lake project, where files are edited and built
         ctx = self.scratch / "context"
         ctx.mkdir(exist_ok=True)
         extracted = self.cfg["protected"]["extracted"]
-        (ctx / "extraction.diff").write_text(self.git.run("diff", self.record["base_commit"],
-                                                          self.record["change_commit"], "--", *extracted))
+        (ctx / "extraction.diff").write_text(extraction_diff(self.base, self.broken, extracted))
         bud = self.cfg["budget"]
         prices = self.cfg.get("prices", {}).get(self.agent.model)
         spent_usd = 0.0
@@ -304,7 +334,7 @@ class Run:
                                    f"{len(entry['attempts'])} attempt(s)"))
             if b.get("stubbed", True):
                 self._restub(cand, b)
-        return cand
+        return cand_root
 
     def build_module(self, cand: Path, b: dict) -> tuple[bool, str]:
         """Build the theorem's module in the candidate: (ok, its error messages for that file)."""
@@ -372,7 +402,8 @@ class Run:
             return []
         d = self.scratch / "pregate.patch"
         out = self.scratch / "pregate.scope.json"
-        gate("diff", "--config", str(self.config), "--before", str(self.broken), "--after", str(cand), "--out", str(d))
+        gate("diff", "--config", str(self.config), "--before", str(self.broken_root),
+             "--after", str(cand.parents[len(Path(self.wp).parts) - 1] if self.wp else cand), "--out", str(d))
         B, K = self.snapshot_paths
         gate("scope", "--config", str(self.config), "--base", str(B), "--broken", str(K), "--diff", str(d),
              "--out", str(out), check=False)
@@ -418,7 +449,7 @@ class Run:
         anything is built (§3.4). `past_scope` builds anyway, for reference candidates (the human fix)
         whose G1/G2 findings are evidence; the gate still refuses protected paths."""
         d = self.scratch / f"{label}.patch"
-        gate("diff", "--config", str(self.config), "--before", str(self.broken), "--after", str(after), "--out", str(d))
+        gate("diff", "--config", str(self.config), "--before", str(self.broken_root), "--after", str(after), "--out", str(d))
         common = ["--config", str(self.config), "--base", str(B), "--broken", str(K), "--diff", str(d)]
         sc = self.scratch / f"{label}.scope.json"
         gate("scope", *common, "--out", str(sc))
@@ -429,7 +460,7 @@ class Run:
                               "theorems": [], "built": False, "eligible": None}
             return res
         C = self.scratch / f"{label}.C.json"
-        gate("snapshot", "--config", str(self.config), "--tree", str(self.broken), "--apply", str(d),
+        gate("snapshot", "--config", str(self.config), "--tree", str(self.broken_root), "--apply", str(d),
              "--workdir", str(self.scratch / f"{label}-gate-tree"), "--clean", "--out", str(C),
              "--log", str(self.scratch / f"{label}.build.log"))
         V = self.scratch / f"{label}.V.json"
@@ -449,14 +480,14 @@ class Run:
         t = self.scratch / "human-fix"
         if t.exists():
             shutil.rmtree(t)
-        shutil.copytree(self.broken, t, symlinks=True, ignore=shutil.ignore_patterns(".lake", ".git"))
+        shutil.copytree(self.broken_root, t, symlinks=True, ignore=shutil.ignore_patterns(".lake", ".git"))
         K = json.loads((self.case_dir / "snapshots" / "K.json").read_text())
         for f in K["sources"]:
             src = self.fixed / f
             if src.exists():
-                (t / f).write_text(src.read_text())
+                (t / self.wp / f).write_text(src.read_text())
             else:
-                (t / f).unlink(missing_ok=True)
+                (t / self.wp / f).unlink(missing_ok=True)
         return t
 
     # ------------------------------------------------------------------ main
@@ -473,7 +504,9 @@ class Run:
                         "started_at": self.started.isoformat(timespec="seconds"),
                         "provenance": provenance.collect(self.agent.model, self.agent.name, gate_version, self.config,
                                                           harness=self.agent.version()),
-                        "inputs": {"repo": self.cfg["github"], "base_commit": r["base_commit"],
+                        "inputs": {"repo": self.cfg["github"], "base_commit": r.get("base_commit"),
+                                   "generated": self.generated,
+                                   "repo_lean_root": self.cfg["lean"].get("repo_lean_root", ""),
                                    "change_commit": r["change_commit"], "change_pr": r.get("change_pr"),
                                    "change_pr_url": r.get("change_pr_url"), "change_subject": r["change_subject"],
                                    "cause": r["cause"], "causes": r.get("causes"), "pin_changes": pins,
@@ -488,12 +521,13 @@ class Run:
             self.prepare()
             self.timing["prepare_s"] = time.time() - t0
             t0 = time.time()
-            B = self.snapshot("B", self.base)
-            K = self.snapshot("K", self.broken)
+            B = self.snapshot("B", self.base_root)
+            K = self.snapshot("K", self.broken_root)
             self.snapshot_paths = (B, K)
             self.timing["snapshots_s"] = time.time() - t0
             t0 = time.time()
-            report["audit"] = self.audit(B)
+            report["audit"] = self.audit(B) if self.fixed_root else \
+                {"outcome": "not-applicable", "error": "generated case: no human change to audit"}
             self.timing["audit_s"] = time.time() - t0
             Kj, Bj = json.loads(K.read_text()), json.loads(B.read_text())
             report["toolchain"] = Kj["toolchain"]
@@ -565,10 +599,10 @@ class Run:
                 g = self.run_gate("candidate", B, K, cand)
                 self.timing["gate_s"] = time.time() - t0
                 report["gate"] = summarize_gate(g)
-                report["delivery_diff"] = self.delivery_diff(cand, targets)
+                report["delivery_diff"] = self.delivery_diff(cand / self.wp, targets)
                 self.p.gate_line(report["gate"])
                 self.finish_outcomes(report, g["verdict"])
-            human = self.gate_human_fix if self.gate_human_fix is not None else bool(stmt_broken)
+            human = (self.gate_human_fix if self.gate_human_fix is not None else bool(stmt_broken)) and bool(self.fixed)
             if human:
                 t0 = time.time()
                 self.p.step("gate the human fix as a reference candidate (replay only)")
@@ -581,7 +615,7 @@ class Run:
                                                 "failed_checks": [], "checks": {}}
                     self.p.result(f"the gate could not check the human fix: {str(e)[:200]}")
                 self.timing["human_fix_gate_s"] = time.time() - t0
-            report["human_fix"] = self.compare_human(broken + stmt_broken, report)
+            report["human_fix"] = self.compare_human(broken + stmt_broken, report) if self.fixed else []
         except GateUnavailable as e:
             report["error"] = {"outcome": "gate-unavailable", "detail": str(e)}
         except KeyboardInterrupt:  # keep the partial run record (review finding 9)
@@ -600,7 +634,7 @@ class Run:
         """What the triggering change itself did to the frozen declarations (§4.7, path A): the
         base against the change's head (in replay, the change commit). Independent of repair."""
         try:
-            H = self.snapshot("H", self.fixed)
+            H = self.snapshot("H", self.fixed_root)
         except GateUnavailable as e:
             return {"outcome": "incomplete", "error": str(e)[:500]}
         out = self.case_dir / "snapshots" / "audit.json"
@@ -626,9 +660,9 @@ class Run:
         out = []
         for n in names:
             sig = {}
-            for side, rev in (("before", self.record["base_commit"]), ("after", self.record["change_commit"])):
+            for side, tree in (("before", self.base), ("after", self.broken)):
                 for f in self.cfg["protected"]["extracted"]:
-                    text = self.git.show(rev, f) or ""
+                    text = (tree / f).read_text() if (tree / f).is_file() else ""
                     m = re.search(rf"^(?:@\[[^\]]*\]\s*)*(?:(?:noncomputable|partial|private|protected)\s+)*def\s+"
                                   rf"(\S*?\.?{re.escape(n)})\s(.*?):=", text, re.M | re.S)
                     if m:
@@ -691,7 +725,7 @@ class Run:
                 entry["statement_after"] = stmt_changes[b["key"]]["after"]
             if human and base:
                 entry["human_diff"] = unified(base["proof"], human["proof"], b["file"])
-            cand = self.scratch / "candidate" / b["file"]
+            cand = self.scratch / "candidate" / self.wp / b["file"]
             mine = decl_text(cand.read_text(), b["key"]) if cand.exists() and bot.get(b["key"], {}).get("attempts") else None
             if mine and base and mine["proof"].strip() != STUB:
                 entry["bot_proof_lines"] = len(mine["proof"].splitlines())
@@ -722,6 +756,29 @@ class Run:
 
 
 SKIP_DIRS = {".lake", ".git", "lake-packages"}
+
+
+def repo_to_project(replay: dict, lean_root: str) -> dict:
+    """Replay records name files relative to the repo; the gate and the pipeline work relative to
+    the Lake project. Strip the project's path inside the repo (e.g. SymCRust/lean/)."""
+    if not lean_root:
+        return replay
+    pre = lean_root.rstrip("/") + "/"
+    fix = lambda p: p[len(pre):] if isinstance(p, str) and p.startswith(pre) else p
+    out = dict(replay)
+    for k in ("broken_proofs", "statement_broken", "definition_broken"):
+        out[k] = [fix(x) for x in replay.get(k, [])]
+    for k in ("broken_proofs_detail", "statement_errors"):
+        out[k] = [{**d, "file": fix(d.get("file"))} for d in replay.get(k, [])]
+    return out
+
+
+def extraction_diff(base: Path, broken: Path, extracted: list[str]) -> str:
+    """How the extracted code changed: the base tree against the broken tree (which carries the
+    change's extraction). Works without history, for generated cases too."""
+    files = [f for f in extracted if not f.endswith("/")]
+    read = lambda t: {f: (t / f).read_text() for f in files if (t / f).is_file()}
+    return patch.make_diff(read(base), read(broken))
 SWEEPABLE = {"no-goals", "heartbeats", "unsolved-goals"}
 SWEEP_BUILDS = 3
 SWEEP_HEARTBEATS = 1000000  # 5x Lean's default; raising it is allowed (G0) and shown in the report
