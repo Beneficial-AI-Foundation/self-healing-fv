@@ -26,7 +26,7 @@ gh run download <run id> -R Beneficial-AI-Foundation/self-healing-fv     # fetch
 | `model` | the target config's | e.g. `claude-sonnet-5-5` |
 | `per_run_usd` | `3` | Per-run cost cap (`--per-run-usd`), API-equivalent from token counts. Until the metering proxy exists (§9.5), it is Claude Code's own enforcement plus the pipeline's accounting, not a hard limit. |
 | `per_run_minutes` | `300` | Per-run deadline (`--per-run-minutes`), from the start of preparation |
-| `runner` | `ubuntu-latest` | Runner label, e.g. a larger runner if the standard one runs out of memory |
+| `runner` | `ubuntu-latest` | Runner label. A dalek replay needs the larger runner `self-healing-fv` (8 cores, 32 GB, 300 GB SSD; see Pilot results) |
 
 The agent needs the repository secret `ANTHROPIC_API_KEY`. The dispatch fails at once if `agent` is on and the secret is missing. Set it without printing it, for example from the macOS Keychain:
 
@@ -57,6 +57,7 @@ DESIGN.md first planned the pilot on a fork of the target repo. It runs here ins
 | Run | Case | Runner | Outcome | Wall time | Peak memory | Peak disk | Cost |
 |---|---|---|---|---|---|---|---|
 | [2026-10-27](https://github.com/Beneficial-AI-Foundation/self-healing-fv/actions/runs/40471516417) | `dalek-lean-verify/e65b46d0`, no agent | `ubuntu-latest`, private repo: 2 cores, 7.7 GB + 3 GB swap, 72 GB disk (43 GB free after cleanup) | failed: the replay could not rebuild the case | 1h57m (setup 2.6 min, building base and fixed 1h45m) | 5.0 GB + 2.4 GB swap, no OOM kill | 55.5 GB, 16 GB free | $0 |
+| [2026-10-27](https://github.com/Beneficial-AI-Foundation/self-healing-fv/actions/runs/40497476458) | `dalek-lean-verify/e65b46d0`, no agent | `self-healing-fv`, larger runner: 8 cores, 31 GB, 300 GB SSD | **accepted**: the sweep repaired the 1 broken proof, the gate passed every check | 56 min (setup 3 min, replay 30.5 min, gate 15.7 min) | 11.3 GB, no swap | 78.5 GB, 211 GB free | $0 model; about $1.25 of runner time |
 
 **Run 1: the standard private-repo runner does not fit a dalek replay.**
 - **Time.** Building the base and fixed states (in parallel, 2 cores) took 1h45m, with many dalek files at 5–10 minutes each (`Scalar52.ToBytes` 592 s). In the base state `Scalar52/MontgomeryReduce.lean` ran past the replay's 15-minute per-file limit (`FILE_TIMEOUT_S`) and was killed, so the base "did not build" and the replay stopped before the broken state. The sweep and the gate never ran.
@@ -64,3 +65,9 @@ DESIGN.md first planned the pilot on a fork of the target repo. It runs here ins
 - **Disk.** 16 GB free after two of the three states. The broken state, the candidate and the gate's copy need about 20 GB more, so disk would have run out next.
 - **Mathlib.** Downloading and unpacking the cache took 45–97 s per state; setup otherwise was quick.
 - Next: an 8-core larger runner (32 GB, 300 GB SSD) for the pilot; caching and lighter replays on small runners are V1 (§9.4).
+
+**Run 1 again, on the 8-core larger runner: accepted in 56 minutes.**
+- **Time.** Rebuilding the case (base, fixed and broken states) took 30.5 min, the sweep 28 s, and the gate 15.7 min, of which the clean rebuild (G3) was 13m11s; the statement, trust-base and kernel checks (G1, G2, G5) shared the other 2.5 min. Setup took 3 min, mostly the disk cleanup, which this runner does not need.
+- **Memory.** Peak 11.3 GB of 31 GB, no swap; Lean processes peaked at 14 GB PSS with up to 18 at once. Half the runner's memory would do for this case, but a 4-core runner would roughly double the build times.
+- **Disk.** Peak 78.5 GB used, 211 GB free.
+- **Cost.** Larger runners are billed per minute ($0.022 a minute for 8 cores), so about $1.25 for the run; the sweep made no model call.
