@@ -264,7 +264,7 @@ The audit is also a gate command: `gate audit --config T.toml --base B.json --he
 
 ## 7. Configuration and budgets
 
-A target repo is described by `targets/<repo>.toml`: `dalek-lean-verify` and `symcrypt` so far.
+A target repo is described by `targets/<repo>.toml`: `dalek-lean-verify`, `spqr` and `symcrypt` so far. `shfv doctor --config targets/<repo>.toml --repo PATH` checks the setup for one of them.
 
 - `[lean]`: the build targets, the root modules (every project module they import is audited), and `lean_num_threads`, which defaults to 8 so the machine stays usable.
 - `[protected]`: files the bot may never touch.
@@ -286,7 +286,7 @@ A target repo is described by `targets/<repo>.toml`: `dalek-lean-verify` and `sy
 
 ## 9. Limits of this prototype
 
-- **Replays only.** Target configs exist for curve25519-dalek-lean-verify and SymCrypt, on the toolchains of the replayed cases.
+- **Replays only.** Target configs exist for curve25519-dalek-lean-verify, SparsePostQuantumRatchet-verify (SPQR) and SymCrypt, on the toolchains of the replayed cases.
 - **Kernel replay stops at native code.** Modules with `native_decide` or `bv_decide` proofs are only partly re-checked by G5, and such acceptances are flagged (section 4). A complete re-check is V1 (DESIGN.md §11, question 21). Live CI is V1 (DESIGN.md §9); the prototype replays one case at a time on Actions ([ACTIONS.md](ACTIONS.md)).
 - **Claude Code only.** The adapter interface is ready for others (Codex is next), but only one adapter exists (DESIGN.md §7).
 - **Complete-case acceptance.** A change is accepted only if every broken theorem is repaired (DESIGN.md §4.3).

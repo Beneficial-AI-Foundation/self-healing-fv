@@ -52,3 +52,18 @@ def test_export_keeps_runs_side_by_side_and_refuses_uncommitted(tmp_path):
     dirty = make_run(tmp_path, "20261031T080000Z-m", True, "2026-10-31T08:00:00+00:00")
     assert cli.export([dirty], to, allow_uncommitted=False) == 1
     assert not (to / "demo-00000000" / "20261031T080000Z-m.md").exists()
+
+
+def test_export_keeps_hand_written_notes(tmp_path):
+    to = tmp_path / "examples"
+    run = make_run(tmp_path, "20261023T080000Z-m", False, "2026-10-23T08:00:00+00:00")
+    assert cli.export([run], to, allow_uncommitted=False) == 0
+    index = to / "README.md"
+    index.write_text(index.read_text() + "\n## Notes\n\nA note about the cases.\n")
+    later = make_run(tmp_path, "20261030T080000Z-m", False, "2026-10-30T08:00:00+00:00")
+    assert cli.export([later], to, allow_uncommitted=False) == 0
+    text = index.read_text()
+    assert cli.export([later], to, allow_uncommitted=False) == 0
+    assert index.read_text() == text  # re-export is a no-op, blank lines included
+    assert text.count("## Notes") == 1 and text.rstrip().endswith("A note about the cases.")
+    assert text.index("2026-10-30 08:00") < text.index("## Notes")
