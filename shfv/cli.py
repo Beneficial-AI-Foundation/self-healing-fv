@@ -103,13 +103,13 @@ def write_index(to: Path) -> None:
     (to / "README.md").write_text("\n".join(lines) + "\n")
 
 
-def doctor(config: Path) -> int:
+def doctor(config: Path, repo: Path | None = None) -> int:
     """Check what a run needs before spending anything (review finding 16)."""
     from gates import proc
     from .agents.claude_code import LEAN_LSP_MCP
     with open(config, "rb") as f:
         cfg = tomllib.load(f)
-    clone = Path.home() / "baif" / cfg["github"].split("/")[-1]
+    clone = (repo or Path.home() / "baif" / cfg["github"].split("/")[-1]).expanduser()
     checks = [
         ("elan (Lean toolchains)", ["elan", "--version"]),
         ("lake", ["lake", "--version"]),
@@ -169,6 +169,7 @@ def main(argv: list[str] | None = None) -> int:
     g.add_argument("--work", type=Path, default=Path(os.environ.get("SHFV_WORK", ROOT / "work")))
     d = sub.add_parser("doctor", help="check the setup: Lean toolchain manager, uv, Claude Code, MCP server, target clone")
     d.add_argument("--config", type=Path, default=ROOT / "targets" / "dalek-lean-verify.toml")
+    d.add_argument("--repo", type=Path, help="local clone of the target repo (default: ~/baif/<github name>)")
     e = sub.add_parser("export", help="copy runs' reports into docs/examples/reports with an index")
     e.add_argument("runs", type=Path, nargs="+", help="run directories (runs/<case>/<run id>)")
     e.add_argument("--to", type=Path, default=EXAMPLES)
@@ -188,7 +189,7 @@ def main(argv: list[str] | None = None) -> int:
     if a.cmd == "export":
         return export(a.runs, a.to, a.allow_uncommitted)
     if a.cmd == "doctor":
-        return doctor(a.config)
+        return doctor(a.config, a.repo)
 
     repo_name = a.case.split("/")[0]
     config = a.config or ROOT / "targets" / f"{repo_name}.toml"

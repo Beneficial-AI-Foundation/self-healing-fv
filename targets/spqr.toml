@@ -1,0 +1,64 @@
+# Target config for SparsePostQuantumRatchet-verify (SPQR), DESIGN.md §3.5. Held out: not used
+# while building the bot (§8.5). The [lean] and [protected] sections are read by the gate; [agent],
+# [budget], [prices] and [repair] by the pipeline.
+#
+# SPQR moved its extracted code during its history: up to about PR 300 it lives in Spqr/Code/
+# (one lean_lib, Spqr); later in its own lean_lib SrcTranslated/, which Spqr imports. The lists
+# below name both locations, so one config covers every replayed case; paths absent from a tree
+# match nothing.
+
+name = "spqr"
+github = "Beneficial-AI-Foundation/SparsePostQuantumRatchet-verify"
+
+[lean]
+# Building Spqr also builds SrcTranslated, which it imports (Lake's defaultTargets name both).
+build_targets = ["Spqr"]
+root_modules = ["Spqr"]
+# Every directory with modules in Spqr's import closure, so the snapshot cache key covers them.
+# Utils/ and Tests/ are separate lean_libs that Spqr does not import.
+source_roots = ["Spqr/", "SrcTranslated/", "HeaderLinter/"]
+lean_num_threads = 8
+
+[protected]
+extracted = ["Spqr/Code/Funs.lean", "Spqr/Code/Types.lean",
+             "SrcTranslated/Funs.lean", "SrcTranslated/Types.lean"]
+trusted_models = ["Spqr/Code/FunsExternal.lean", "Spqr/Code/TypesExternal.lean",
+                  "SrcTranslated/FunsExternal.lean", "SrcTranslated/TypesExternal.lean"]
+# HeaderLinter/ is the project's copy of Mathlib's header linter (metaprogramming, imported by
+# Spqr.Lint.Basic); SrcTranslated.lean only imports the extracted modules.
+build_config = ["lakefile.toml", "lakefile.lean", "lean-toolchain", "lake-manifest.json",
+                "aeneas-config.yml", "translation-patches/", ".github/",
+                "HeaderLinter/", "HeaderLinter.lean", "SrcTranslated.lean"]
+
+[agent]
+adapter = "claude-code"
+model = "claude-opus-5-5"
+tool_profile = "lsp"
+
+[budget]
+# Same per-theorem caps as dalek (prototype guesses); the run is capped at $10 for the held-out
+# SPQR runs of 2026-10-27.
+per_theorem_usd = 5.0
+per_theorem_minutes = 25
+per_theorem_turns = 80
+per_run_usd = 10.0
+per_run_minutes = 120
+attempts_per_theorem = 2
+
+[repair]
+sweep = true
+
+# Same list prices as targets/dalek-lean-verify.toml (source and verification there).
+[prices."claude-opus-5-5"]
+input = 4.0
+output = 20.0
+cache_read = 0.20
+cache_write_5m = 5.0
+cache_write_1h = 8.0
+
+[prices."claude-sonnet-5-5"]
+input = 2.0
+output = 10.0
+cache_read = 0.10
+cache_write_5m = 2.50
+cache_write_1h = 4.0
