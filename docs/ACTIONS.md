@@ -56,4 +56,11 @@ DESIGN.md first planned the pilot on a fork of the target repo. It runs here ins
 
 | Run | Case | Runner | Outcome | Wall time | Peak memory | Peak disk | Cost |
 |---|---|---|---|---|---|---|---|
-| | | | | | | | |
+| [2026-10-27](https://github.com/Beneficial-AI-Foundation/self-healing-fv/actions/runs/40471516417) | `dalek-lean-verify/e65b46d0`, no agent | `ubuntu-latest`, private repo: 2 cores, 7.7 GB + 3 GB swap, 72 GB disk (43 GB free after cleanup) | failed: the replay could not rebuild the case | 1h57m (setup 2.6 min, building base and fixed 1h45m) | 5.0 GB + 2.4 GB swap, no OOM kill | 55.5 GB, 16 GB free | $0 |
+
+**Run 1: the standard private-repo runner does not fit a dalek replay.**
+- **Time.** Building the base and fixed states (in parallel, 2 cores) took 1h45m, with many dalek files at 5–10 minutes each (`Scalar52.ToBytes` 592 s). In the base state `Scalar52/MontgomeryReduce.lean` ran past the replay's 15-minute per-file limit (`FILE_TIMEOUT_S`) and was killed, so the base "did not build" and the replay stopped before the broken state. The sweep and the gate never ran.
+- **Memory.** Peak 5.0 GB in use plus 2.4 GB of swap: the two parallel builds were swapping, which slowed them further. No process was killed for memory.
+- **Disk.** 16 GB free after two of the three states. The broken state, the candidate and the gate's copy need about 20 GB more, so disk would have run out next.
+- **Mathlib.** Downloading and unpacking the cache took 45–97 s per state; setup otherwise was quick.
+- Next: an 8-core larger runner (32 GB, 300 GB SSD) for the pilot; caching and lighter replays on small runners are V1 (§9.4).

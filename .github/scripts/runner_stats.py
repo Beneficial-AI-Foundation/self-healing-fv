@@ -1,7 +1,10 @@
 """Runner resource use during a replay on GitHub Actions (SCI-1717; DESIGN.md §3.4, §9.4).
 
-  sample     every few seconds: memory in use, swap, disk in use under a path, and the RSS of the
-             Lean processes (lean, lake, the kernel checkers), as CSV; runs until killed.
+  sample     every few seconds: memory in use, swap, disk in use under a path, and the memory of the
+             Lean processes (lean, lake, the kernel checkers), as CSV; runs until killed. The Lean
+             total is PSS, which splits shared pages among the processes that map them: RSS would
+             count the memory-mapped Mathlib .olean files once per process (run 1 summed to 17.8 GB
+             on a 7.7 GB machine).
   summarize  peak memory and disk per pipeline stage, using the stage lines of `shfv repair`'s
              output ("  mm:ss  <stage>"), plus the run's own timings from report.json; Markdown.
 
@@ -20,7 +23,7 @@ import time
 from pathlib import Path
 
 FIELDS = ["t", "mem_used_mb", "mem_avail_mb", "swap_used_mb", "disk_used_gb", "disk_free_gb",
-          "lean_rss_mb", "lean_procs", "top_rss_mb", "top_cmd"]
+          "lean_pss_mb", "lean_procs", "top_rss_mb", "top_cmd"]
 LEAN = {"lean", "lake", "leanchecker", "lean4checker", "leantar"}
 STAGE_RE = re.compile(r"^  (\d+):(\d\d)  (?![ →…])(.+?)(?:  \((\d+)s\))?$")
 
@@ -33,14 +36,26 @@ def meminfo() -> dict[str, int]:
     return out
 
 
-def processes() -> list[tuple[int, str]]:
-    p = subprocess.run(["ps", "-eo", "rss=,comm="], capture_output=True, text=True)
+def processes() -> list[tuple[int, int, str]]:
+    """(pid, RSS in MB, command) of every process."""
+    p = subprocess.run(["ps", "-eo", "pid=,rss=,comm="], capture_output=True, text=True)
     rows = []
     for line in p.stdout.splitlines():
-        rss, _, comm = line.strip().partition(" ")
-        if rss.isdigit():
-            rows.append((int(rss) // 1024, comm.strip()))
+        parts = line.split(None, 2)
+        if len(parts) == 3 and parts[0].isdigit() and parts[1].isdigit():
+            rows.append((int(parts[0]), int(parts[1]) // 1024, parts[2].strip()))
     return rows
+
+
+def pss_mb(pid: int) -> int:
+    """Proportional set size; 0 if the process is gone or unreadable."""
+    try:
+        for line in Path(f"/proc/{pid}/smaps_rollup").read_text().splitlines():
+            if line.startswith("Pss:"):
+                return int(line.split()[1]) // 1024
+    except OSError:
+        pass
+    return 0
 
 
 def sample(out: Path, path: Path, interval: float) -> None:
@@ -53,13 +68,13 @@ def sample(out: Path, path: Path, interval: float) -> None:
             m = meminfo()
             st = os.statvfs(path)
             procs = processes()
-            lean = [r for r in procs if r[1] in LEAN]
-            top = max(procs, default=(0, ""))
+            lean = [r for r in procs if r[2] in LEAN]
+            top = max(procs, key=lambda r: r[1], default=(0, 0, ""))
             w.writerow([int(time.time()), m["MemTotal"] - m["MemAvailable"], m["MemAvailable"],
                         m["SwapTotal"] - m["SwapFree"],
                         round((st.f_blocks - st.f_bfree) * st.f_frsize / 2**30, 1),
                         round(st.f_bavail * st.f_frsize / 2**30, 1),
-                        sum(r[0] for r in lean), len(lean), top[0], top[1]])
+                        sum(pss_mb(r[0]) for r in lean), len(lean), top[1], top[2]])
             f.flush()
             time.sleep(interval)
 
@@ -87,7 +102,7 @@ def summarize(samples: Path, log: Path, start: int, report: Path | None) -> str:
     lines += [f"- Memory: peak {peak['mem_used_mb'] / 1024:.1f} GB in use of {total / 1024:.1f} GB "
               f"(lowest available {min(r['mem_avail_mb'] for r in rows) / 1024:.1f} GB); "
               f"peak swap {max(r['swap_used_mb'] for r in rows) / 1024:.1f} GB",
-              f"- Lean processes: peak {max(r['lean_rss_mb'] for r in rows) / 1024:.1f} GB RSS in total, "
+              f"- Lean processes: peak {max(r['lean_pss_mb'] for r in rows) / 1024:.1f} GB in total (PSS), "
               f"up to {int(max(r['lean_procs'] for r in rows))} at once; largest single process "
               f"{max(r['top_rss_mb'] for r in rows) / 1024:.1f} GB",
               f"- Disk (work volume): peak {max(r['disk_used_gb'] for r in rows):.1f} GB used, "
@@ -99,12 +114,12 @@ def summarize(samples: Path, log: Path, start: int, report: Path | None) -> str:
         # from one line to the next and is named by the line that closes it.
         end = int(rows[-1]["t"] - start)
         bounds = [(0, None)] + st + [(max(end, st[-1][0]), f"(after the last line: {st[-1][1]})")]
-        lines += ["| Window | Closed by the line | Duration | Peak memory | Peak Lean RSS | Peak disk used |",
+        lines += ["| Window | Closed by the line | Duration | Peak memory | Peak Lean (PSS) | Peak disk used |",
                   "|---|---|---|---|---|---|"]
         for (s, _), (e, text) in zip(bounds, bounds[1:]):
             win = [r for r in rows if s <= r["t"] - start <= e]
             peaks = (f"{max(r['mem_used_mb'] for r in win) / 1024:.1f} GB | "
-                     f"{max(r['lean_rss_mb'] for r in win) / 1024:.1f} GB | "
+                     f"{max(r['lean_pss_mb'] for r in win) / 1024:.1f} GB | "
                      f"{max(r['disk_used_gb'] for r in win):.1f} GB") if win else "– | – | –"
             lines.append(f"| {s // 60:02d}:{s % 60:02d}–{e // 60:02d}:{e % 60:02d} | {text.replace('|', '/')} | "
                          f"{fmt(e - s)} | {peaks} |")

@@ -311,6 +311,23 @@ def test_api_key_auth_takes_the_adapters_key_out_of_the_pipeline_environment(tmp
     assert seen == {"api_key": "secret", "left_in_env": None}  # builds and the gate cannot see it
 
 
+def test_a_rebuild_that_does_not_reproduce_the_replay_record_fails_clearly(toy_case, tmp_path, monkeypatch):
+    # As on the first Actions run: a slow runner killed a base file after FILE_TIMEOUT_S, so the
+    # replay stopped before the broken state existed. The run must say so, not fail later on a missing tree.
+    cfg = toy_case["root"] / "toy-rebuild.toml"
+    cfg.write_text(CONFIG.format(per_run_usd=10.0))
+    replay = {**toy_case["replay"], "verdict": "break confirmed"}
+    monkeypatch.setattr(pipeline, "load_case", lambda cid, path=None: (toy_case["record"], replay))
+    monkeypatch.setattr(pipeline.replay_case, "replay", lambda *a, **k: {
+        "verdict": "invalid: base or fixed state does not build",
+        "base": {"ok": False, "hung": ["Toy/Specs.lean"]}, "fixed": {"ok": True}})
+    run = Run(toy_case["case_id"], cfg, FakeAgent(GOOD), toy_case["repo"], tmp_path / "empty-work",
+              tmp_path / "runs", gate_human_fix=False, label="rebuild")
+    rep = run.execute()
+    assert rep["verdict"] == "failed" and rep["error"]["outcome"] == "infrastructure-failure"
+    assert "does not build" in rep["error"]["detail"] and "base: hung Toy/Specs.lean" in rep["error"]["detail"]
+
+
 def test_model_without_prices_reports_unknown_cost_and_no_dollar_cap(toy_case, monkeypatch):
     rep, agent, _ = run_case(toy_case, monkeypatch, GOOD, "noprice", model="unpriced-model")
     assert all(c[3].usd is None for c in agent.calls)  # dollar cap not enforced
