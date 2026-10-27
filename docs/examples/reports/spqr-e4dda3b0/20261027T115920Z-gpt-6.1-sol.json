@@ -1,0 +1,160 @@
+{
+ "case_id": "spqr/e4dda3b0",
+ "run_id": "20261027T115920Z-gpt-6.1-sol",
+ "started_at": "2026-10-27T11:59:20+00:00",
+ "provenance": {
+  "tool": {
+   "commit": "fe5aaff67009142e493c70a14b7cbaccfdfc3033",
+   "branch": "dana/sci-1715-codex-compare",
+   "dirty": false,
+   "dirty_files": null
+  },
+  "gate_version": "2adac4196a39",
+  "prompt_sha256": "74621d301b9e",
+  "config_sha256": "5bcff060df11",
+  "agent": {
+   "adapter": "codex",
+   "model": "gpt-6.1-sol",
+   "harness": "codex-cli 0.164.0"
+  },
+  "python": "3.14.8",
+  "platform": "Darwin 27.0.0 arm64",
+  "machine": {
+   "cpus": 18,
+   "memory_gb": 24.0
+  }
+ },
+ "renders": null,
+ "verdict": "accepted",
+ "totals": {
+  "cost_usd": null,
+  "cost_status": "no-price",
+  "tokens": {
+   "input": 291306,
+   "output": 10797,
+   "cache_read": 1444480,
+   "cache_write_5m": 0,
+   "cache_write_1h": 0
+  },
+  "reported_cost_usd": null,
+  "resolved_models": [],
+  "turns": 27,
+  "agent_seconds": 478,
+  "wall_seconds": 771,
+  "stages": {
+   "prepare_s": 0,
+   "snapshots_s": 37,
+   "audit_s": 15,
+   "agent_s": 617,
+   "gate_s": 97
+  },
+  "attempts": 12
+ },
+ "inputs": {
+  "repo": "Beneficial-AI-Foundation/SparsePostQuantumRatchet-verify",
+  "base_commit": "ff474b492e7c01a36229b6cd87211c68e1e423f3",
+  "generated": false,
+  "repo_lean_root": "",
+  "change_commit": "e4dda3b02fc166a9b012a800b9b2d1b54c6ac089",
+  "change_pr": 52,
+  "change_pr_url": "https://github.com/Beneficial-AI-Foundation/SparsePostQuantumRatchet-verify/pull/52",
+  "change_subject": "Update Aeneas to version 3fb1cd4b (#52)",
+  "cause": "aeneas",
+  "causes": [
+   "aeneas",
+   "lean-mathlib",
+   "lean-dep"
+  ],
+  "pin_changes": {
+   "Cli": [
+    "28e0856d4424863a85b18f38868c5420c55f9bae",
+    "13567aed1ac4f12aea9484178e07e51f8c9f7658"
+   ],
+   "LeanSearchClient": [
+    "5ce7f0a355f522a952a3d678d696bd563bb4fd28",
+    "c5d5b8fe6e5158def25cd28eb94e4141ad97c843"
+   ],
+   "Qq": [
+    "23324752757bf28124a518ec284044c8db79fee5",
+    "1cc7e819b9b9bc1e87c9edcccb62e0269e00a809"
+   ],
+   "aeneas": [
+    "1180be60c7a0e642cb442bfe90fe5cd8c1bb853f",
+    "3fb1cd4bb00be9344544edc66e8d7ece406116f6"
+   ],
+   "aesop": [
+    "f08e838d4f9aea519f3cde06260cfb686fd4bab0",
+    "f0c6e183ea26531e82773feb4b73ab6595ca17a5"
+   ],
+   "batteries": [
+    "cabbb5a025bfbbc50af9184ed2dfdde6ea4f53a7",
+    "5c57f3857ba81924a88b2cdf4f062e34ec04ff11"
+   ],
+   "importGraph": [
+    "875ad9d88ed684e39c16bdea260e6ecfa15afd60",
+    "cdab3938ccabbdb044be6896e251b5814bec932e"
+   ],
+   "lean": [
+    "leanprover/lean4:v4.28.0-rc1",
+    "leanprover/lean4:v4.30.0-rc2"
+   ],
+   "mathlib": [
+    "5352afccd6866369be9de43f5b7ec47203555f44",
+    "5450b53e5ddc75d46418fabb605edbf36bd0beb6"
+   ],
+   "plausible": [
+    "7311586e1a56af887b1081d05e80c11b6c41d212",
+    "86210d4ad1b08b086d0bd638637a75246523dbb8"
+   ],
+   "proofwidgets": [
+    "6d65c6e0a25b8a52c13c3adeb63ecde3bfbb6294",
+    "2db6054a44326f8c0230ee0570e2ddb894816511"
+   ]
+  },
+  "fix_commits": [
+   "e4dda3b02fc166a9b012a800b9b2d1b54c6ac089",
+   "936bbdc01b42f24373472ccb72a25dcab2c24524"
+  ]
+ },
+ "broken": {
+  "proofs": [
+   "spqr.math.gf.natToBinaryPoly_polyGF2",
+   "spqr.math.gf.polyGF2_dvd_modByMonic_sub",
+   "spqr.math.gf.natToBinaryPoly_one",
+   "_private.Spqr.Math.Gf2Poly.NatRep.0.spqr.math.gf.natBinaryPolyModAux_log2_lt",
+   "spqr.math.gf.natToBinaryPoly_natDegree_eq_log2",
+   "spqr.math.gf.natBinaryPolyMod_ne_zero_of_not_dvd",
+   "spqr.math.gf.natToBinaryPoly_surjective",
+   "spqr.math.gf.ringHom_modByMonic",
+   "spqr.encoding.gf.reduce.reduce_bytes_loop_spec",
+   "spqr.encoding.gf.reduce.reduceByteTable_eq_poly_full",
+   "spqr.encoding.gf.unaccelerated.poly_mul_loop_spec",
+   "spqr.encoding.polynomial.Pt.try_from_spec",
+   "spqr.encoding.polynomial.Pt.deserialize_spec"
+  ],
+  "statements": [],
+  "frozen_inventory": 350,
+  "observed_in_broken": 350,
+  "unobserved_modules": [],
+  "missing_frozen": []
+ },
+ "outcomes": {
+  "spqr.math.gf.natToBinaryPoly_polyGF2": "repaired",
+  "spqr.math.gf.polyGF2_dvd_modByMonic_sub": "repaired",
+  "spqr.math.gf.natToBinaryPoly_one": "repaired",
+  "_private.Spqr.Math.Gf2Poly.NatRep.0.spqr.math.gf.natBinaryPolyModAux_log2_lt": "repaired",
+  "spqr.math.gf.natToBinaryPoly_natDegree_eq_log2": "repaired",
+  "spqr.math.gf.natBinaryPolyMod_ne_zero_of_not_dvd": "repaired",
+  "spqr.math.gf.natToBinaryPoly_surjective": "repaired",
+  "spqr.math.gf.ringHom_modByMonic": "repaired",
+  "spqr.encoding.gf.reduce.reduce_bytes_loop_spec": "repaired",
+  "spqr.encoding.gf.reduce.reduceByteTable_eq_poly_full": "repaired",
+  "spqr.encoding.gf.unaccelerated.poly_mul_loop_spec": "repaired",
+  "spqr.encoding.polynomial.Pt.try_from_spec": "repaired",
+  "spqr.encoding.polynomial.Pt.deserialize_spec": "repaired"
+ },
+ "gate": {
+  "verdict": "accepted",
+  "failed_checks": []
+ }
+}

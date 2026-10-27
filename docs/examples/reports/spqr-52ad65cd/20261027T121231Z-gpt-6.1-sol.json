@@ -1,0 +1,97 @@
+{
+ "case_id": "spqr/52ad65cd",
+ "run_id": "20261027T121231Z-gpt-6.1-sol",
+ "started_at": "2026-10-27T12:12:31+00:00",
+ "provenance": {
+  "tool": {
+   "commit": "fe5aaff67009142e493c70a14b7cbaccfdfc3033",
+   "branch": "dana/sci-1715-codex-compare",
+   "dirty": false,
+   "dirty_files": null
+  },
+  "gate_version": "2adac4196a39",
+  "prompt_sha256": "74621d301b9e",
+  "config_sha256": "5bcff060df11",
+  "agent": {
+   "adapter": "codex",
+   "model": "gpt-6.1-sol",
+   "harness": "codex-cli 0.164.0"
+  },
+  "python": "3.14.8",
+  "platform": "Darwin 27.0.0 arm64",
+  "machine": {
+   "cpus": 18,
+   "memory_gb": 24.0
+  }
+ },
+ "renders": null,
+ "verdict": "accepted",
+ "totals": {
+  "cost_usd": null,
+  "cost_status": "no-price",
+  "tokens": {
+   "input": 60421,
+   "output": 3176,
+   "cache_read": 414848,
+   "cache_write_5m": 0,
+   "cache_write_1h": 0
+  },
+  "reported_cost_usd": null,
+  "resolved_models": [],
+  "turns": 8,
+  "agent_seconds": 138,
+  "wall_seconds": 460,
+  "stages": {
+   "prepare_s": 0,
+   "snapshots_s": 60,
+   "audit_s": 30,
+   "agent_s": 177,
+   "gate_s": 189
+  },
+  "attempts": 3
+ },
+ "inputs": {
+  "repo": "Beneficial-AI-Foundation/SparsePostQuantumRatchet-verify",
+  "base_commit": "4cf0b6d184f906e2e30c9634a646d8bbb0a02ff1",
+  "generated": false,
+  "repo_lean_root": "",
+  "change_commit": "52ad65cdcee992ce4ecbcf4a2be275bbc5c0b8ee",
+  "change_pr": 493,
+  "change_pr_url": "https://github.com/Beneficial-AI-Foundation/SparsePostQuantumRatchet-verify/pull/493",
+  "change_subject": "Update aeneas to nightly 2026.08.27 5b9dcf3 (#493)",
+  "cause": "aeneas",
+  "causes": [
+   "aeneas"
+  ],
+  "pin_changes": {
+   "aeneas": [
+    "6e167c9b63a4dafd66d0e0edd9d94669f957ff7b",
+    "5b9dcf33dccdb1560ea7203ac57ea202476b6ed3"
+   ]
+  },
+  "fix_commits": [
+   "52ad65cdcee992ce4ecbcf4a2be275bbc5c0b8ee"
+  ]
+ },
+ "broken": {
+  "proofs": [
+   "spqr.v1.chunked.states.serialize.decode_chunk_spec",
+   "spqr.v1.chunked.states.serialize.decode_varint_spec",
+   "spqr.v1.chunked.states.serialize.Message.deserialize_spec"
+  ],
+  "statements": [],
+  "frozen_inventory": 1346,
+  "observed_in_broken": 1346,
+  "unobserved_modules": [],
+  "missing_frozen": []
+ },
+ "outcomes": {
+  "spqr.v1.chunked.states.serialize.decode_varint_spec": "repaired",
+  "spqr.v1.chunked.states.serialize.decode_chunk_spec": "repaired",
+  "spqr.v1.chunked.states.serialize.Message.deserialize_spec": "repaired"
+ },
+ "gate": {
+  "verdict": "accepted",
+  "failed_checks": []
+ }
+}
