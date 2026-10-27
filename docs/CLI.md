@@ -276,7 +276,7 @@ A target repo is described by `targets/<repo>.toml`: `dalek-lean-verify`, `spqr`
 ### Codex CLI
 
 Use Codex 0.164.0 with an explicit Codex model (the existing target defaults name a Claude
-model): `uv run shfv repair --case dalek-lean-verify/9d82afb9 --agent codex --model gpt-5.4-mini`.
+model): `uv run shfv repair --case dalek-lean-verify/9d82afb9 --agent codex --model gpt-6.1-sol`.
 Each theorem gets a fresh `codex exec` session, the shared repair prompt, structured diagnosis,
 and the pinned Lean LSP MCP server for the `lsp` profile. The gate and report are unchanged.
 

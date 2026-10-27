@@ -75,21 +75,23 @@ scrub environment variable. MCP uses Codex's default restricted subprocess envir
 the explicit Lean project/thread variables; no model key is listed in its `env`/`env_vars`.
 The CLI contract removes the key from the pipeline's environment before any builds
 or gate subprocesses start. This branch was rebased onto main after that contract landed
-(main at `c7358da`); its key handling is reused unchanged. A CLI integration test checks
+(now rebased onto main at `a9ca41a`); its key handling is reused unchanged. A CLI integration test checks
 the actual Codex registration, model selection, missing-key error and key transfer without
 starting a repair or calling a model.
 
 Sandbox configuration is `workspace-write`, no additional roots, `/tmp` and `$TMPDIR` writes
 excluded, network off, approvals `never`. Context is readable without `--add-dir`, which would
-grant unwanted writes. This is command write isolation, not a container: reads outside the
-workspace remain possible, including a model deliberately opening an instruction file. MCP
+grant unwanted writes. Workspace-write limits writes but not reads: the agent can read sibling
+trees such as `work/<case>/fixed/`, including the human fix. This is the same isolation gap as
+Claude Code and can contaminate a repair comparison; passing the gate does not establish that
+the agent avoided the human fix. Reads of external instruction files also remain possible. MCP
 servers are host processes outside the command sandbox. The Lean MCP has only the existing
 local-tool allowlist; remote search tools and `lean_build` are not exposed. Broader command
 restrictions equivalent to Claude's Bash allowlist are not available through these exec flags.
 
 ## Verification
 
-After rebasing onto main at `c7358da`, `uv run pytest` passed: **144 passed, 2 skipped**
+After rebasing onto main at `a9ca41a`, `uv run pytest` passed: **145 passed, 2 skipped**
 (the optional real-dalek-tree tests). All existing tests ran unchanged relative to main.
 
 Unit tests use a fake `codex` executable on PATH and synthetic events matching the
@@ -150,16 +152,22 @@ No prohibited shared code was changed. The proposed changes above remain finding
 
 ## Deferred PR 41 run
 
+Use `gpt-6.1-sol`, the user's default model as resolved by Codex's `model/list` diagnostic.
+This chooses their normal top-tier coding model for the comparison with Claude Opus 5.5,
+rather than a mini model whose capability/cost tradeoff would confound the first adapter
+comparison. This is a choice of comparison tier, not a claim that the models have equal Lean
+proof-repair performance. No adapter or target default is changed.
+
 After reviewing the login-mode global-instruction limitation, the exact command is:
 
 ```sh
-uv run shfv repair --case dalek-lean-verify/9d82afb9 --agent codex --model gpt-5.4-mini
+uv run shfv repair --case dalek-lean-verify/9d82afb9 --agent codex --model gpt-6.1-sol
 ```
 
 With `CODEX_API_KEY` already provisioned securely, use:
 
 ```sh
-uv run shfv repair --case dalek-lean-verify/9d82afb9 --agent codex --model gpt-5.4-mini --auth api-key
+uv run shfv repair --case dalek-lean-verify/9d82afb9 --agent codex --model gpt-6.1-sol --auth api-key
 ```
 
 These select a model explicitly; availability for the account must be checked at run time.
