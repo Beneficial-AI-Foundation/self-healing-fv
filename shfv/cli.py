@@ -150,6 +150,14 @@ def main(argv: list[str] | None = None) -> int:
                         "escalates them without an attempt)")
     r.add_argument("--gate-human-fix", action=argparse.BooleanOptionalAction, default=None,
                    help="also gate the human fix as a reference candidate (default: on for escalations)")
+    r.add_argument("--no-agent", action="store_true",
+                   help="the no-model sweep only: theorems it does not repair are not attempted (no key needed)")
+    r.add_argument("--auth", choices=["login", "api-key"], default="login",
+                   help="agent authentication: the harness's own login (default), or the adapter's API key "
+                        "variable (ANTHROPIC_API_KEY for claude-code), which is then handed to the agent only, "
+                        "not to builds or the gate (CI, DESIGN.md §9.3)")
+    r.add_argument("--per-run-usd", type=float, help="override the target config's [budget].per_run_usd")
+    r.add_argument("--per-run-minutes", type=float, help="override the target config's [budget].per_run_minutes")
     r.add_argument("--keep", action="store_true", help="keep the candidate and gate workspaces")
     r.add_argument("--replay-record", type=Path, help="replay record to use instead of data/replay/<repo>/<case>.json")
     r.add_argument("--label", help="suffix for the run id, e.g. 'demo'")
@@ -182,10 +190,19 @@ def main(argv: list[str] | None = None) -> int:
     adapter = a.agent or cfg["agent"].get("adapter", "claude-code")
     if adapter not in ADAPTERS:
         ap.error(f"unknown adapter {adapter!r} (known: {', '.join(sorted(ADAPTERS))})")
-    agent = ADAPTERS[adapter](model=model, lean_threads=cfg["lean"].get("lean_num_threads", 8))
+    # The key leaves this process's environment, so the builds and the gate (subprocesses) never see it.
+    key_env = ADAPTERS[adapter].api_key_env
+    api_key = os.environ.pop(key_env, None) if a.auth == "api-key" else None
+    if a.auth == "api-key" and not api_key and not a.no_agent:
+        ap.error(f"--auth api-key needs {key_env} in the environment (the {adapter} adapter's key)")
+    agent = ADAPTERS[adapter](model=model, lean_threads=cfg["lean"].get("lean_num_threads", 8),
+                              **({"api_key": api_key} if api_key else {}))
     check_capabilities(agent, cfg["agent"].get("tool_profile", "lsp"))
+    overrides = {k: v for k, v in (("per_run_usd", a.per_run_usd), ("per_run_minutes", a.per_run_minutes))
+                 if v is not None}
     run = Run(a.case, config, agent, clone, a.work, a.runs, attempt_anyway=a.attempt_anyway,
-              gate_human_fix=a.gate_human_fix, keep=a.keep, label=a.label, replay_path=a.replay_record)
+              gate_human_fix=a.gate_human_fix, keep=a.keep, label=a.label, replay_path=a.replay_record,
+              use_agent=not a.no_agent, budget_overrides=overrides)
     if (tool := provenance.tool_code()).get("dirty"):
         run.p.step(f"note: uncommitted changes in the tool ({', '.join(tool['dirty_files'][:3])}…); "
                    "the report will say so")

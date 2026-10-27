@@ -15,6 +15,7 @@ The prototype replays historical cases locally and writes a report; it opens no 
 | `docs/OVERVIEW.md` | The approach and the checks, in plain words |
 | `docs/CLI.md` | Running `shfv` and `gate`: options, output, troubleshooting |
 | `docs/REPORT.md` | The `report.json` fields and exit codes, for tools that call `shfv` |
+| `docs/ACTIONS.md` | Replaying a case on GitHub Actions (manual dispatch) |
 | `docs/DESIGN.md` | The design and its reasons. Read it before changing architecture. |
 | `data/README.md` | The mined and replayed cases |
 | `docs/reviews/`, `docs/experiments/` | Design reviews with triage; one-off experiments |
@@ -29,6 +30,7 @@ The prototype replays historical cases locally and writes a report; it opens no 
 | `replay/` | `replay_case.py` builds a case's broken state and records which theorems fail; `evaluate.py` scores replays; `export_results.py` writes `data/`; `generate_aeneas_upgrade.py` makes SymCrypt's generated cases. |
 | `targets/` | One TOML config per target repo: build targets, protected files, agent, model, budgets, prices. |
 | `tests/` | Unit tests for the pipeline; `tests/gate/` has the gate tests, including the planted-violation tests, on a toy Lean project in `tests/gate/fixture/`. |
+| `.github/` | `workflows/replay.yml`, the manually dispatched replay on a hosted runner; `scripts/runner_stats.py` samples memory and disk during it |
 | `data/` | The committed dataset: `mined/<repo>.jsonl` case records, `replay/<repo>/<sha8>.json` replay ground truth. |
 
 Not in git: `work/` (replay workspaces), `runs/` (run records), `data/raw/`, clones of target repos, `.lake/`.

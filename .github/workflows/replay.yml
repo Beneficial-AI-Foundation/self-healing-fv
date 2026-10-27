@@ -1,0 +1,191 @@
+# Replay one historical case on a GitHub-hosted runner and upload the run record (SCI-1717).
+# The prototype's deployment step (DESIGN.md §2.3, §9): manual dispatch only. It never runs on
+# pull requests, posts nothing, and holds no GitHub write token. How to dispatch: docs/ACTIONS.md.
+name: replay
+
+on:
+  workflow_dispatch:
+    inputs:
+      case:
+        description: "Case id, <repo>/<sha8> as in data/replay/"
+        required: true
+        default: dalek-lean-verify/e65b46d0
+      agent:
+        description: "Run the agent (uses the ANTHROPIC_API_KEY secret). Off: the no-model sweep only, no key"
+        type: boolean
+        default: false
+      model:
+        description: "Model (empty: the target config's default)"
+        required: false
+        default: ""
+      per_run_usd:
+        description: "Per-run cost cap, USD (API-equivalent, from token counts)"
+        required: true
+        default: "3"
+      per_run_minutes:
+        description: "Per-run deadline, minutes (preparation, attempts, builds, gate)"
+        required: true
+        default: "300"
+      runner:
+        description: "Runner label"
+        required: true
+        default: ubuntu-latest
+
+# Read-only token for the checkout of this repo; nothing else (§3.1, §9.3).
+permissions:
+  contents: read
+
+concurrency:
+  group: replay-${{ inputs.case }}
+  cancel-in-progress: false
+
+jobs:
+  replay:
+    runs-on: ${{ inputs.runner }}
+    # Below the 6 h job cap (§9.4), so a slow run still uploads its record.
+    timeout-minutes: 345
+    env:
+      CASE: ${{ inputs.case }}
+      AGENT: ${{ inputs.agent }}
+      MODEL: ${{ inputs.model }}
+      PER_RUN_USD: ${{ inputs.per_run_usd }}
+      PER_RUN_MINUTES: ${{ inputs.per_run_minutes }}
+      CLAUDE_CODE_VERSION: "2.1.311"
+      ELAN_TAG: v4.2.4
+    steps:
+      - name: Check inputs
+        run: |
+          [[ "$CASE" =~ ^[a-z0-9-]+/[0-9a-f]{8}$ ]] || { echo "::error::bad case id: $CASE"; exit 1; }
+          [[ "$MODEL" =~ ^[a-z0-9.-]*$ ]] || { echo "::error::bad model: $MODEL"; exit 1; }
+          [[ "$PER_RUN_USD" =~ ^[0-9]+(\.[0-9]+)?$ && "$PER_RUN_MINUTES" =~ ^[0-9]+$ ]] || {
+            echo "::error::caps must be numbers"; exit 1; }
+          mkdir -p "$RUNNER_TEMP/stats"
+          echo "STATS=$RUNNER_TEMP/stats" >> "$GITHUB_ENV"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false  # the token does not stay in .git/config, where the agent could read it
+
+      - name: Runner before setup
+        run: |
+          { echo "## Runner"; echo; echo '```'; uname -a; nproc; free -m; df -h / /mnt 2>/dev/null; echo '```'; } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      # Each replay workspace holds a built Mathlib (about 8 GB). On ext4 every copy is a full copy,
+      # so free the preinstalled toolchains this job does not use, and work on the larger volume.
+      - name: Free disk
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup \
+            /opt/hostedtoolcache/CodeQL /usr/local/share/boost /usr/share/swift
+          sudo docker image prune --all --force > /dev/null 2>&1 || true
+          root_free=$(df --output=avail -B1G / | tail -1)
+          mnt_free=$(df --output=avail -B1G /mnt 2>/dev/null | tail -1 || echo 0)
+          if [ "${mnt_free:-0}" -gt "$root_free" ]; then
+            sudo mkdir -p /mnt/shfv && sudo chown "$USER" /mnt/shfv && work=/mnt/shfv/work
+          else
+            work="$RUNNER_TEMP/work"
+          fi
+          mkdir -p "$work"
+          echo "SHFV_WORK=$work" >> "$GITHUB_ENV"
+          { echo; echo "Work volume: \`$work\` (free: / ${root_free} GB, /mnt ${mnt_free:-0} GB)"; } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Install elan
+        run: |
+          curl -sSfL "https://raw.githubusercontent.com/leanprover/elan/$ELAN_TAG/elan-init.sh" -o "$RUNNER_TEMP/elan-init.sh"
+          sh "$RUNNER_TEMP/elan-init.sh" -y --default-toolchain none
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
+
+      - name: Install Claude Code
+        run: npm install -g --no-fund --no-audit "@anthropic-ai/claude-code@$CLAUDE_CODE_VERSION"
+
+      # The lean4checker builds that the gate caches per toolchain (G5).
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        with:
+          path: ~/.cache/self-healing-fv
+          key: lean4checker-${{ runner.os }}-${{ inputs.case }}-${{ hashFiles('gates/kernel.py') }}
+          restore-keys: lean4checker-${{ runner.os }}-
+
+      # Full history: the replay takes the base, change and fix commits from it. The default Lean
+      # toolchain (for `shfv doctor`) is the change commit's, which the replay needs anyway.
+      - name: Clone the target repo
+        run: |
+          repo=$(python3 -c 'import sys, tomllib; print(tomllib.load(open(sys.argv[1], "rb"))["github"])' "targets/${CASE%%/*}.toml")
+          clone="$HOME/baif/${repo##*/}"
+          git clone --quiet "https://github.com/$repo" "$clone"
+          git -C "$clone" log -1 --format='%h %cs %s'
+          change=$(python3 - "data/mined/${CASE%%/*}.jsonl" "${CASE#*/}" <<'EOF'
+          import json, sys
+          for line in open(sys.argv[1]):
+              r = json.loads(line)
+              if r["change_commit"].startswith(sys.argv[2]):
+                  print(r["change_commit"]); break
+          EOF
+          )
+          elan default "$(git -C "$clone" show "$change:lean-toolchain" 2>/dev/null || echo leanprover/lean4:stable)"
+
+      - name: Doctor
+        run: |
+          uv sync --quiet
+          uv run shfv doctor
+
+      - name: Start resource sampler
+        run: |
+          nohup python3 .github/scripts/runner_stats.py sample --out "$STATS/samples.csv" --path "$SHFV_WORK" \
+            > "$STATS/sampler.log" 2>&1 &
+          echo $! > "$STATS/sampler.pid"
+
+      - name: Replay
+        env:
+          # The key reaches this step only when the agent is on; shfv hands it to the agent alone.
+          ANTHROPIC_API_KEY: ${{ inputs.agent && secrets.ANTHROPIC_API_KEY || '' }}
+        run: |
+          args=(--case "$CASE" --per-run-usd "$PER_RUN_USD" --per-run-minutes "$PER_RUN_MINUTES" --label actions)
+          if [ "$AGENT" = "true" ]; then
+            [ -n "$ANTHROPIC_API_KEY" ] || { echo "::error::agent is on but the ANTHROPIC_API_KEY secret is not set"; exit 1; }
+            args+=(--auth api-key)
+          else
+            unset ANTHROPIC_API_KEY
+            args+=(--no-agent)
+          fi
+          [ -z "$MODEL" ] || args+=(--model "$MODEL")
+          date +%s > "$STATS/start"
+          set -o pipefail
+          uv run shfv repair "${args[@]}" 2>&1 | tee "$STATS/shfv.log"
+
+      - name: Resource summary
+        if: always()
+        run: |
+          kill "$(cat "$STATS/sampler.pid" 2>/dev/null)" 2>/dev/null || true
+          run_dir=$(readlink -f "runs/${CASE/\//-}/latest" 2>/dev/null || true)
+          echo "RUN_DIR=$run_dir" >> "$GITHUB_ENV"
+          python3 .github/scripts/runner_stats.py summarize --samples "$STATS/samples.csv" --log "$STATS/shfv.log" \
+            --start "$(cat "$STATS/start" 2>/dev/null || date +%s)" ${run_dir:+--report "$run_dir/report.json"} \
+            | tee "$STATS/resources.md" >> "$GITHUB_STEP_SUMMARY"
+          # The kernel's OOM killer leaves a trace here; a build killed for memory looks like a failure otherwise.
+          sudo dmesg -T 2>/dev/null | grep -iE 'out of memory|oom-kill|killed process' > "$STATS/oom.txt" || true
+          if [ -s "$STATS/oom.txt" ]; then
+            { echo "### OOM kills"; echo '```'; cat "$STATS/oom.txt"; echo '```'; } | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
+          { echo "### Disk at the end"; echo '```'; df -h / /mnt 2>/dev/null; du -sh "$SHFV_WORK"/* 2>/dev/null; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          if [ -n "$run_dir" ] && [ -f "$run_dir/report.md" ]; then
+            { echo; echo "## Report"; echo; cat "$run_dir/report.md"; } >> "$GITHUB_STEP_SUMMARY"
+          fi
+          mkdir -p "$STATS/replay-logs"
+          cp -R "$SHFV_WORK/${CASE/\//-}/logs/." "$STATS/replay-logs/" 2>/dev/null || true
+
+      # The run record (§3.3 S7): report.json, report.md, and the agent's prompts and transcripts.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        if: always() && env.RUN_DIR != ''
+        with:
+          name: run-record-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.RUN_DIR }}
+          if-no-files-found: warn
+
+      # What the runner went through: pipeline output, resource samples, replay build logs.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        if: always()
+        with:
+          name: runner-stats-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.STATS }}
+          if-no-files-found: warn

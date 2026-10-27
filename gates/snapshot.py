@@ -21,6 +21,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -161,15 +162,21 @@ def workspace_project(cfg: dict) -> str:
     return cfg["lean"].get("workspace_project", "")
 
 
+# Copy-on-write where the filesystem has it: APFS `cp -c`; GNU `cp --reflink=auto` (XFS, Btrfs),
+# a plain copy elsewhere (ext4 on GitHub's runners). GNU `cp -c` means something else.
+CP_COW = ["cp", "-c", "-R"] if sys.platform == "darwin" else ["cp", "-a", "--reflink=auto"]
+
+
 def fresh_copy(src: Path, dest: Path, project: str = "") -> None:
     """The whole workspace (copy-on-write, so dependency builds and sibling dependencies come
     along), minus the project's own build output: the candidate is rebuilt from scratch (G3)."""
     if dest.exists():
         shutil.rmtree(dest)
     dest.parent.mkdir(parents=True, exist_ok=True)
-    r = subprocess.run(["cp", "-c", "-R", str(src), str(dest)], capture_output=True)
-    if r.returncode != 0:
-        shutil.copytree(src, dest, symlinks=True, ignore=shutil.ignore_patterns(".git"))
+    r = subprocess.run([*CP_COW, str(src), str(dest)], capture_output=True)
+    if r.returncode != 0:  # a plain copy, packages' .git included (see below)
+        shutil.rmtree(dest, ignore_errors=True)  # a failed cp can leave a partial copy
+        shutil.copytree(src, dest, symlinks=True)
     shutil.rmtree(dest / project / ".lake" / "build", ignore_errors=True)
     # Drop the workspace's own git metadata, but keep the dependency packages' (.lake/packages/*):
     # Lake checks each package's checked-out revision against the manifest, and without .git it

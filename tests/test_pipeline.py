@@ -9,6 +9,7 @@ exhaustion, a model without prices, and gate-unavailable.
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -159,13 +160,13 @@ class FakeAgent:
 
 
 def run_case(toy_case, monkeypatch, script, label, per_run_usd=10.0, model="fake-model", partial=False,
-             expect_error=False):
+             expect_error=False, **run_options):
     cfg = toy_case["root"] / f"toy-{label}.toml"
     cfg.write_text(CONFIG.format(per_run_usd=per_run_usd))
     monkeypatch.setattr(pipeline, "load_case", lambda cid, path=None: (toy_case["record"], toy_case["replay"]))
     agent = FakeAgent(script, model=model, partial=partial)
     run = Run(toy_case["case_id"], cfg, agent, toy_case["repo"], toy_case["work"], toy_case["root"] / "runs",
-              gate_human_fix=False, label=label)
+              gate_human_fix=False, label=label, **run_options)
     rep = run.execute()
     assert expect_error or "error" not in rep, rep.get("error")
     md = render(rep)  # every lifecycle path must render a report
@@ -247,6 +248,67 @@ def test_run_cost_budget_stops_further_attempts(toy_case, monkeypatch):
     assert [c[0] for c in agent.calls] == ["double_spec"]
     e = {x["decl"]: x for x in rep["repairs"]}
     assert e["double_even"]["outcome"] == "proof-hard" and "cost budget" in e["double_even"]["reason"]
+
+
+def test_run_cost_override_replaces_the_config_cap_and_is_recorded(toy_case, monkeypatch):
+    rep, agent, _ = run_case(toy_case, monkeypatch, GOOD, "override", per_run_usd=10.0,
+                             budget_overrides={"per_run_usd": COST + 0.04})
+    assert [c[0] for c in agent.calls] == ["double_spec"]
+    assert rep["config"]["budget"]["per_run_usd"] == COST + 0.04
+    assert rep["config"]["budget_overrides"] == {"per_run_usd": COST + 0.04}
+
+
+def test_no_agent_runs_the_sweep_only_and_escalates_the_rest(toy_case, monkeypatch):
+    rep, agent, _ = run_case(toy_case, monkeypatch, GOOD, "noagent", use_agent=False)
+    assert agent.calls == []
+    e = {x["decl"]: x for x in rep["repairs"]}
+    assert e["double_spec"]["outcome"] == "proof-hard" and "--no-agent" in e["double_spec"]["reason"]
+    assert e["double_even"]["outcome"] == "blocked-on"
+    assert rep["verdict"] == "escalated" and rep["agent"]["enabled"] is False
+    assert rep["totals"]["cost_usd"] in (0, None)
+
+
+def test_claude_code_gets_the_api_key_only_when_given_one(tmp_path, monkeypatch):
+    from shfv.agents.claude_code import ClaudeCode
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "from-the-environment")
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://elsewhere.invalid")
+    env = ClaudeCode("m")._env(tmp_path, tmp_path)  # "login": nothing from the environment
+    assert not any(k.startswith("ANTHROPIC_") for k in env)
+    env = ClaudeCode("m", api_key="given")._env(tmp_path, tmp_path)
+    assert env["ANTHROPIC_API_KEY"] == "given" and "ANTHROPIC_BASE_URL" not in env
+    assert env["CLAUDE_CODE_SUBPROCESS_ENV_SCRUB"] == "1"
+
+
+def test_api_key_auth_takes_the_adapters_key_out_of_the_pipeline_environment(tmp_path, monkeypatch, capsys):
+    from shfv import cli
+
+    class OtherAdapter(FakeAgent):
+        api_key_env = "OTHER_PROVIDER_KEY"
+
+        def __init__(self, model, lean_threads=8, api_key=None):
+            super().__init__({}, model=model)
+            self.api_key = api_key
+
+    seen = {}
+
+    class StopRun(Exception):
+        pass
+
+    def fake_run(case, config, agent, *args, **kwargs):
+        seen.update(api_key=agent.api_key, left_in_env=os.environ.get("OTHER_PROVIDER_KEY"))
+        raise StopRun
+    monkeypatch.setitem(cli.ADAPTERS, "other", OtherAdapter)
+    monkeypatch.setattr(cli, "Run", fake_run)
+    monkeypatch.setattr(cli, "check_capabilities", lambda agent, profile: None)
+    argv = ["repair", "--case", "dalek-lean-verify/e65b46d0", "--agent", "other", "--auth", "api-key"]
+    monkeypatch.delenv("OTHER_PROVIDER_KEY", raising=False)
+    with pytest.raises(SystemExit):
+        cli.main(argv)
+    assert "OTHER_PROVIDER_KEY" in capsys.readouterr().err  # names the adapter's own variable
+    monkeypatch.setenv("OTHER_PROVIDER_KEY", "secret")
+    with pytest.raises(StopRun):
+        cli.main(argv)
+    assert seen == {"api_key": "secret", "left_in_env": None}  # builds and the gate cannot see it
 
 
 def test_model_without_prices_reports_unknown_cost_and_no_dollar_cap(toy_case, monkeypatch):

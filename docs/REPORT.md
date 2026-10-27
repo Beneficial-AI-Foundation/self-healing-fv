@@ -61,8 +61,8 @@ Exit 2 is also argparse's code for bad arguments. Exit 2 never means a pass.
 | `totals` | object | Cost, tokens, time (section 9) |
 | `provenance` | object | What produced the run (section 9) |
 | `inputs` | object | `repo`, `base_commit`, `change_commit`, `change_pr`, `change_pr_url`, `change_subject`, `cause`, `causes`, `pin_changes`, `fix_commits`, `generated`, `repo_lean_root` |
-| `config` | object | `path`, `sha256` (first 12 hex) and `budget` of the target config |
-| `agent` | object | `adapter`, `model` |
+| `config` | object | `path`, `sha256` (first 12 hex) and `budget` of the target config; `budget` includes any per-run override, and `budget_overrides` lists them (`--per-run-usd`, `--per-run-minutes`) |
+| `agent` | object | `adapter`, `model`, `enabled` (false with `--no-agent`: the sweep only), `auth` (`login` or `api-key`) |
 | `gate_version` | str | Hash of the gate's sources |
 | `toolchain` | str | The target's Lean toolchain in the broken state |
 | `error` | object | Only when the run failed: `outcome` (`gate-unavailable` or `infrastructure-failure`) and `detail` |

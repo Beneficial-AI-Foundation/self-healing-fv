@@ -96,12 +96,18 @@ def overlay_change(git: Git, miner: Miner, base: str, change: str, dest: Path,
     return applied
 
 
+# Copy-on-write where the filesystem has it: APFS `cp -c`; GNU `cp --reflink=auto` (XFS, Btrfs),
+# a plain copy elsewhere (ext4 on GitHub's runners). GNU `cp -c` means something else.
+CP_COW = ["cp", "-c", "-R"] if sys.platform == "darwin" else ["cp", "-a", "--reflink=auto"]
+
+
 def clone_lake_dir(src: Path, dest: Path) -> None:
-    """Copy-on-write clone of a .lake directory (APFS `cp -c`; falls back to a plain copy)."""
+    """Copy-on-write clone of a .lake directory (CP_COW; falls back to a plain copy)."""
     if dest.exists():
         return
-    r = subprocess.run(["cp", "-c", "-R", str(src), str(dest)], capture_output=True)
+    r = subprocess.run([*CP_COW, str(src), str(dest)], capture_output=True)
     if r.returncode != 0:
+        shutil.rmtree(dest, ignore_errors=True)  # a failed cp can leave a partial copy
         shutil.copytree(src, dest, symlinks=True)
 
 

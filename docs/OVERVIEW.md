@@ -192,7 +192,7 @@ Next: compare accepted and escalated cases with the human fixes in history, to c
 
 ## 7. Limits of the prototype
 
-- **Replays only.** It runs historical cases on a laptop. It does not run in GitHub Actions yet, and it opens no PRs.
+- **Replays only.** It runs historical cases on a laptop, or one at a time on a GitHub-hosted runner by manual dispatch. It opens no PRs.
 - **Two target repos configured:** curve25519-dalek-lean-verify and SymCrypt.
 - **One agent:** Claude Code. The adapter interface is ready for others; Codex CLI is next.
 - **All or nothing.** A case is accepted only if every broken proof is repaired.
