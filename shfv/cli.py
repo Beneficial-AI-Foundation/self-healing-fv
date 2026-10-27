@@ -78,6 +78,9 @@ def export(run_dirs: list[Path], to: Path, allow_uncommitted: bool) -> int:
     return 0
 
 
+NOTES = "\n## Notes\n"  # README.md heading after which hand-written notes survive re-export
+
+
 def write_index(to: Path) -> None:
     rows = []
     for f in sorted(to.glob("*/*.json")):
@@ -100,7 +103,11 @@ def write_index(to: Path) -> None:
              "| Case | Run | Tool | Gate | Model | Verdict | Repaired | Agent cost |",
              "|---|---|---|---|---|---|---|---|"]
     lines += [r[2] for r in sorted(rows, key=lambda r: (r[0], r[1]))]
-    (to / "README.md").write_text("\n".join(lines) + "\n")
+    # The table is regenerated; hand-written notes from the NOTES heading on are kept.
+    index = to / "README.md"
+    old = index.read_text() if index.exists() else ""
+    notes = old[old.index(NOTES) + 1:].rstrip("\n") if NOTES in old else ""
+    index.write_text("\n".join(lines) + "\n" + (f"\n{notes}\n" if notes else ""))
 
 
 def doctor(config: Path, repo: Path | None = None) -> int:

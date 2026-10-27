@@ -25,3 +25,9 @@ PR comments the bot produced on historical cases (`shfv repair`), exported with 
 | [PR 679](https://github.com/Beneficial-AI-Foundation/SparsePostQuantumRatchet-verify/pull/679) `e0e5b392` | [2026-10-27 08:14 UTC](spqr-e0e5b392/20261027T081408Z-claude-opus-5-5.md) | `ef44fbd` | `5693641` | `claude-opus-5-5` | accepted | 15/15 | $6.34 |
 | [PR 52](https://github.com/Beneficial-AI-Foundation/SparsePostQuantumRatchet-verify/pull/52) `e4dda3b0` | [2026-10-27 08:02 UTC](spqr-e4dda3b0/20261027T080200Z-claude-opus-5-5.md) | `ef44fbd` | `5693641` | `claude-opus-5-5` | accepted | 13/13 | $2.35 |
 | generated `gen-aeneas-6e167c9b` | [2026-10-26 12:42 UTC](symcrypt-gen-aeneas-6e167c9b/20261026T124231Z-claude-opus-5-5.md) | `20f70af` | `5693641` | `claude-opus-5-5` | accepted | 3/3 | $0.97 |
+
+## Notes
+
+### SPQR (held out)
+
+SparsePostQuantumRatchet-verify is a public repo, and Opus 5.5's training cutoff is about June 2026, so the model may have seen fixes merged before then. Of the four accepted SPQR cases, PR 52 (merged 2026-05-20, 13 theorems) is before the cutoff, and its human fix could be in the training data. PR 359 (2026-07-27), PR 493 (2026-08-27) and PR 679 (2026-10-19), 19 theorems in all, are after it. PR 106 (2026-06-04) is close to the cutoff, but no agent ran on it. Each report's "Compared with the human fix" section flags an edit 90% or more like the human's as possible recall.
