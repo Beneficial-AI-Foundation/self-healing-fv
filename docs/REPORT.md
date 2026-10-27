@@ -26,6 +26,7 @@ The last line on stdout has the form `<VERDICT> · <counts by outcome> · <cost>
 | `shfv render` | Re-rendered | – | – |
 | `shfv export` | Exported | A run has no provenance, or was made with uncommitted code | – |
 | `shfv doctor` | Every check passed | Something is missing | – |
+| `shfv compare-human` | Written | A path holds no run record | – |
 
 So exit 0 does not mean "repaired". Always read `verdict`.
 
