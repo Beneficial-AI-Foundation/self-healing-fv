@@ -48,7 +48,7 @@ V1:
 | Gate (§4) | G0–G3 and G5 (`lean4checker`); planted-violation tests; **complete-case acceptance** | G4 quality report; component acceptance | sandboxed `lake comparator` (stronger threat model) |
 | Outcomes (§5.1) | `repaired`, `statement-must-change`, `proof-hard`, `blocked-on`, `infrastructure-failure`, `gate-unavailable` | `spec-suspect`, `extraction-setup`, `behavior-difference-observed` | rename map for `rename-only` |
 | Delivery (S6, §5) | run record (S7); partial repairs kept as unaccepted suggestions | check runs, PR comment, PRs via GitHub App, patches for forks, optional Linear | auto-merge; draft statement changes |
-| Deployment (§9) | one manually dispatched GitHub Actions run on a fork, producing the run record as an artifact | reusable workflow, metering proxy, secret-free candidate container, egress filter, cost caps | |
+| Deployment (§9) | one manually dispatched GitHub Actions run in this repo (not a fork: see docs/ACTIONS.md), producing the run record as an artifact | reusable workflow, metering proxy, secret-free candidate container, egress filter, cost caps | |
 | Evaluation (§8) | repair rate, cost, gate rejections, PR 535 audit, no-LLM sweep baseline, human-fix comparison, adjudicated labels; newer cases held out from tuning | ungated baseline, repetitions, adapter and tool-profile comparisons, decision models, SymCrypt held out | |
 
 **First milestone (by 2026-10-24).** On the chosen toolchain: (1) `lean4checker` and the snapshot tooling run; (2) the frozen inventory of one real case is complete (§4.2); (3) one gate fixture accepts a valid repair and rejects the planted violations. If any of these fails, the prototype supports fewer cases; it never weakens acceptance.
@@ -586,7 +586,7 @@ As a secondary view, the confusion matrix compares the bot with the human fix:
 
 ## 9. Deployment (SCI-1717)
 
-This section is V1. The prototype runs replays locally and demonstrates one manually dispatched Actions run on a fork (§2.3).
+This section is V1. The prototype runs replays locally and demonstrates manually dispatched Actions runs in this repo (§2.3; docs/ACTIONS.md).
 
 Model keys: the bot runs in the target repo's own CI with that repo's own API keys, stored as repository or organization secrets. BAIF repos use BAIF's API keys; outside users supply their own. BAIF hosts no service and never holds anyone else's keys or code.
 
