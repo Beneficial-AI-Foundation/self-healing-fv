@@ -13,6 +13,7 @@ The prototype replays historical cases locally and writes a report; it opens no 
 | Doc | For |
 |---|---|
 | `docs/OVERVIEW.md` | The approach and the checks, in plain words |
+| `docs/RESULTS.md` | Headline results so far, each linked to its source; update it when a result changes |
 | `docs/CLI.md` | Running `shfv` and `gate`: options, output, troubleshooting |
 | `docs/REPORT.md` | The `report.json` fields and exit codes, for tools that call `shfv` |
 | `docs/ACTIONS.md` | Replaying a case on GitHub Actions (manual dispatch) |
