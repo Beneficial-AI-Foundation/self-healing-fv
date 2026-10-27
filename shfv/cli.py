@@ -23,9 +23,10 @@ from pathlib import Path
 from . import provenance
 from . import report as report_mod
 from .agents.claude_code import ClaudeCode
+from .agents.codex_cli import CodexCLI
 from .pipeline import ROOT, Run, check_capabilities, fmt_s
 
-ADAPTERS = {"claude-code": ClaudeCode}  # TODO(§7.1, V1): codex, minimal loop
+ADAPTERS = {"claude-code": ClaudeCode, "codex": CodexCLI}
 EXAMPLES = ROOT / "docs" / "examples" / "reports"
 
 
