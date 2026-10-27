@@ -3,6 +3,7 @@
   shfv repair --case dalek-lean-verify/e65b46d0 --agent claude-code [--model M]
   shfv render runs/<case>/<run id>/report.json
   shfv export runs/<case>/<run id> ... [--to docs/examples/reports]
+  shfv compare-human runs/ [--out summary.md] [--csv theorems.csv]
 
 `repair` replays one historical case: rebuilds the broken state (base proofs + the change's
 extracted code and pins), runs the repair agent on each broken proof, runs the gate, and writes
@@ -164,7 +165,15 @@ def main(argv: list[str] | None = None) -> int:
     e.add_argument("runs", type=Path, nargs="+", help="run directories (runs/<case>/<run id>)")
     e.add_argument("--to", type=Path, default=EXAMPLES)
     e.add_argument("--allow-uncommitted", action="store_true")
+    c = sub.add_parser("compare-human", help="compare the bot's repairs with the human fixes across runs (§8.2–8.4)")
+    c.add_argument("runs", type=Path, nargs="+",
+                   help="run directories, case directories (their latest run) or runs directories (every case's latest)")
+    c.add_argument("--out", type=Path, help="write the Markdown summary here (default: stdout)")
+    c.add_argument("--csv", type=Path, help="also write the per-theorem table as CSV")
     a = ap.parse_args(argv)
+    if a.cmd == "compare-human":
+        from . import human_compare
+        return human_compare.main(a.runs, a.out, a.csv)
     if a.cmd == "render":
         print(render(a.report, a.work, a.audit_focus))
         return 0

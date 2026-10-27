@@ -202,6 +202,14 @@ uv run shfv export runs/dalek-lean-verify-e65b46d0/latest runs/dalek-lean-verify
 
 This copies each run's `report.md`, plus a small metadata file (no transcripts), to `docs/examples/reports/<case>/<run id>.md`, and regenerates `docs/examples/reports/README.md`: one row per run, with case, date, tool commit, gate version, model, verdict and cost. Exporting a newer run of a case adds a row and keeps the old one, so results can be compared across tool versions. Runs made or rendered with uncommitted code are refused unless you pass `--allow-uncommitted`.
 
+### Comparing many runs with the human fixes
+
+```
+uv run shfv compare-human runs/ --out summary.md --csv theorems.csv
+```
+
+This reads finished run records only (no builds) and writes one table row per broken theorem: the bot's outcome, what the human fix did (kept, changed or removed the statement), the proof sizes, how alike the two edits are, and the flags. It also writes per-case and overall counts, each with its denominator. Pass a runs directory (every case's `latest` run), case directories, or single run directories; repeat them to combine runs, e.g. from another target. Example: [docs/experiments/human-fix-comparison.md](experiments/human-fix-comparison.md).
+
 ## 6. The gate on its own
 
 The gate (`gates/`) is separate from the agent and the pipeline: model-free, deterministic, and reached only through this CLI. It works on **snapshots**. A snapshot is a build of a tree plus one fingerprint per frozen declaration: its kind, its elaborated statement, its definition body if it has one, its axiom closure and its `sorry` sources. The pipeline runs these steps for you; to run them by hand on a case:
