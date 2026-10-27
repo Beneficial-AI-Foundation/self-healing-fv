@@ -208,3 +208,28 @@ def test_explicit_ci_key_is_agent_only(harness, monkeypatch, tmp_path):
     assert capture["settings"]["shell_environment_policy.ignore_default_excludes"] == "false"
     assert "test-key-not-real" not in json.dumps(capture)
     assert "test-key-not-real" not in Path(att.transcript).read_text()
+
+
+def test_cli_passes_codex_key_and_model_without_starting_repair(monkeypatch, capsys):
+    from shfv import cli
+
+    class StopBeforeRepair(Exception):
+        pass
+
+    def inspect_run(case, config, agent, *args, **kwargs):
+        assert isinstance(agent, CodexCLI)
+        assert agent.model == "explicit-codex-model"
+        assert agent.api_key == "test-key-not-real" and agent.auth == "api-key"
+        assert "CODEX_API_KEY" not in os.environ
+        raise StopBeforeRepair
+
+    monkeypatch.setattr(cli, "Run", inspect_run)
+    argv = ["repair", "--case", "dalek-lean-verify/9d82afb9", "--agent", "codex",
+            "--model", "explicit-codex-model", "--auth", "api-key"]
+    monkeypatch.delenv("CODEX_API_KEY", raising=False)
+    with pytest.raises(SystemExit):
+        cli.main(argv)
+    assert "CODEX_API_KEY" in capsys.readouterr().err
+    monkeypatch.setenv("CODEX_API_KEY", "test-key-not-real")
+    with pytest.raises(StopBeforeRepair):
+        cli.main(argv)

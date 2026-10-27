@@ -273,6 +273,26 @@ A target repo is described by `targets/<repo>.toml`: `dalek-lean-verify`, `spqr`
 - `[prices."<model>"]`: USD per million tokens (input, output, cache read, 5-minute and 1-hour cache writes). Cost is computed from these for every adapter; the agent harness's own figure is only a cross-check. A model without an entry has cost "unknown" and no dollar cap.
 - `[repair]`: `sweep = true` runs the no-model sweep before the agent.
 
+### Codex CLI
+
+Use Codex 0.164.0 with an explicit Codex model (the existing target defaults name a Claude
+model): `uv run shfv repair --case dalek-lean-verify/9d82afb9 --agent codex --model gpt-5.4-mini`.
+Each theorem gets a fresh `codex exec` session, the shared repair prompt, structured diagnosis,
+and the pinned Lean LSP MCP server for the `lsp` profile. The gate and report are unchanged.
+
+The minutes deadline kills the process group. Codex has no CLI turn or dollar cap; these are
+declared unsupported. Usage is priced by the pipeline; existing target configs have no Codex
+prices, so cost is `no-price`. Interrupted usage is marked incomplete.
+
+Use `--auth api-key` with `CODEX_API_KEY` provisioned for CI. The adapter accepts the key through
+the shared contract. Key runs use
+an empty Codex home; shell environment exclusions keep the key out of agent commands. Login
+runs reuse Codex's own authentication without reading or copying credentials. User config and
+rules, project instructions, plugins and memories are disabled, but **Codex 0.164.0 still loads
+global `$CODEX_HOME/AGENTS.md` in login mode**. Workspace-write restricts command writes to the
+workspace; MCP runs outside that command sandbox. See
+[the experiment](experiments/codex-adapter.md) for verification and remaining isolation limits.
+
 ## 8. Troubleshooting
 
 | Symptom | What to do |
@@ -288,6 +308,6 @@ A target repo is described by `targets/<repo>.toml`: `dalek-lean-verify`, `spqr`
 
 - **Replays only.** Target configs exist for curve25519-dalek-lean-verify, SparsePostQuantumRatchet-verify (SPQR) and SymCrypt, on the toolchains of the replayed cases.
 - **Kernel replay stops at native code.** Modules with `native_decide` or `bv_decide` proofs are only partly re-checked by G5, and such acceptances are flagged (section 4). A complete re-check is V1 (DESIGN.md §11, question 21). Live CI is V1 (DESIGN.md §9); the prototype replays one case at a time on Actions ([ACTIONS.md](ACTIONS.md)).
-- **Claude Code only.** The adapter interface is ready for others (Codex is next), but only one adapter exists (DESIGN.md §7).
+- **Agent adapters:** Claude Code and Codex CLI; Codex's budget and isolation limits are described above.
 - **Complete-case acceptance.** A change is accepted only if every broken theorem is repaired (DESIGN.md §4.3).
 - **Not built yet:** the sandbox and metering proxy for the agent (DESIGN.md §3.4, §9.5). Until then the cost caps are Claude Code's own enforcement plus the pipeline's accounting, not a hard limit.
