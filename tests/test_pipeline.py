@@ -159,13 +159,13 @@ class FakeAgent:
 
 
 def run_case(toy_case, monkeypatch, script, label, per_run_usd=10.0, model="fake-model", partial=False,
-             expect_error=False):
+             expect_error=False, **run_options):
     cfg = toy_case["root"] / f"toy-{label}.toml"
     cfg.write_text(CONFIG.format(per_run_usd=per_run_usd))
     monkeypatch.setattr(pipeline, "load_case", lambda cid, path=None: (toy_case["record"], toy_case["replay"]))
     agent = FakeAgent(script, model=model, partial=partial)
     run = Run(toy_case["case_id"], cfg, agent, toy_case["repo"], toy_case["work"], toy_case["root"] / "runs",
-              gate_human_fix=False, label=label)
+              gate_human_fix=False, label=label, **run_options)
     rep = run.execute()
     assert expect_error or "error" not in rep, rep.get("error")
     md = render(rep)  # every lifecycle path must render a report
@@ -247,6 +247,35 @@ def test_run_cost_budget_stops_further_attempts(toy_case, monkeypatch):
     assert [c[0] for c in agent.calls] == ["double_spec"]
     e = {x["decl"]: x for x in rep["repairs"]}
     assert e["double_even"]["outcome"] == "proof-hard" and "cost budget" in e["double_even"]["reason"]
+
+
+def test_run_cost_override_replaces_the_config_cap_and_is_recorded(toy_case, monkeypatch):
+    rep, agent, _ = run_case(toy_case, monkeypatch, GOOD, "override", per_run_usd=10.0,
+                             budget_overrides={"per_run_usd": COST + 0.04})
+    assert [c[0] for c in agent.calls] == ["double_spec"]
+    assert rep["config"]["budget"]["per_run_usd"] == COST + 0.04
+    assert rep["config"]["budget_overrides"] == {"per_run_usd": COST + 0.04}
+
+
+def test_no_agent_runs_the_sweep_only_and_escalates_the_rest(toy_case, monkeypatch):
+    rep, agent, _ = run_case(toy_case, monkeypatch, GOOD, "noagent", use_agent=False)
+    assert agent.calls == []
+    e = {x["decl"]: x for x in rep["repairs"]}
+    assert e["double_spec"]["outcome"] == "proof-hard" and "--no-agent" in e["double_spec"]["reason"]
+    assert e["double_even"]["outcome"] == "blocked-on"
+    assert rep["verdict"] == "escalated" and rep["agent"]["enabled"] is False
+    assert rep["totals"]["cost_usd"] in (0, None)
+
+
+def test_claude_code_gets_the_api_key_only_when_given_one(tmp_path, monkeypatch):
+    from shfv.agents.claude_code import ClaudeCode
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "from-the-environment")
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://elsewhere.invalid")
+    env = ClaudeCode("m")._env(tmp_path, tmp_path)  # "login": nothing from the environment
+    assert not any(k.startswith("ANTHROPIC_") for k in env)
+    env = ClaudeCode("m", api_key="given")._env(tmp_path, tmp_path)
+    assert env["ANTHROPIC_API_KEY"] == "given" and "ANTHROPIC_BASE_URL" not in env
+    assert env["CLAUDE_CODE_SUBPROCESS_ENV_SCRUB"] == "1"
 
 
 def test_model_without_prices_reports_unknown_cost_and_no_dollar_cap(toy_case, monkeypatch):

@@ -3,8 +3,10 @@
 Isolation in this prototype (TODO §3.4, §9.3: container without secrets, metering proxy, egress
 filter): only the lean-lsp MCP server (remote search tools off), an explicit tool allowlist, no
 CLAUDE.md or auto-memory, no plugins, and no view of the outer git repository or the user's git
-identity. Runs on whatever Claude Code is logged in with; the cost is the harness's own
-(API-equivalent) estimate.
+identity. Authentication: by default Claude Code runs on whatever it is logged in with, and every
+ANTHROPIC_* variable is stripped. With an `api_key` (CI, §9.3) it gets that key only, and is told to
+scrub it from the commands it runs (CLAUDE_CODE_SUBPROCESS_ENV_SCRUB), so builds the agent starts do
+not see it. The cost is computed from token counts (shfv/costs.py).
 """
 from __future__ import annotations
 
@@ -40,9 +42,11 @@ class ClaudeCode:
     capabilities = {"tool_calling": True, "mcp": True, "skills": True, "structured_output": True,
                     "lsp_tools": True}
 
-    def __init__(self, model: str, lean_threads: int = 8):
+    def __init__(self, model: str, lean_threads: int = 8, api_key: str | None = None):
         self.model = model
         self.lean_threads = lean_threads
+        self.api_key = api_key
+        self.auth = "api-key" if api_key else "login"
 
     def _env(self, workspace: Path, log_dir: Path) -> dict:
         gitcfg = log_dir / "bot.gitconfig"
@@ -54,6 +58,8 @@ class ClaudeCode:
             "GIT_CEILING_DIRECTORIES": str(workspace.parent), "GIT_CONFIG_GLOBAL": str(gitcfg),
             "GIT_CONFIG_NOSYSTEM": "1",
         })
+        if self.api_key:
+            env.update({"ANTHROPIC_API_KEY": self.api_key, "CLAUDE_CODE_SUBPROCESS_ENV_SCRUB": "1"})
         return env
 
     def version(self) -> str | None:

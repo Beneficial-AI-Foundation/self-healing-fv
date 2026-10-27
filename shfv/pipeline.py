@@ -132,10 +132,15 @@ def leaves_first(broken: list[dict], base_records: dict) -> list[dict]:
 class Run:
     def __init__(self, case_id: str, config: Path, agent: AgentAdapter, repo: Path, work: Path, runs: Path,
                  attempt_anyway: bool = False, gate_human_fix: bool | None = None, keep: bool = False,
-                 label: str | None = None, replay_path: Path | None = None):
+                 label: str | None = None, replay_path: Path | None = None, use_agent: bool = True,
+                 budget_overrides: dict | None = None):
         self.case_id, self.agent, self.repo = case_id, agent, repo.expanduser()
+        self.use_agent = use_agent  # False: the sweep only, no model call (and no key needed)
         with open(config, "rb") as f:
             self.cfg = tomllib.load(f)
+        # Per-run caps from the command line (e.g. a CI dispatch input); the report records them.
+        self.budget_overrides = budget_overrides or {}
+        self.cfg["budget"].update(self.budget_overrides)
         self.config = config.resolve()
         self.work, self.attempt_anyway, self.keep = work.resolve(), attempt_anyway, keep
         self.gate_human_fix = gate_human_fix
@@ -271,6 +276,12 @@ class Run:
                     continue
                 self.p.result("the sweep did not repair it" + (f" (tried {', '.join(t['action'] for t in tries)})" if tries else ""))
                 restore_sources(cand, checkpoint, tree_sources(cand))
+            if not self.use_agent:
+                entry.update(outcome="proof-hard", reason="not attempted: the agent is off for this run (--no-agent)")
+                self.p.step(f"[{i}/{len(broken)}] {b['key']} → no agent attempt (--no-agent)")
+                if b.get("stubbed", True):
+                    self._restub(cand, b)
+                continue
             # 2. Agent attempts: patch the old proof, then a fresh session with the failure as feedback.
             theorem_deadline = time.monotonic() + 60 * min(bud["per_theorem_minutes"], remaining_min)
             theorem_usd = None if remaining_usd is None else min(bud["per_theorem_usd"], remaining_usd)
@@ -515,8 +526,9 @@ class Run:
                                    "fix_commits": r.get("fix", {}).get("fix_commits", [])},
                         "config": {"path": str(self.config.relative_to(ROOT)) if self.config.is_relative_to(ROOT) else str(self.config),
                                    "sha256": hashlib.sha256(self.config.read_bytes()).hexdigest()[:12],
-                                   "budget": self.cfg["budget"]},
-                        "agent": {"adapter": self.agent.name, "model": self.agent.model},
+                                   "budget": self.cfg["budget"], "budget_overrides": self.budget_overrides},
+                        "agent": {"adapter": self.agent.name, "model": self.agent.model, "enabled": self.use_agent,
+                                  "auth": getattr(self.agent, "auth", None)},
                         "gate_version": gate_version, "repairs": [], "escalations": []}
         try:
             t0 = time.time()

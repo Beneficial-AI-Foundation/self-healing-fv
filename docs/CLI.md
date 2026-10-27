@@ -2,7 +2,7 @@
 
 This guide shows how to replay a historical proof break through the self-healing pipeline. In a replay, an agent repairs the broken proofs, the gate checks the repair, and you get the report the bot would post on the PR. It also shows how to use the gate on its own. For why the pipeline works this way, see [DESIGN.md](DESIGN.md).
 
-The prototype runs **historical replays on your machine**. It does not run in GitHub Actions yet, and it posts nothing anywhere.
+The prototype runs **historical replays on your machine**, or one replay at a time on a GitHub-hosted runner ([ACTIONS.md](ACTIONS.md)). It posts nothing anywhere.
 
 ## 1. Setup
 
@@ -86,6 +86,9 @@ A typical run takes 10–20 minutes. Most of that is building and fingerprinting
 | `--label NAME` | Add a suffix to the run id, e.g. `demo`. Every run already gets its own directory (section 5), so you need this only to tag a run. |
 | `--gate-human-fix` / `--no-gate-human-fix` | Also run the human's historical fix through the gate, as if the bot had proposed it. This checks the gate against real data. It is on by default for escalations, and costs one more clean rebuild (2–7 minutes). |
 | `--attempt-anyway` | Run the agent even on theorems whose statement no longer type-checks. This is for demos, to show that the bot will not change the statement. |
+| `--no-agent` | Run the no-model sweep only. A theorem it does not repair is not attempted, so no model is called and no key is needed. |
+| `--auth api-key` | Run the agent on `ANTHROPIC_API_KEY` instead of Claude Code's login (CI). The key is handed to the agent alone, not to builds or the gate. |
+| `--per-run-usd N`, `--per-run-minutes N` | Override the target config's per-run caps for this run. The report records the override. |
 | `--keep` | Keep the candidate and gate workspaces under `work/<case>/run-<run id>/` for inspection. They are deleted by default. |
 | `--agent NAME` | The agent adapter. Default: the target config's `[agent].adapter` (`claude-code`). |
 | `--audit-focus TEXT` | Show the audit's before/after first for declarations whose name contains `TEXT` (e.g. `clamped`). |
@@ -276,7 +279,7 @@ A target repo is described by `targets/<repo>.toml`: `dalek-lean-verify` and `sy
 ## 9. Limits of this prototype
 
 - **Replays only.** Target configs exist for curve25519-dalek-lean-verify and SymCrypt, on the toolchains of the replayed cases.
-- **Kernel replay stops at native code.** Modules with `native_decide` or `bv_decide` proofs are only partly re-checked by G5, and such acceptances are flagged (section 4). A complete re-check is V1 (DESIGN.md §11, question 21). GitHub Actions deployment and live CI are V1 (DESIGN.md §9).
+- **Kernel replay stops at native code.** Modules with `native_decide` or `bv_decide` proofs are only partly re-checked by G5, and such acceptances are flagged (section 4). A complete re-check is V1 (DESIGN.md §11, question 21). Live CI is V1 (DESIGN.md §9); the prototype replays one case at a time on Actions ([ACTIONS.md](ACTIONS.md)).
 - **Claude Code only.** The adapter interface is ready for others (Codex is next), but only one adapter exists (DESIGN.md §7).
 - **Complete-case acceptance.** A change is accepted only if every broken theorem is repaired (DESIGN.md §4.3).
 - **Not built yet:** the sandbox and metering proxy for the agent (DESIGN.md §3.4, §9.5). Until then the cost caps are Claude Code's own enforcement plus the pipeline's accounting, not a hard limit.
