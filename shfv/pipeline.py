@@ -183,7 +183,17 @@ class Run:
                 ok = ok and d is not None and d["proof"].strip() == STUB
         if not ok:
             self.p.step("replay workspaces missing or stale: rebuilding with replay/replay_case.py")
-            replay_case.replay(r, self.repo, self.work, skip_base=False)
+            res = replay_case.replay(r, self.repo, self.work, skip_base=False)
+            # The rebuilt case must reproduce its replay record, or there is nothing valid to repair
+            # (e.g. a file killed after FILE_TIMEOUT_S on a slow machine made the base "not build").
+            want = self.replay.get("verdict")
+            if res.get("verdict") != want:
+                why = [f"{s}: hung {', '.join(res[s]['hung'])}" if res.get(s, {}).get("hung")
+                       else f"{s}: failed at {res[s].get('stage', 'build')}" for s in ("base", "fixed")
+                       if res.get(s) and not res[s].get("ok")]
+                raise RuntimeError(f"replaying the case here gave \"{res.get('verdict')}\", not \"{want}\" as in its "
+                                   f"replay record" + (f" ({'; '.join(why)})" if why else "")
+                                   + f"; build logs in {self.case_dir / 'logs'}")
         self.base_root, self.broken_root, self.fixed_root = trees
         self.base, self.broken, self.fixed = (t / self.wp for t in trees)
 
