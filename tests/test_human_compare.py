@@ -86,7 +86,7 @@ def test_counts_keep_their_denominators():
     assert s["cases_without_fix"] == ["symcrypt/gen-00000003"]
     md = hc.render(reps, table(*reps))
     assert "1 of 1 identical to the human edit" in md and "1 of 5 proof breaks" in md
-    assert "3 of 5 proof breaks repaired" in md and "rejected (G1)" in md
+    assert "dalek: 3 of 5 proof breaks repaired" in md and "rejected (G1)" in md
 
 
 def test_finds_runs_by_run_case_or_runs_directory(tmp_path):

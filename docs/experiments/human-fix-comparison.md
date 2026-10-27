@@ -30,11 +30,11 @@ Definitions:
 
 ## Results
 
-The generated summary has every number. The main ones:
+The generated summary has every number. All counts here are for the 15 curve25519-dalek-lean-verify cases. SymCrypt's generated case is excluded because it has no human fix; its 3 agent repairs appear only in the per-theorem table. The main ones:
 
 | | Count |
 |---|---|
-| Proof breaks repaired | 17 of 95 (14 by the agent, 3 by the no-model sweep) |
+| Proof breaks repaired | **dalek: 17 of 95 proof breaks** (14 by the agent, 3 by the no-model sweep) |
 | Repairs with no flag (strict) | 5 of 17 (11 rest on an inherited `sorry`, 1 has an incomplete kernel replay) |
 | Agent repairs comparable with a human edit | 10 of 14 (in the other 4, the human left that proof unchanged and fixed something else) |
 | Identical to the human edit | 3 of 10 |

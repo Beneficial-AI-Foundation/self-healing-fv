@@ -28,7 +28,7 @@ Computed from run records alone (DESIGN.md §8.2–8.4). Counts cover the theore
 ## Overall
 
 - **Coverage:** 16 runs of 16 cases; 154 broken theorems in cases with a human fix: 95 proof breaks (statement still type-checks) and 59 statement breaks (statement or definition no longer type-checks).
-- **Repairs:** 17 of 95 proof breaks repaired: 14 by the agent, 3 by the no-model sweep. 5 of 17 repairs carry no flag (inherited `sorry`: 11; kernel replay incomplete: 1).
+- **Repairs:** dalek-lean-verify: 17 of 95 proof breaks repaired: 14 by the agent, 3 by the no-model sweep. 5 of 17 repairs carry no flag (inherited `sorry`: 11; kernel replay incomplete: 1).
 - **Agent edit vs human edit:** 14 of 14 agent repairs have a proof diff in the record. Of those, the human left the proof unchanged in 4 (the human fixed something else), so 10 can be compared: 3 of 10 identical to the human edit (similarity 1.0), 3 of 10 flagged as possible memorization (≥ 0.9), median similarity 0.50 (range 0.10–1.00). Changed lines over those 10: agent 55, human 68.
 - **Proof size:** of 14 agent repairs with both sizes, the agent's proof is shorter than the human's in 4, the same length in 6, longer in 4 (1518 vs 1647 lines in total). Agent-reported helper lemmas, which these line counts leave out: in 1 of 14 agent repairs.
 - **Statement still type-checked, human changed it anyway:** 23 of 95 proof breaks (and 2 more the human removed or commented out).

@@ -120,6 +120,7 @@ def summarize(reps: list[dict], table: list[dict]) -> dict:
     return {
         "runs": len(reps), "cases": len({r["case_id"] for r in reps}),
         "cases_without_fix": sorted({r["case"] for r in table if r["human_group"] == "no human fix"}),
+        "repos": sorted({r["case"].split("/", 1)[0] for r in t}),
         "theorems": len(t), "proof_breaks": len(proofs), "statement_breaks": len(stmts),
         "repaired": len(repaired), "by_agent": len(agent), "by_sweep": len(repaired) - len(agent),
         "strict": len(repaired) - len(flagged),
@@ -183,7 +184,7 @@ def render(reps: list[dict], table: list[dict]) -> str:
             f"{s['theorems']} broken theorems in cases with a human fix: {s['proof_breaks']} proof breaks "
             f"(statement still type-checks) and {s['statement_breaks']} statement breaks (statement or definition "
             "no longer type-checks).",
-            f"- **Repairs:** {of(s['repaired'], s['proof_breaks'], 'proof breaks repaired')}: "
+            f"- **Repairs:** {', '.join(s['repos'])}: {of(s['repaired'], s['proof_breaks'], 'proof breaks repaired')}: "
             f"{s['by_agent']} by the agent, {s['by_sweep']} by the no-model sweep. "
             f"{of(s['strict'], s['repaired'], 'repairs carry no flag')} "
             f"(inherited `sorry`: {s['inherited_sorry']}; kernel replay incomplete: {s['kernel_replay_incomplete']}).",
