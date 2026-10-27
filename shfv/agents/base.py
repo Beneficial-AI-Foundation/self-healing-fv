@@ -70,6 +70,10 @@ class AgentAdapter(Protocol):
     model: str
     # Declared capabilities (§7.1); an adapter that cannot meet a tool profile refuses to start.
     capabilities: dict
+    # The environment variable holding its model key under `--auth api-key` (e.g. ANTHROPIC_API_KEY).
+    # The pipeline takes it out of its own environment and passes it as `api_key`; the adapter keeps
+    # it out of the commands its agent runs. V1 passes a metering-proxy token instead (§3.4, §9.3).
+    api_key_env: str
 
     def version(self) -> str | None:
         """The harness's own version, for provenance."""

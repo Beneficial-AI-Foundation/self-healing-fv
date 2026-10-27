@@ -153,8 +153,9 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--no-agent", action="store_true",
                    help="the no-model sweep only: theorems it does not repair are not attempted (no key needed)")
     r.add_argument("--auth", choices=["login", "api-key"], default="login",
-                   help="agent authentication: the harness's own login (default), or ANTHROPIC_API_KEY, which "
-                        "is then handed to the agent only, not to builds or the gate (CI, DESIGN.md §9.3)")
+                   help="agent authentication: the harness's own login (default), or the adapter's API key "
+                        "variable (ANTHROPIC_API_KEY for claude-code), which is then handed to the agent only, "
+                        "not to builds or the gate (CI, DESIGN.md §9.3)")
     r.add_argument("--per-run-usd", type=float, help="override the target config's [budget].per_run_usd")
     r.add_argument("--per-run-minutes", type=float, help="override the target config's [budget].per_run_minutes")
     r.add_argument("--keep", action="store_true", help="keep the candidate and gate workspaces")
@@ -190,9 +191,10 @@ def main(argv: list[str] | None = None) -> int:
     if adapter not in ADAPTERS:
         ap.error(f"unknown adapter {adapter!r} (known: {', '.join(sorted(ADAPTERS))})")
     # The key leaves this process's environment, so the builds and the gate (subprocesses) never see it.
-    api_key = os.environ.pop("ANTHROPIC_API_KEY", None) if a.auth == "api-key" else None
+    key_env = ADAPTERS[adapter].api_key_env
+    api_key = os.environ.pop(key_env, None) if a.auth == "api-key" else None
     if a.auth == "api-key" and not api_key and not a.no_agent:
-        ap.error("--auth api-key needs ANTHROPIC_API_KEY in the environment")
+        ap.error(f"--auth api-key needs {key_env} in the environment (the {adapter} adapter's key)")
     agent = ADAPTERS[adapter](model=model, lean_threads=cfg["lean"].get("lean_num_threads", 8),
                               **({"api_key": api_key} if api_key else {}))
     check_capabilities(agent, cfg["agent"].get("tool_profile", "lsp"))

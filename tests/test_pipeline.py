@@ -9,6 +9,7 @@ exhaustion, a model without prices, and gate-unavailable.
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -276,6 +277,38 @@ def test_claude_code_gets_the_api_key_only_when_given_one(tmp_path, monkeypatch)
     env = ClaudeCode("m", api_key="given")._env(tmp_path, tmp_path)
     assert env["ANTHROPIC_API_KEY"] == "given" and "ANTHROPIC_BASE_URL" not in env
     assert env["CLAUDE_CODE_SUBPROCESS_ENV_SCRUB"] == "1"
+
+
+def test_api_key_auth_takes_the_adapters_key_out_of_the_pipeline_environment(tmp_path, monkeypatch, capsys):
+    from shfv import cli
+
+    class OtherAdapter(FakeAgent):
+        api_key_env = "OTHER_PROVIDER_KEY"
+
+        def __init__(self, model, lean_threads=8, api_key=None):
+            super().__init__({}, model=model)
+            self.api_key = api_key
+
+    seen = {}
+
+    class StopRun(Exception):
+        pass
+
+    def fake_run(case, config, agent, *args, **kwargs):
+        seen.update(api_key=agent.api_key, left_in_env=os.environ.get("OTHER_PROVIDER_KEY"))
+        raise StopRun
+    monkeypatch.setitem(cli.ADAPTERS, "other", OtherAdapter)
+    monkeypatch.setattr(cli, "Run", fake_run)
+    monkeypatch.setattr(cli, "check_capabilities", lambda agent, profile: None)
+    argv = ["repair", "--case", "dalek-lean-verify/e65b46d0", "--agent", "other", "--auth", "api-key"]
+    monkeypatch.delenv("OTHER_PROVIDER_KEY", raising=False)
+    with pytest.raises(SystemExit):
+        cli.main(argv)
+    assert "OTHER_PROVIDER_KEY" in capsys.readouterr().err  # names the adapter's own variable
+    monkeypatch.setenv("OTHER_PROVIDER_KEY", "secret")
+    with pytest.raises(StopRun):
+        cli.main(argv)
+    assert seen == {"api_key": "secret", "left_in_env": None}  # builds and the gate cannot see it
 
 
 def test_model_without_prices_reports_unknown_cost_and_no_dollar_cap(toy_case, monkeypatch):

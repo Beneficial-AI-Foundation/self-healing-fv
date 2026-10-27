@@ -39,6 +39,7 @@ STOPS = {"success": "done", "error_max_turns": "max-turns", "error_max_budget_us
 
 class ClaudeCode:
     name = "claude-code"
+    api_key_env = "ANTHROPIC_API_KEY"
     capabilities = {"tool_calling": True, "mcp": True, "skills": True, "structured_output": True,
                     "lsp_tools": True}
 
@@ -59,7 +60,7 @@ class ClaudeCode:
             "GIT_CONFIG_NOSYSTEM": "1",
         })
         if self.api_key:
-            env.update({"ANTHROPIC_API_KEY": self.api_key, "CLAUDE_CODE_SUBPROCESS_ENV_SCRUB": "1"})
+            env.update({self.api_key_env: self.api_key, "CLAUDE_CODE_SUBPROCESS_ENV_SCRUB": "1"})
         return env
 
     def version(self) -> str | None:
