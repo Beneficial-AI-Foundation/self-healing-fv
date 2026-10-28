@@ -19,15 +19,20 @@ from .prompt import DIAGNOSIS_SCHEMA, GIVE_UP, build_prompt, validate_diagnosis
 
 
 def normalize_usage(usage: object) -> dict | None:
-    """Codex input includes cached input; our price fields are disjoint."""
+    """Codex input includes cached input; our price fields are disjoint. Cache writes come with no
+    duration, so they are counted as the longer, more expensive kind (`cache_write_1h`), and are not
+    subtracted from input: the estimate errs high, as in costs.normalize. Output already includes
+    reasoning; `reasoning_output` is kept for information and is not priced again."""
     if not isinstance(usage, dict):
         return None
-    inp, out, cached = (usage.get("input_tokens"), usage.get("output_tokens"),
-                        usage.get("cached_input_tokens", 0))
-    if any(type(n) is not int or n < 0 for n in (inp, out, cached)) or cached > inp:
+    inp, out, cached, written, reasoning = (
+        usage.get("input_tokens"), usage.get("output_tokens"), usage.get("cached_input_tokens", 0),
+        usage.get("cache_write_input_tokens", 0), usage.get("reasoning_output_tokens", 0))
+    if any(type(n) is not int or n < 0 for n in (inp, out, cached, written, reasoning)) or cached > inp \
+            or reasoning > out:
         return None
     return {"input": inp - cached, "output": out, "cache_read": cached,
-            "cache_write_5m": 0, "cache_write_1h": 0}
+            "cache_write_5m": 0, "cache_write_1h": written, "reasoning_output": reasoning}
 
 
 class CodexCLI:
