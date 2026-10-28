@@ -40,6 +40,7 @@ sys.path.insert(0, str(ROOT / "replay"))
 import replay_case  # noqa: E402  (also puts mining/ on sys.path)
 from mine_history import Git, parse_decls  # noqa: E402
 
+WORK = replay_case.WORK  # default replay workspaces: outside this repo (§8.5)
 STUB = ":= by sorry"
 
 

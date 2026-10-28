@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sys
 import tempfile
@@ -28,7 +29,8 @@ LEFTOVER_RE = re.compile(r"(?<![\w.])/(?:Users|home|private|var/folders|tmp)/[^\
 
 def make_sanitizer(extra_prefixes: dict[str, str]):
     """Return a function that rewrites local absolute paths inside any JSON value."""
-    prefixes = {str((ROOT / "work").resolve()): "work", str(ROOT): "."}
+    work = Path(os.environ.get("SHFV_WORK") or Path.home() / "baif" / "shfv-work")  # as replay_case.WORK
+    prefixes = {str((ROOT / "work").resolve()): "work", str(work.resolve()): "work", str(ROOT): "."}
     prefixes.update(extra_prefixes)
     prefixes[tempfile.gettempdir()] = "<tmp>"
     prefixes[str(Path.home())] = "~"

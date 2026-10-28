@@ -53,3 +53,16 @@ def test_failed_run_without_error_record_gives_the_gate_reason():
            "reason": "kernel replay (G5) could not run: no checker"}
     md = render(minimal_report(verdict="failed", repairs=[rep]))
     assert "`None`" not in md and "kernel replay (G5) could not run" in md
+
+
+def test_report_says_what_the_tripwire_found():
+    clean = {"version": 1, "verdict": "clean", "attempts": 2, "tool_calls": 30, "transcripts_missing": [], "flags": [],
+             "n_flags": 0, "counts": {"outside-read:toolchain": 3}}
+    assert "Tripwire: no reads outside the workspace" in render(minimal_report(tripwire=clean))
+    flag = {"attempt": "01-T", "tool": "Bash", "route": "outside-read", "area": "replay-trees", "paths": [],
+            "detail": "cat ../../fixed/A.lean `@someone` https://x.example", "result": "ok", "flag": True}
+    md = render(minimal_report(tripwire={**clean, "verdict": "flagged", "flags": [flag], "n_flags": 1}))
+    line = next(l for l in md.splitlines() if "Tripwire" in l)
+    assert line.startswith("⚠️ Tripwire: 1 look(s)") and "../../fixed/A.lean" in line
+    assert "@someone" not in line and "https://" not in line
+    assert "Tripwire: not run" in render(minimal_report())
