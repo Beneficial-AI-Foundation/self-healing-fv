@@ -72,8 +72,23 @@ The work folder is `/mnt/shfv/work` on runners with a larger `/mnt`, otherwise u
 - **The project builds are the saving.** On an exact hit, the dalek base and fixed builds take 15 s each instead of about 650 s. Packages save 38 s (dalek) and 100 s (SPQR).
 - **A neighbouring case helps only if its pins match.** SPQR PR 287 changed the Lean and Mathlib pins, so its builds did not help PR 359 at all. Dalek PR 232 changed only the Aeneas pin, and its builds saved 365 s on PR 278.
 - **The broken state is always rebuilt** (105 s dalek, 30 s SPQR): the cache does not hold it.
-- **Mathlib is left out of the cache.** It is 5.5–7 GB per revision unpacked, and PR 278 needs two, which would fill most of the 10 GB per repo. Mathlib's own cache took 45–97 s per state on run 1. Without Mathlib, a case's entry is about 1 GB before compression (Aeneas, the other packages, two project builds of about 0.25 GB).
-- **Not measured on Actions yet.** There, a restore also downloads and unpacks the entry, and the store is copied rather than cloned (ext4), so the gains will be smaller than on the laptop. The cold run 2 replay took 12.4 min on the 8-core runner. The next dispatch will show the restore time and the hit kind in the job summary.
+- **Mathlib is left out of the cache.** It is 5.5–7 GB per revision unpacked, and PR 278 needs two, which would fill most of the 10 GB per repo. Mathlib's own cache took 45–97 s per state on run 1. Without Mathlib, dalek PR 278's entry is 1.7 GB unpacked (both pins of Aeneas and each other package, two project builds of about 0.23 GB) and 0.5 GB compressed.
+
+**On Actions** (8-core runner, 2026-10-28, tool `522c912`): dalek PR 278 with the agent, dispatched twice in a row, a miss ([run 40733313019](https://github.com/Beneficial-AI-Foundation/self-healing-fv/actions/runs/40733313019)) and then an exact hit ([run 40739111049](https://github.com/Beneficial-AI-Foundation/self-healing-fv/actions/runs/40739111049)). Both accepted 6 of 6, $0.98 and $0.99, tripwire clean.
+
+| Stage | Miss | Exact hit |
+|---|---|---|
+| Restore the store | 0 s (nothing found) | 5 s |
+| Prepare the case | 859 s | 568 s |
+| Snapshots, audit, agent, gate | 1,101 s | 1,632 s |
+| Trim and save the store | 24 s | skipped (exact hit) |
+| Whole job | 35 min | 41 min |
+| Peak memory | 9.5 GB | 7.0 GB |
+
+- **The hit saved 291 s of preparation (34%)**, much less than the laptop's 80%. Mathlib's own cache is still downloaded for every state (7,335 files for the base), and the broken state is rebuilt.
+- **The second runner was slower.** The same modules took 1.5–1.9 times as long to build (`Scalar52.Add` 30 s → 50 s), and the stages the cache does not touch took 1.5 times as long. So the whole job was slower despite the hit, and the saving on equal machines is probably larger than 291 s. One pair of runs cannot separate the two; repeated runs would.
+- **Restore and save are cheap:** 5 s to restore and unpack 1.7 GB, 24 s to trim and save it.
+- **Less memory:** with the base and fixed builds restored, preparation ran at most 9 Lean processes at once instead of 18, and peak memory fell from 9.5 to 7.0 GB.
 
 ## Where secrets go
 
@@ -91,6 +106,8 @@ DESIGN.md first planned the pilot on a fork of the target repo. It runs here ins
 | [2026-10-27](https://github.com/Beneficial-AI-Foundation/self-healing-fv/actions/runs/40497476458) | `dalek-lean-verify/e65b46d0`, no agent | `self-healing-fv`, larger runner: 8 cores, 31 GB, 300 GB SSD | **accepted**: the sweep repaired the 1 broken proof, the gate passed every check | 56 min (setup 3 min, replay 30.5 min, gate 15.7 min) | 11.3 GB, no swap | 78.5 GB, 211 GB free | $0 model; about $1.25 of runner time |
 | [2026-10-28](https://github.com/Beneficial-AI-Foundation/self-healing-fv/actions/runs/40652654439) | `dalek-lean-verify/aef8b10f`, agent, $3 cap | `self-healing-fv` | failed: Claude Code exited before its first turn (no bubblewrap), so the case escalated | 24 min (replay 12.4 min, gate 5.5 min) | 10.0 GB, no swap | 80.0 GB | $0 model (no API call); about $0.55 of runner time |
 | [2026-10-28](https://github.com/Beneficial-AI-Foundation/self-healing-fv/actions/runs/40656565156) | `dalek-lean-verify/aef8b10f`, agent, $3 cap | `self-healing-fv` | **accepted**: the agent repaired all 6 broken proofs (56 turns), the gate passed every check | 33 min (replay 12.6 min, agent 9.6 min, gate 6 min) | 10.2 GB, no swap | 80.2 GB | $1.03 model (API-equivalent); about $0.75 of runner time |
+| [2026-10-28](https://github.com/Beneficial-AI-Foundation/self-healing-fv/actions/runs/40733313019) | `dalek-lean-verify/aef8b10f`, agent, $3 cap; replay store cache miss | `self-healing-fv` | **accepted**, 6 of 6 (52 turns); tripwire clean | 35 min (prepare 14.3 min, agent 9.4 min, gate 6.6 min) | 9.5 GB, no swap | 80.2 GB | $0.98 model (API-equivalent); about $0.78 of runner time |
+| [2026-10-28](https://github.com/Beneficial-AI-Foundation/self-healing-fv/actions/runs/40739111049) | the same, right after; exact hit | `self-healing-fv` | **accepted**, 6 of 6 (57 turns); tripwire clean | 41 min (prepare 9.5 min, agent 13.7 min, gate 9.7 min; a slower machine, see "Replay store cache") | 7.0 GB, no swap | 80.2 GB | $0.99 model (API-equivalent); about $0.90 of runner time |
 
 **Run 1: the standard private-repo runner does not fit a dalek replay.**
 - **Time.** Building the base and fixed states (in parallel, 2 cores) took 1h45m, with many dalek files at 5–10 minutes each (`Scalar52.ToBytes` 592 s). In the base state `Scalar52/MontgomeryReduce.lean` ran past the replay's 15-minute per-file limit (`FILE_TIMEOUT_S`) and was killed, so the base "did not build" and the replay stopped before the broken state. The sweep and the gate never ran.
