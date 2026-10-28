@@ -70,7 +70,7 @@ The work folder is `/mnt/shfv/work` on runners with a larger `/mnt`, otherwise u
 | packages + this case's own builds | 171 s | 115 s | an exact hit: the same case again |
 
 - **The project builds are the saving.** On an exact hit, the dalek base and fixed builds take 15 s each instead of about 650 s. Packages save 38 s (dalek) and 100 s (SPQR).
-- **A neighbouring case helps only if its pins match.** SPQR PR 287 changed the Lean and Mathlib pins, so its builds did not help PR 359 at all. Dalek PR 232 shared PR 278's base pins and saved 365 s.
+- **A neighbouring case helps only if its pins match.** SPQR PR 287 changed the Lean and Mathlib pins, so its builds did not help PR 359 at all. Dalek PR 232 changed only the Aeneas pin, and its builds saved 365 s on PR 278.
 - **The broken state is always rebuilt** (105 s dalek, 30 s SPQR): the cache does not hold it.
 - **Mathlib is left out of the cache.** It is 5.5–7 GB per revision unpacked, and PR 278 needs two, which would fill most of the 10 GB per repo. Mathlib's own cache took 45–97 s per state on run 1. Without Mathlib, a case's entry is about 1 GB before compression (Aeneas, the other packages, two project builds of about 0.25 GB).
 - **Not measured on Actions yet.** There, a restore also downloads and unpacks the entry, and the store is copied rather than cloned (ext4), so the gains will be smaller than on the laptop. The cold run 2 replay took 12.4 min on the 8-core runner. The next dispatch will show the restore time and the hit kind in the job summary.

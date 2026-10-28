@@ -53,6 +53,19 @@ Flagged runs, all from 2026-10-27 unless noted. **Decision (Dana, 2026-10-28): n
 
 This agrees with the hand scan in [codex-vs-claude.md](codex-vs-claude.md) ("Tripwire"), which found 13 of 48 Codex attempts above the run folder and none for Claude. That scan counted Claude's failed `git` commands as harmless; the tripwire flags them, because a `git` command that reads history could reach a clone if it were given its path. The 4 older SPQR Claude runs from before 10-27 have no transcripts and could not be scanned.
 
+## Verification after the change
+
+Re-run locally with Claude Code (Opus 5.5) at tool `aaae6ea`, in a new, empty work folder (`~/baif/shfv-work/`), so each case was replayed from scratch. Outcomes match the earlier runs at tool `fe5aaff`:
+
+| Case | Earlier run | This run | Tripwire |
+|---|---|---|---|
+| dalek PR 278 (`aef8b10f`) | accepted, 6 of 6 repaired, 5 flagged inherited `sorry`, $1.22 | accepted, 6 of 6, the same 5 flags, $1.14 | clean: 39 tool calls in 6 attempts |
+| SPQR PR 359 (`20b2b498`) | accepted, 1 of 1, $0.69 | accepted, 1 of 1, $0.40 | clean: 25 tool calls, 1 system path not flagged |
+
+No stale build output was pruned in either candidate: in a fresh work folder the broken state's `.lake` comes from this case's own fixed state, and these two cases' human fixes add no modules. The pruning matters for workspaces seeded from a store that holds other commits' builds (place 10 above).
+
+The first SPQR attempt at this failed before any agent ran: the default clone path `~/baif/SparsePostQuantumRatchet-verify` does not exist on this laptop (the clone is in `~/baif/self-healing-fv/repos/`). Earlier SPQR runs never needed the clone, because their workspaces were already built. Re-run with `--repo`.
+
 ## Where the answer is reachable
 
 Checked on this laptop and in the Actions workflow at `51b4de8`, before the changes above.
@@ -101,4 +114,4 @@ The design of E, for when it is built:
 
 ## Veritooling build cache
 
-Separate from isolation; see [ACTIONS.md](../ACTIONS.md), "Replay store cache", for the steps and the measured effect.
+Separate from isolation; see [ACTIONS.md](../ACTIONS.md), "Replay store cache", for the steps and the measured effect. In short, on a laptop: an exact hit cuts preparing dalek PR 278 from 861 s to 171 s and SPQR PR 359 from 291 s to 115 s; a nearby case's builds help only when its pins match; Mathlib is left out of the cache. Not yet measured on Actions.
