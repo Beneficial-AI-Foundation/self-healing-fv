@@ -227,6 +227,10 @@ class Run:
         cand_root.parent.mkdir(parents=True, exist_ok=True)
         replay_case.clone_lake_dir(self.broken_root, cand_root)  # copy-on-write, includes .lake and siblings
         cand = cand_root / self.wp  # the Lake project, where files are edited and built
+        pruned = prune_orphan_build(cand)
+        report["workspace"] = {"pruned_build_modules": len(pruned), "pruned_examples": pruned[:10]}
+        if pruned:
+            self.p.step(f"removed stale build output of {len(pruned)} module(s) with no source in the candidate")
         ctx = self.scratch / "context"
         ctx.mkdir(exist_ok=True)
         extracted = self.cfg["protected"]["extracted"]
@@ -817,6 +821,36 @@ def repo_to_project(replay: dict, lean_root: str) -> dict:
     for k in ("broken_proofs_detail", "statement_errors"):
         out[k] = [{**d, "file": fix(d.get("file"))} for d in replay.get(k, [])]
     return out
+
+
+def prune_orphan_build(project: Path) -> list[str]:
+    """Delete the project's own build output (.lake/build/lib/lean, .lake/build/ir) for modules
+    with no source file in the project, and return their names. The broken state's .lake is
+    cloned from the fixed state and seeded from other commits' builds, so it can hold compiled
+    modules that exist only in the human fix (§8.5, leakage). Lake rebuilds from sources, so
+    builds are unaffected; dependencies under .lake/packages are left alone. A module has a
+    source if some .lean file's path ends with the module's path (libraries may set srcDir)."""
+    build = project / ".lake" / "build"
+    suffixes = set()
+    for d, dirs, files in os.walk(project):
+        dirs[:] = [x for x in dirs if x not in SKIP_DIRS]
+        for f in files:
+            if f.endswith(".lean"):
+                parts = (Path(d) / f).relative_to(project).with_suffix("").parts
+                suffixes |= {"/".join(parts[i:]) for i in range(len(parts))}
+    pruned: set[str] = set()
+    for out_dir in (build / "lib" / "lean", build / "ir"):
+        if not out_dir.is_dir():
+            continue
+        for f in out_dir.rglob("*"):
+            if not f.is_file():
+                continue
+            rel = f.relative_to(out_dir)
+            module = str(rel.parent / rel.name.split(".", 1)[0])
+            if module not in suffixes:
+                f.unlink()
+                pruned.add(module.replace("/", "."))
+    return sorted(pruned)
 
 
 def extraction_diff(base: Path, broken: Path, extracted: list[str]) -> str:
