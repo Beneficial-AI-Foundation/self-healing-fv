@@ -148,21 +148,25 @@ def location_warnings(work: Path, runs: Path, clones: list[Path]) -> list[str]:
     return out
 
 
-def doctor(config: Path, repo: Path | None = None, work: Path = WORK, runs: Path = ROOT / "runs") -> int:
-    """Check what a run needs before spending anything (review finding 16)."""
+def doctor(config: Path, repo: Path | None = None, work: Path = WORK, runs: Path = ROOT / "runs",
+           adapter: str | None = None) -> int:
+    """Check what a run needs before spending anything (review finding 16), for the target's agent
+    adapter or the one given."""
     from gates import proc
     from .agents.claude_code import LEAN_LSP_MCP
     with open(config, "rb") as f:
         cfg = tomllib.load(f)
     clone = (repo or Path.home() / "baif" / cfg["github"].split("/")[-1]).expanduser()
+    agent = ADAPTERS[adapter or cfg["agent"].get("adapter", "claude-code")]
     checks = [
         ("elan (Lean toolchains)", ["elan", "--version"]),
         ("lake", ["lake", "--version"]),
         ("uv", ["uv", "--version"]),
-        ("Claude Code", ["claude", "--version"]),
-        (f"Lean LSP MCP server ({LEAN_LSP_MCP})", ["uvx", LEAN_LSP_MCP, "--help"]),
+        (f"{agent.harness} (adapter {agent.name})", [agent.executable, "--version"]),
         ("git", ["git", "--version"]),
     ]
+    if cfg["agent"].get("tool_profile", "lsp") == "lsp":
+        checks.insert(4, (f"Lean LSP MCP server ({LEAN_LSP_MCP})", ["uvx", LEAN_LSP_MCP, "--help"]))
     ok = True
     for label, cmd in checks:
         try:
@@ -177,7 +181,8 @@ def doctor(config: Path, repo: Path | None = None, work: Path = WORK, runs: Path
     print(f"{'✓' if work.is_dir() else '•'} replay workspaces: {work}" + ("" if work.is_dir() else " (created on first run)"))
     for w in location_warnings(work, runs, [clone]):
         print(f"⚠ {w}")
-    print("• Claude Code login is not checked (it would spend tokens): run `claude` once interactively if unsure.")
+    print(f"• {agent.harness} login is not checked (it would spend tokens): {agent.login_hint} if unsure, or use "
+          f"--auth api-key with {agent.api_key_env}.")
     return 0 if ok and clone.is_dir() else 1
 
 
@@ -217,8 +222,9 @@ def main(argv: list[str] | None = None) -> int:
     g.add_argument("report", type=Path)
     g.add_argument("--audit-focus", help="show these declarations' audit before/after first (substring)")
     g.add_argument("--work", type=Path, default=WORK)
-    d = sub.add_parser("doctor", help="check the setup: Lean toolchain manager, uv, Claude Code, MCP server, target clone")
+    d = sub.add_parser("doctor", help="check the setup: Lean toolchain manager, uv, the agent's CLI, MCP server, target clone")
     d.add_argument("--config", type=Path, default=ROOT / "targets" / "dalek-lean-verify.toml")
+    d.add_argument("--agent", choices=sorted(ADAPTERS), help="agent adapter to check (default: the target config's)")
     d.add_argument("--repo", type=Path, help="local clone of the target repo (default: ~/baif/<github name>)")
     d.add_argument("--work", type=Path, default=WORK)
     d.add_argument("--runs", type=Path, default=ROOT / "runs")
@@ -247,7 +253,7 @@ def main(argv: list[str] | None = None) -> int:
     if a.cmd == "export":
         return export(a.runs, a.to, a.allow_uncommitted)
     if a.cmd == "doctor":
-        return doctor(a.config, a.repo, a.work, a.runs)
+        return doctor(a.config, a.repo, a.work, a.runs, a.agent)
 
     repo_name = a.case.split("/")[0]
     config = a.config or ROOT / "targets" / f"{repo_name}.toml"

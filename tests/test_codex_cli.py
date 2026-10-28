@@ -236,3 +236,19 @@ def test_cli_passes_codex_key_and_model_without_starting_repair(monkeypatch, cap
     monkeypatch.setenv("CODEX_API_KEY", "test-key-not-real")
     with pytest.raises(StopBeforeRepair):
         cli.main(argv + ["--allow-unenforced-caps"])
+
+
+def test_doctor_checks_the_chosen_adapter(monkeypatch, capsys, tmp_path):
+    from types import SimpleNamespace
+    from gates import proc
+    from shfv import cli
+    seen = []
+    monkeypatch.setattr(proc, "run", lambda cmd, *a, **k: seen.append(cmd) or SimpleNamespace(
+        returncode=0, stdout=f"{cmd[0]} 1.0", stderr=""))
+    cli.doctor(cli.ROOT / "targets" / "dalek-lean-verify.toml", tmp_path, adapter="codex")
+    out = capsys.readouterr().out
+    assert ["codex", "--version"] in seen and ["claude", "--version"] not in seen
+    assert "Codex CLI login is not checked" in out and "CODEX_API_KEY" in out and "Claude" not in out
+    seen.clear()
+    cli.doctor(cli.ROOT / "targets" / "dalek-lean-verify.toml", tmp_path)  # the target's adapter
+    assert ["claude", "--version"] in seen and "Claude Code login" in capsys.readouterr().out

@@ -32,6 +32,7 @@ def normalize_usage(usage: object) -> dict | None:
 
 class CodexCLI:
     name = "codex"
+    harness, executable, login_hint = "Codex CLI", "codex", "run `codex login`"
     api_key_env = "CODEX_API_KEY"
     capabilities = {"tool_calling": True, "mcp": True, "skills": False,
                     "structured_output": True, "lsp_tools": True,

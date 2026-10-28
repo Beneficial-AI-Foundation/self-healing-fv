@@ -39,6 +39,7 @@ STOPS = {"success": "done", "error_max_turns": "max-turns", "error_max_budget_us
 
 class ClaudeCode:
     name = "claude-code"
+    harness, executable, login_hint = "Claude Code", "claude", "run `claude` once interactively"
     api_key_env = "ANTHROPIC_API_KEY"
     capabilities = {"tool_calling": True, "mcp": True, "skills": True, "structured_output": True,
                     "lsp_tools": True, "turn_limit": True, "budget_usd": True}

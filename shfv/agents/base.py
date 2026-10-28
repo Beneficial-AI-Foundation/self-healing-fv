@@ -68,6 +68,10 @@ Progress = Callable[[str], None]
 class AgentAdapter(Protocol):
     name: str
     model: str
+    # For `shfv doctor`: the harness's name, its command, and how to log in to it.
+    harness: str
+    executable: str
+    login_hint: str
     # Declared capabilities (§7.1); an adapter that cannot meet a tool profile refuses to start, and so
     # does one without `turn_limit` or `budget_usd` when such a cap is configured, unless allowed.
     capabilities: dict
