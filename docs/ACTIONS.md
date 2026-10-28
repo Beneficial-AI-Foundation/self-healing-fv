@@ -44,6 +44,37 @@ Give the key its own spend limit with the provider (§9.3): that is the only lim
 
 Artifacts are kept for 90 days. The repo is private, so only people with access to it can see them.
 
+## Replay store cache
+
+A replay builds three states of the target (base, fixed, broken) from historical commits. `replay/replay_case.py` keeps what it builds in a **replay store**, `$SHFV_WORK/_store`, and seeds each state's build from it:
+- `pkgs/<name>@<rev>/`: built Lake packages (Mathlib with its unpacked cache, Aeneas, ...);
+- `builds/<commit>/`: the project's `.lake/build` after a green build of that commit. A seed from another commit only speeds things up: Lake re-checks every hash and rebuilds what changed.
+
+The workflow caches the store between runs. The steps follow the `.lake` cache that Lara (Lacramioara Astefanoaei) wrote for [secure-messaging's CI](https://github.com/Beneficial-AI-Foundation/secure-messaging/blob/6ba44239abbca2abba26b145675bb1d766e6591f/.github/workflows/ci.yml#L62-L81) (veritooling): one cache, restored by exact key or by prefix, and saved only when there was no exact hit. Sergiu's later rule there (save only on `main`, or when no entry exists) has no counterpart here, since replays are dispatched by hand.
+
+| Step | What it does |
+|---|---|
+| Restore the replay store | Key `shfv-store-<os>-<repo>-<pins>-<change commit>`, where `<pins>` hashes the base and change commits' `lean-toolchain` and `lake-manifest.json`. Exact hit: the same case again. Prefix hits, in order: another case with the same pins, then any case of the same repo. The job summary says which. |
+| Trim the replay store | After the replay, keep only this case's packages and its base and change builds, so entries restored from other cases do not pile up (the cache holds 10 GB per repo). Mathlib is left out (below). |
+| Save the replay store | Unless the restore was an exact hit. |
+
+The work folder is `/mnt/shfv/work` on runners with a larger `/mnt`, otherwise under `$RUNNER_TEMP`. The cache is tied to that path, so runs on different runner types do not share it.
+
+**What it saves, measured on a laptop** (18 cores, 2026-10-28, tool `3817137`). The time to prepare a case (build base, fixed and broken states), by what the store holds when the case's workspaces are built:
+
+| Store holds | dalek PR 278 (`aef8b10f`) | SPQR PR 359 (`20b2b498`) | Actions situation |
+|---|---|---|---|
+| nothing | 861 s | 291 s | a cache miss |
+| this case's packages only | 823 s | 191 s | a prefix hit on another case with the same pins, whose project builds are far from this commit |
+| packages + the previous case's builds (dalek PR 232, SPQR PR 287) | 458 s | 191 s | a prefix hit on a nearby case |
+| packages + this case's own builds | 171 s | 115 s | an exact hit: the same case again |
+
+- **The project builds are the saving.** On an exact hit, the dalek base and fixed builds take 15 s each instead of about 650 s. Packages save 38 s (dalek) and 100 s (SPQR).
+- **A neighbouring case helps only if its pins match.** SPQR PR 287 changed the Lean and Mathlib pins, so its builds did not help PR 359 at all. Dalek PR 232 changed only the Aeneas pin, and its builds saved 365 s on PR 278.
+- **The broken state is always rebuilt** (105 s dalek, 30 s SPQR): the cache does not hold it.
+- **Mathlib is left out of the cache.** It is 5.5–7 GB per revision unpacked, and PR 278 needs two, which would fill most of the 10 GB per repo. Mathlib's own cache took 45–97 s per state on run 1. Without Mathlib, a case's entry is about 1 GB before compression (Aeneas, the other packages, two project builds of about 0.25 GB).
+- **Not measured on Actions yet.** There, a restore also downloads and unpacks the entry, and the store is copied rather than cloned (ext4), so the gains will be smaller than on the laptop. The cold run 2 replay took 12.4 min on the 8-core runner. The next dispatch will show the restore time and the hit kind in the job summary.
+
 ## Where secrets go
 
 The single `replay` job has a read-only token, and the checkout does not keep it on disk. The key reaches only the replay step, and only when `agent` is on. There, `shfv repair --auth api-key` takes it out of the pipeline's environment and hands it to Claude Code alone, so the replay builds and the gate never see it. Claude Code is also told to scrub it from the commands it runs (`CLAUDE_CODE_SUBPROCESS_ENV_SCRUB`), which on Linux needs bubblewrap; the workflow installs it when `agent` is on. This is weaker than the V1 design, which holds the key in a metering proxy and runs candidate code in a container with no secrets and no network (§3.4, §9.3). For the pilot, the code built is BAIF's own public history.

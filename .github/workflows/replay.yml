@@ -124,20 +124,52 @@ jobs:
       # Full history: the replay takes the base, change and fix commits from it. The default Lean
       # toolchain (for `shfv doctor`) is the change commit's, which the replay needs anyway.
       - name: Clone the target repo
+        id: clone
         run: |
-          repo=$(python3 -c 'import sys, tomllib; print(tomllib.load(open(sys.argv[1], "rb"))["github"])' "targets/${CASE%%/*}.toml")
+          read -r repo root < <(python3 -c 'import sys, tomllib; c = tomllib.load(open(sys.argv[1], "rb"))
+          print(c["github"], c["lean"].get("repo_lean_root", "") or ".")' "targets/${CASE%%/*}.toml")
           clone="$HOME/baif/${repo##*/}"
           git clone --quiet "https://github.com/$repo" "$clone"
           git -C "$clone" log -1 --format='%h %cs %s'
-          change=$(python3 - "data/mined/${CASE%%/*}.jsonl" "${CASE#*/}" <<'EOF'
+          read -r base change < <(python3 - "data/mined/${CASE%%/*}.jsonl" "${CASE#*/}" <<'EOF'
           import json, sys
           for line in open(sys.argv[1]):
               r = json.loads(line)
               if r["change_commit"].startswith(sys.argv[2]):
-                  print(r["change_commit"]); break
+                  print(r["base_commit"], r["change_commit"]); break
           EOF
           )
-          elan default "$(git -C "$clone" show "$change:lean-toolchain" 2>/dev/null || echo leanprover/lean4:stable)"
+          elan default "$(git -C "$clone" show "$change:$root/lean-toolchain" 2>/dev/null || echo leanprover/lean4:stable)"
+          # The replay store's cache key: the case's toolchains and Lake manifests (base and change).
+          pins=$(for c in "$base" "$change"; do for f in lean-toolchain lake-manifest.json; do
+            git -C "$clone" show "$c:$root/$f" 2>/dev/null; done; done | sha256sum | cut -c1-16)
+          { echo "repo=${CASE%%/*}"; echo "pins=$pins"; echo "base=$base"; echo "change=$change"; echo "root=$root"
+            echo "clone=$clone"; } >> "$GITHUB_OUTPUT"
+
+      # The replay store (replay/replay_case.py `Store`): built Lake packages (Mathlib, Aeneas, ...) by
+      # revision, and the project's .lake/build by commit, which seed each state's build. Lake re-checks
+      # hashes, so a seed from another commit only speeds things up. The steps follow the .lake cache that
+      # Lara (Lacramioara Astefanoaei) wrote for secure-messaging's CI: one cache, restored by exact key or
+      # by prefix, saved only when there was no exact hit.
+      # https://github.com/Beneficial-AI-Foundation/secure-messaging/blob/6ba44239abbca2abba26b145675bb1d766e6591f/.github/workflows/ci.yml#L62-L81
+      # Exact hit: the same case again. Prefix hit: another case with the same pins, or the same repo.
+      - name: Restore the replay store
+        id: store
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        with:
+          path: ${{ env.SHFV_WORK }}/_store
+          key: shfv-store-${{ runner.os }}-${{ steps.clone.outputs.repo }}-${{ steps.clone.outputs.pins }}-${{ steps.clone.outputs.change }}
+          restore-keys: |
+            shfv-store-${{ runner.os }}-${{ steps.clone.outputs.repo }}-${{ steps.clone.outputs.pins }}-
+            shfv-store-${{ runner.os }}-${{ steps.clone.outputs.repo }}-
+
+      - name: Replay store restored
+        env:
+          HIT: ${{ steps.store.outputs.cache-hit }}
+          MATCHED: ${{ steps.store.outputs.cache-matched-key }}
+        run: |
+          if [ "$HIT" = "true" ]; then what="exact hit"; elif [ -n "$MATCHED" ]; then what="prefix hit: $MATCHED"; else what="miss"; fi
+          { echo; echo "Replay store: $what ($(du -sh "$SHFV_WORK/_store" 2>/dev/null | cut -f1 || echo empty))"; } | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Doctor
         run: |
@@ -151,6 +183,7 @@ jobs:
           echo $! > "$STATS/sampler.pid"
 
       - name: Replay
+        id: replay
         env:
           # The key reaches this step only when the agent is on; shfv hands it to the agent alone.
           ANTHROPIC_API_KEY: ${{ inputs.agent && secrets.ANTHROPIC_API_KEY || '' }}
@@ -188,6 +221,42 @@ jobs:
           fi
           mkdir -p "$STATS/replay-logs"
           cp -R "$SHFV_WORK/${CASE/\//-}/logs/." "$STATS/replay-logs/" 2>/dev/null || true
+
+      # Keep only what this case uses (its packages and its base and change builds), so entries
+      # restored by prefix from other cases do not pile up in the next save (10 GB per repo). Mathlib
+      # is left out: 5.5-7 GB per revision unpacked, against 45-97 s per state for its own cache
+      # (ACTIONS.md, run 1). The project builds are what save time (ACTIONS.md, "Replay store cache").
+      - name: Trim the replay store
+        id: trim
+        if: ${{ !cancelled() && steps.store.outputs.cache-hit != 'true' && steps.clone.outputs.change != '' }}
+        env:
+          CLONE: ${{ steps.clone.outputs.clone }}
+          ROOT_DIR: ${{ steps.clone.outputs.root }}
+          BASE: ${{ steps.clone.outputs.base }}
+          CHANGE: ${{ steps.clone.outputs.change }}
+        run: |
+          keep=$(for c in "$BASE" "$CHANGE"; do git -C "$CLONE" show "$c:$ROOT_DIR/lake-manifest.json" 2>/dev/null \
+            | python3 -c 'import json, sys; [print(p["name"] + "@" + p["rev"]) for p in json.load(sys.stdin)["packages"] if p.get("rev")]'; done)
+          for d in "$SHFV_WORK"/_store/pkgs/*; do
+            if [ -e "$d" ] && { [[ "$(basename "$d")" == mathlib@* ]] || ! grep -qxF "$(basename "$d")" <<< "$keep"; }; then
+              rm -rf "$d"
+            fi
+          done
+          for d in "$SHFV_WORK"/_store/builds/*; do
+            if [ -e "$d" ] && [ "$(basename "$d")" != "$BASE" ] && [ "$(basename "$d")" != "$CHANGE" ]; then rm -rf "$d"; fi
+          done
+          { echo "Replay store to save:"; du -sh "$SHFV_WORK"/_store/pkgs/* "$SHFV_WORK"/_store/builds/* 2>/dev/null || true; } \
+            | tee "$STATS/store.txt"
+          if [ -n "$(find "$SHFV_WORK/_store" -mindepth 2 -maxdepth 2 2>/dev/null | head -1)" ]; then
+            echo "nonempty=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Save the replay store
+        if: ${{ !cancelled() && steps.trim.outputs.nonempty == 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        with:
+          path: ${{ env.SHFV_WORK }}/_store
+          key: ${{ steps.store.outputs.cache-primary-key }}
 
       # The run record (§3.3 S7): report.json, report.md, and the agent's prompts and transcripts.
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2

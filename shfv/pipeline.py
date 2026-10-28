@@ -29,15 +29,18 @@ from pathlib import Path
 
 from gates import patch, proc  # the diff format and the bounded-subprocess helper, not gate logic
 
-from . import costs, provenance
+from . import costs, provenance, tripwire
 from .agents.base import AgentAdapter, Attempt, Budget, RepairTask
 from .progress import Progress
 
 ROOT = Path(__file__).resolve().parents[1]
+# This repo's main checkout, also when running from one of its worktrees (.claude/worktrees/<name>).
+BOT_REPO = ROOT.parents[2] if ROOT.parent.name == "worktrees" else ROOT
 sys.path.insert(0, str(ROOT / "replay"))
 import replay_case  # noqa: E402  (also puts mining/ on sys.path)
 from mine_history import Git, parse_decls  # noqa: E402
 
+WORK = replay_case.WORK  # default replay workspaces: outside this repo (§8.5)
 STUB = ":= by sorry"
 
 
@@ -224,6 +227,10 @@ class Run:
         cand_root.parent.mkdir(parents=True, exist_ok=True)
         replay_case.clone_lake_dir(self.broken_root, cand_root)  # copy-on-write, includes .lake and siblings
         cand = cand_root / self.wp  # the Lake project, where files are edited and built
+        pruned = prune_orphan_build(cand)
+        report["workspace"] = {"pruned_build_modules": len(pruned), "pruned_examples": pruned[:10]}
+        if pruned:
+            self.p.step(f"removed stale build output of {len(pruned)} module(s) with no source in the candidate")
         ctx = self.scratch / "context"
         ctx.mkdir(exist_ok=True)
         extracted = self.cfg["protected"]["extracted"]
@@ -654,12 +661,24 @@ class Run:
         except Exception as e:  # noqa: BLE001  an infrastructure failure says nothing about the theorems
             report["error"] = {"outcome": "infrastructure-failure", "detail": f"{type(e).__name__}: {e}"}
         self.close_open_outcomes(report)
+        report["tripwire"] = self.tripwire(report)
         report["totals"] = self.totals(report, time.time() - t_start)
         report["verdict"] = overall(report)
         if not self.keep:
             shutil.rmtree(self.scratch / "candidate", ignore_errors=True)
             shutil.rmtree(self.scratch / "human-fix", ignore_errors=True)
         return report
+
+    def tripwire(self, report: dict) -> dict:
+        """Did any attempt look outside its workspace (§8.5, leakage)? Detection only: nothing
+        stops a read today (a read sandbox is V1, §9.3). Never fails the run."""
+        try:
+            return tripwire.scan_record(self.out, self.scratch / "candidate", self.scratch / "context",
+                                        runs_root=self.case_runs.parent, repo=self.repo, bot_repo=BOT_REPO,
+                                        gate_diff=(report.get("gate") or {}).get("diff", ""))
+        except Exception as e:  # noqa: BLE001  a scanner bug must not cost the run its record
+            return {"version": tripwire.VERSION, "verdict": "error", "error": f"{type(e).__name__}: {e}"[:500],
+                    "attempts": 0, "tool_calls": 0, "transcripts_missing": [], "flags": [], "n_flags": 0, "counts": {}}
 
     def audit(self, B: Path) -> dict:
         """What the triggering change itself did to the frozen declarations (§4.7, path A): the
@@ -802,6 +821,36 @@ def repo_to_project(replay: dict, lean_root: str) -> dict:
     for k in ("broken_proofs_detail", "statement_errors"):
         out[k] = [{**d, "file": fix(d.get("file"))} for d in replay.get(k, [])]
     return out
+
+
+def prune_orphan_build(project: Path) -> list[str]:
+    """Delete the project's own build output (.lake/build/lib/lean, .lake/build/ir) for modules
+    with no source file in the project, and return their names. The broken state's .lake is
+    cloned from the fixed state and seeded from other commits' builds, so it can hold compiled
+    modules that exist only in the human fix (§8.5, leakage). Lake rebuilds from sources, so
+    builds are unaffected; dependencies under .lake/packages are left alone. A module has a
+    source if some .lean file's path ends with the module's path (libraries may set srcDir)."""
+    build = project / ".lake" / "build"
+    suffixes = set()
+    for d, dirs, files in os.walk(project):
+        dirs[:] = [x for x in dirs if x not in SKIP_DIRS]
+        for f in files:
+            if f.endswith(".lean"):
+                parts = (Path(d) / f).relative_to(project).with_suffix("").parts
+                suffixes |= {"/".join(parts[i:]) for i in range(len(parts))}
+    pruned: set[str] = set()
+    for out_dir in (build / "lib" / "lean", build / "ir"):
+        if not out_dir.is_dir():
+            continue
+        for f in out_dir.rglob("*"):
+            if not f.is_file():
+                continue
+            rel = f.relative_to(out_dir)
+            module = str(rel.parent / rel.name.split(".", 1)[0])
+            if module not in suffixes:
+                f.unlink()
+                pruned.add(module.replace("/", "."))
+    return sorted(pruned)
 
 
 def extraction_diff(base: Path, broken: Path, extracted: list[str]) -> str:

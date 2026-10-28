@@ -43,6 +43,9 @@ from mine_history import (REPO_CONFIGS, Git, Miner, lean_libs, lean_path,  # noq
                           module_resolver, parse_decls)
 
 MAX_ROUNDS = 20
+# Replay workspaces live outside this repo and outside any target clone, so an agent working in
+# one does not find the bot's own docs or the clone's history by walking up (DESIGN.md §8.5).
+WORK = Path(os.environ.get("SHFV_WORK") or Path.home() / "baif" / "shfv-work")
 # A single Lean file elaborating longer than this is hung (a whole project builds in minutes).
 # Heartbeat limits do not cover kernel checking or some tactic loops (SPQR #635 ran for 80+ min).
 FILE_TIMEOUT_S = 900
@@ -707,7 +710,7 @@ def main() -> int:
                     "existing Lake project dir into the store (read-only on that dir)")
     ap.add_argument("--harvest-sha", help="with --harvest: also store the project build under this commit")
     ap.add_argument("--repo", type=Path, help="local clone (historical cases and --harvest)")
-    ap.add_argument("--work", type=Path, default=Path("work"))
+    ap.add_argument("--work", type=Path, default=WORK, help=f"replay workspaces (default: $SHFV_WORK or {WORK})")
     ap.add_argument("--out", type=Path, default=Path("runs/replay"))
     ap.add_argument("--skip-base", action="store_true", help="skip the base sanity build")
     g = ap.add_argument_group("generated cases (no commits; e.g. an Aeneas upgrade + re-extraction)")

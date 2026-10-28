@@ -198,6 +198,6 @@ The per-case tables, the Codex-vs-Claude join and the tripwire scan were made wi
 
 ## Follow-ups (proposals, not done here)
 
-1. **Read isolation.** Run agents in a workspace outside this repo and the other replay trees, or under a read-restricting sandbox (DESIGN.md §3.4), so neither the bot's own `AGENTS.md` nor a `fixed/` tree is reachable. For Codex this is the main gap; Claude's allowlist covers it today.
-2. **A tripwire in the pipeline.** Make the scan above a report field: list each path a session asked for outside the candidate and `context/`, so a replay's comparison with the human fix can say whether the fix was reachable.
+1. **Read isolation.** Run agents in a workspace outside this repo and the other replay trees, or under a read-restricting sandbox (DESIGN.md §3.4), so neither the bot's own `AGENTS.md` nor a `fixed/` tree is reachable. For Codex this is the main gap; Claude's allowlist covers it today. *2026-10-28: workspaces moved outside this repo; the read sandbox is V1 ([replay-isolation.md](replay-isolation.md)).*
+2. **A tripwire in the pipeline.** Make the scan above a report field: list each path a session asked for outside the candidate and `context/`, so a replay's comparison with the human fix can say whether the fix was reachable. *2026-10-28: done, `tripwire` in every report; over these runs it agrees with the scan above ([replay-isolation.md](replay-isolation.md)).*
 3. **Codex prices.** Add a `[prices."gpt-6.1-sol"]` entry so Codex runs get a computed cost and an enforced per-run dollar cap (the pipeline's, since Codex has none).

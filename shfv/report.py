@@ -11,7 +11,7 @@ import json
 import re
 from pathlib import Path
 
-from . import costs
+from . import costs, tripwire
 
 MARKER = "<!-- self-healing-fv:report case={case} -->"
 GITHUB_LIMIT = 60000  # GitHub allows ~65,000 characters per comment (§5.2)
@@ -460,6 +460,8 @@ def render(r: dict) -> str:
             out.append("")
         out.append("</details>")
         out.append("")
+    out.append(tripwire.describe(r.get("tripwire")))
+    out.append("")
     out.append("---")
     out += provenance_lines(r)
     out.append("<sub>self-healing-fv prototype · acceptance needs every check to pass, the kernel replay included; "

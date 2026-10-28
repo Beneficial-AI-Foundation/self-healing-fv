@@ -24,7 +24,7 @@ from . import provenance
 from . import report as report_mod
 from .agents.claude_code import ClaudeCode
 from .agents.codex_cli import CodexCLI
-from .pipeline import ROOT, Run, check_capabilities, fmt_s
+from .pipeline import BOT_REPO, ROOT, WORK, Run, check_capabilities, fmt_s
 
 ADAPTERS = {"claude-code": ClaudeCode, "codex": CodexCLI}
 EXAMPLES = ROOT / "docs" / "examples" / "reports"
@@ -111,7 +111,41 @@ def write_index(to: Path) -> None:
     index.write_text("\n".join(lines) + "\n" + (f"\n{notes}\n" if notes else ""))
 
 
-def doctor(config: Path, repo: Path | None = None) -> int:
+def scan_tripwire(run_dirs: list[Path], repo: Path | None, out: Path | None) -> int:
+    """The tripwire over finished runs, e.g. ones made before it existed. Exit 1 if any is flagged."""
+    from . import tripwire
+    results, flagged = {}, False
+    for d in run_dirs:
+        d = d.resolve()
+        r = tripwire.scan_record(d, runs_root=d.parent.parent, repo=repo, bot_repo=BOT_REPO)
+        results[str(d)] = r
+        flagged |= r["verdict"] == "flagged"
+        print(f"{d.parent.name}/{d.name}: {tripwire.describe(r)}")
+    if out:
+        out.write_text(json.dumps(results, indent=1, ensure_ascii=False))
+    return 1 if flagged else 0
+
+
+def location_warnings(work: Path, runs: Path, clones: list[Path]) -> list[str]:
+    """Replay workspaces and run records the agent could reach by walking up or searching from
+    its workspace (DESIGN.md §8.5, leakage): inside this repo or a target clone, or each other."""
+    places = [("this repo", BOT_REPO), ("this repo", ROOT)] + [(f"the target clone {c}", c) for c in clones]
+    out = []
+    for label, d in (("replay workspaces", work), ("run records", runs)):
+        d = d.expanduser().resolve()
+        for name, root in places:
+            if d.is_relative_to(root.expanduser().resolve()):
+                out.append(f"{label} ({d}) are inside {name}, where an agent's searches for its instructions or "
+                           f"history land; use --{'work' if label.startswith('replay') else 'runs'} outside it")
+                break
+    w, r = work.expanduser().resolve(), runs.expanduser().resolve()
+    if w.is_relative_to(r) or r.is_relative_to(w):
+        out.append(f"replay workspaces ({w}) and run records ({r}) are nested: earlier runs' records, which quote the "
+                   "human fix, sit next to the agent's workspace")
+    return out
+
+
+def doctor(config: Path, repo: Path | None = None, work: Path = WORK, runs: Path = ROOT / "runs") -> int:
     """Check what a run needs before spending anything (review finding 16)."""
     from gates import proc
     from .agents.claude_code import LEAN_LSP_MCP
@@ -137,8 +171,9 @@ def doctor(config: Path, repo: Path | None = None) -> int:
         ok &= good
         print(f"{'✓' if good else '✗'} {label}: {detail if good else 'missing or failing: ' + detail}")
     print(f"{'✓' if clone.is_dir() else '✗'} target clone: {clone}" + ("" if clone.is_dir() else " (pass --repo to shfv repair)"))
-    work = Path(os.environ.get("SHFV_WORK", ROOT / "work"))
     print(f"{'✓' if work.is_dir() else '•'} replay workspaces: {work}" + ("" if work.is_dir() else " (created on first run)"))
+    for w in location_warnings(work, runs, [clone]):
+        print(f"⚠ {w}")
     print("• Claude Code login is not checked (it would spend tokens): run `claude` once interactively if unsure.")
     return 0 if ok and clone.is_dir() else 1
 
@@ -152,7 +187,8 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--model", help="override the target config's model")
     r.add_argument("--config", type=Path, help="target config (default: targets/<repo>.toml)")
     r.add_argument("--repo", type=Path, help="local clone of the target repo (default: ~/baif/<github name>)")
-    r.add_argument("--work", type=Path, default=Path(os.environ.get("SHFV_WORK", ROOT / "work")))
+    r.add_argument("--work", type=Path, default=WORK,
+                   help=f"replay workspaces (default: $SHFV_WORK or {WORK}; keep it outside this repo and the clones)")
     r.add_argument("--runs", type=Path, default=ROOT / "runs")
     r.add_argument("--attempt-anyway", action="store_true",
                    help="also run the agent on theorems whose statement no longer type-checks (demo; §3.3 S2 "
@@ -174,10 +210,12 @@ def main(argv: list[str] | None = None) -> int:
     g = sub.add_parser("render", help="re-render report.md from a run's report.json")
     g.add_argument("report", type=Path)
     g.add_argument("--audit-focus", help="show these declarations' audit before/after first (substring)")
-    g.add_argument("--work", type=Path, default=Path(os.environ.get("SHFV_WORK", ROOT / "work")))
+    g.add_argument("--work", type=Path, default=WORK)
     d = sub.add_parser("doctor", help="check the setup: Lean toolchain manager, uv, Claude Code, MCP server, target clone")
     d.add_argument("--config", type=Path, default=ROOT / "targets" / "dalek-lean-verify.toml")
     d.add_argument("--repo", type=Path, help="local clone of the target repo (default: ~/baif/<github name>)")
+    d.add_argument("--work", type=Path, default=WORK)
+    d.add_argument("--runs", type=Path, default=ROOT / "runs")
     e = sub.add_parser("export", help="copy runs' reports into docs/examples/reports with an index")
     e.add_argument("runs", type=Path, nargs="+", help="run directories (runs/<case>/<run id>)")
     e.add_argument("--to", type=Path, default=EXAMPLES)
@@ -187,7 +225,13 @@ def main(argv: list[str] | None = None) -> int:
                    help="run directories, case directories (their latest run) or runs directories (every case's latest)")
     c.add_argument("--out", type=Path, help="write the Markdown summary here (default: stdout)")
     c.add_argument("--csv", type=Path, help="also write the per-theorem table as CSV")
+    t = sub.add_parser("tripwire", help="scan finished runs' transcripts for looks outside the workspace (§8.5)")
+    t.add_argument("runs", type=Path, nargs="+", help="run directories (runs/<case>/<run id>)")
+    t.add_argument("--repo", type=Path, help="the target clone, to name it in the findings")
+    t.add_argument("--json", type=Path, help="also write every run's full result here")
     a = ap.parse_args(argv)
+    if a.cmd == "tripwire":
+        return scan_tripwire(a.runs, a.repo, a.json)
     if a.cmd == "compare-human":
         from . import human_compare
         return human_compare.main(a.runs, a.out, a.csv)
@@ -197,7 +241,7 @@ def main(argv: list[str] | None = None) -> int:
     if a.cmd == "export":
         return export(a.runs, a.to, a.allow_uncommitted)
     if a.cmd == "doctor":
-        return doctor(a.config, a.repo)
+        return doctor(a.config, a.repo, a.work, a.runs)
 
     repo_name = a.case.split("/")[0]
     config = a.config or ROOT / "targets" / f"{repo_name}.toml"
