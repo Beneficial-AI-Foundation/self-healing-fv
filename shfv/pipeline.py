@@ -25,12 +25,12 @@ import time
 import tomllib
 from datetime import datetime, timezone
 from collections import Counter
-from difflib import SequenceMatcher
 from pathlib import Path
 
 from gates import patch, proc  # the diff format and the bounded-subprocess helper, not gate logic
 
 from . import costs, provenance, tripwire
+from .human_compare import edit_similarity
 from .agents.base import AgentAdapter, Attempt, Budget, RepairTask
 from .progress import Progress
 
@@ -944,16 +944,6 @@ def pin_summary(record: dict) -> str:
     parts = [f"Lean {pins['lean'][0].split(':')[-1]} → {pins['lean'][1].split(':')[-1]}"] if "lean" in pins else []
     parts += [f"{k} {v[0][:7]} → {v[1][:7]}" for k, v in pins.items() if k in ("aeneas", "mathlib")]
     return f"; {', '.join(parts)}" if parts else ""
-
-
-def edit_similarity(a: str, b: str) -> float:
-    """How alike two edits of the same old proof are: compares the changed lines (+/-) only, so two
-    small but different edits of a long proof do not look alike (§8.5 memorization flag)."""
-    def changed(d: str) -> list[str]:
-        return [l[0] + " ".join(l[1:].split()) for l in d.splitlines()
-                if l[:1] in "+-" and not l.startswith(("+++", "---"))]
-    x, y = changed(a), changed(b)
-    return round(SequenceMatcher(None, x, y).ratio(), 2) if x and y else 0.0
 
 
 def unified(a: str, b: str, path: str) -> str:
