@@ -119,6 +119,11 @@ def test_lean_io_in_an_edit_diff_is_flagged(run, tmp_path):
     assert routes(r) == [("lean-io", None)]
 
 
+def test_no_attempts_is_not_called_clean(run, tmp_path):
+    r = tripwire.scan_record(tmp_path / "no-run", run["ws"], run["ctx"])
+    assert r["verdict"] == "no-attempts" and tripwire.describe(r) == "Tripwire: no agent attempts to scan."
+
+
 def test_missing_transcript_is_incomplete_not_clean(run):
     r = tripwire.scan_run([("01-thm", None)], {}, run["ws"], run["ctx"])
     assert r["verdict"] == "incomplete" and r["transcripts_missing"] == ["01-thm"]

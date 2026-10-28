@@ -303,7 +303,7 @@ def summarize(events: list[dict], n_attempts: int, n_calls: int, missing: list[s
         k = e["route"] + (f":{e['area']}" if e.get("area") else "")
         counts[k] = counts.get(k, 0) + 1
     return {"version": VERSION, "attempts": n_attempts, "tool_calls": n_calls, "transcripts_missing": missing,
-            "verdict": "flagged" if flags else "incomplete" if missing else "clean",
+            "verdict": "flagged" if flags else "incomplete" if missing else "clean" if n_attempts else "no-attempts",
             "flags": flags[:100], "n_flags": len(flags), "counts": counts,
             "read_sandbox": "none (V1, DESIGN.md §9.3): the tripwire detects, it does not prevent"}
 

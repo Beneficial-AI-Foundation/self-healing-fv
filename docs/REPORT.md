@@ -181,7 +181,7 @@ Detection only: in a replay the human fix is on disk, and nothing stops an agent
 
 | Field | Meaning |
 |---|---|
-| `verdict` | `clean`, `flagged`, `incomplete` (a transcript is missing) or `error` (the scan itself failed; the run is unchecked) |
+| `verdict` | `clean`, `flagged`, `incomplete` (a transcript is missing), `no-attempts` (no agent ran) or `error` (the scan itself failed; the run is unchecked) |
 | `attempts`, `tool_calls` | What was scanned |
 | `transcripts_missing` | Attempts without a transcript |
 | `flags`, `n_flags` | Each flag: `attempt`, `tool`, `route`, `area`, `paths`, `detail` (the command or path, model output: display it neutralized), `result` (`ok`, `failed`, `denied` or `unknown`), `flag: true`. At most 100 are listed; `n_flags` counts all. |
