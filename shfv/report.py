@@ -118,7 +118,7 @@ def gate_table(r: dict, g: dict) -> list[str]:
             why = (c.get("info") or {}).get("checker") if cid == "G5" else None
             mark, text = "⚪", desc + (f": required for acceptance, could not run ({why})" if c.get("required") and why
                                       else ": required for acceptance, did not run" if c.get("required")
-                                      else ": not run in this prototype")
+                                      else ": did not run")
         else:
             mark = "✅" if c["ok"] else "❌"
             text = desc.format(inventory=inv, targets=", ".join(c.get("info", {}).get("targets", ["the project"])),
@@ -214,7 +214,15 @@ def audit_section(r: dict, focus: str | None = None) -> list[str]:
         for x in stmts[:AUDIT_SHOWN]:
             out.append(f"**`{x['decl']}`**")
             out.append("")
-            out.append(fence(f"before:\n{x['before']}\n\nafter:\n{x['after']}", limit=2500))
+            if x["before"] == x["after"]:
+                # The printer hides what changed; the fingerprint, which decided, does not.
+                out.append("Prints the same before and after; the fingerprint differs in "
+                           + (x.get("hidden_difference") or "details the printer hides (universe levels, implicit "
+                              "arguments or instances)") + ":")
+                out.append("")
+                out.append(fence(x["before"], limit=2500))
+            else:
+                out.append(fence(f"before:\n{x['before']}\n\nafter:\n{x['after']}", limit=2500))
             out.append("")
         rest = stmts[AUDIT_SHOWN:]
         if rest:
@@ -381,14 +389,15 @@ def render(r: dict) -> str:
         out.append("#### Repaired" if v == "accepted" else "#### Repaired, pending the kernel replay"
                    if v == "passed-without-kernel-replay" else "#### Repairs that passed the agent's own build")
         out.append("")
-        out.append("| Theorem | Edit of the old proof | Agent |")
+        out.append("| Theorem | Edit of the old proof | Repaired by |")
         out.append("|---|---|---|")
         hf = {h["theorem"]: h for h in r.get("human_fix", [])}
         for e in repaired:
             a = e["attempts"][-1] if e["attempts"] else {}
+            by = ("sweep, no model" if e.get("repaired_by") == "sweep" else
+                  f"agent: {a.get('turns', 0)} turns · {usd(a.get('cost_usd'))} · {fmt_s(a.get('seconds'))}")
             out.append(f"| {link(r, e['file'], e.get('line'), short_name(e['theorem']))} | "
-                       f"{diff_size(hf.get(e['theorem'], {}).get('bot_diff'))} | "
-                       f"{a.get('turns', 0)} turns · {usd(a.get('cost_usd'))} · {fmt_s(a.get('seconds'))} |")
+                       f"{diff_size(hf.get(e['theorem'], {}).get('bot_diff'))} | {by} |")
         out.append("")
     delivery = r.get("delivery_diff")
     if g and delivery:

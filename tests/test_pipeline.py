@@ -259,8 +259,9 @@ def test_run_cost_override_replaces_the_config_cap_and_is_recorded(toy_case, mon
 
 
 def test_no_agent_runs_the_sweep_only_and_escalates_the_rest(toy_case, monkeypatch):
-    rep, agent, _ = run_case(toy_case, monkeypatch, GOOD, "noagent", use_agent=False)
+    rep, agent, run = run_case(toy_case, monkeypatch, GOOD, "noagent", use_agent=False)
     assert agent.calls == []
+    assert rep["run_id"].endswith("-no-model-noagent") and run.out.name == rep["run_id"]  # not "fake-model"
     e = {x["decl"]: x for x in rep["repairs"]}
     assert e["double_spec"]["outcome"] == "proof-hard" and "--no-agent" in e["double_spec"]["reason"]
     assert e["double_even"]["outcome"] == "blocked-on"
@@ -368,6 +369,17 @@ def test_gate_unavailable_never_becomes_a_repair_outcome(toy_case, monkeypatch):
     rep, _, _ = run_case(toy_case, monkeypatch, GOOD, "unavail", expect_error=True)
     assert rep["verdict"] == "failed" and rep["error"]["outcome"] == "gate-unavailable"
     assert set(outcomes(rep).values()) == {"gate-unavailable"}  # no `candidate` left behind
+
+
+def test_a_run_that_called_no_model_is_renamed(tmp_path):
+    from types import SimpleNamespace
+    from shfv import provenance
+    started = provenance.now()
+    old = tmp_path / provenance.run_id(started, "some-model", "x")
+    old.mkdir()
+    run = SimpleNamespace(started=started, label="x", case_runs=tmp_path, out=old, run_id=old.name)
+    assert Run.name_without_model(run) == provenance.run_id(started, "no-model", "x")
+    assert run.out.is_dir() and not old.exists()
 
 
 def test_adapter_without_lsp_tools_cannot_run_the_lsp_profile():

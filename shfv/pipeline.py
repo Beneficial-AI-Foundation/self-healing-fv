@@ -24,6 +24,7 @@ import sys
 import time
 import tomllib
 from datetime import datetime, timezone
+from collections import Counter
 from difflib import SequenceMatcher
 from pathlib import Path
 
@@ -42,6 +43,7 @@ from mine_history import Git, parse_decls  # noqa: E402
 
 WORK = replay_case.WORK  # default replay workspaces: outside this repo (§8.5)
 STUB = ":= by sorry"
+NO_MODEL = "no-model"  # run ids of runs that called no model
 
 
 class GateUnavailable(Exception):
@@ -155,7 +157,9 @@ class Run:
         self.case_dir = self.work / case_id.replace("/", "-")
         # One directory per run, never reused: runs/<case>/<run id>/, plus runs/<case>/latest.
         self.started = provenance.now()
-        self.run_id = provenance.run_id(self.started, agent.model, label)
+        self.label = label
+        # Named after the model, or `no-model` when none will be called (renamed at the end if none was).
+        self.run_id = provenance.run_id(self.started, agent.model if use_agent else NO_MODEL, label)
         self.case_runs = runs.resolve() / case_id.replace("/", "-")
         self.out = self.case_runs / self.run_id
         self.out.mkdir(parents=True, exist_ok=False)
@@ -664,6 +668,8 @@ class Run:
         report["tripwire"] = self.tripwire(report)
         report["totals"] = self.totals(report, time.time() - t_start)
         report["verdict"] = overall(report)
+        if not report["totals"]["attempts"]:
+            report["run_id"] = self.name_without_model()
         if not self.keep:
             shutil.rmtree(self.scratch / "candidate", ignore_errors=True)
             shutil.rmtree(self.scratch / "human-fix", ignore_errors=True)
@@ -680,6 +686,16 @@ class Run:
             return {"version": tripwire.VERSION, "verdict": "error", "error": f"{type(e).__name__}: {e}"[:500],
                     "attempts": 0, "tool_calls": 0, "transcripts_missing": [], "flags": [], "n_flags": 0, "counts": {}}
 
+    def name_without_model(self) -> str:
+        """A run that called no model (the sweep repaired everything, or nothing was attempted) is
+        not named after one: rename its directory to `<time>-no-model[-label]`."""
+        run_id = provenance.run_id(self.started, NO_MODEL, self.label)
+        new = self.case_runs / run_id
+        if run_id != self.run_id and not new.exists():
+            self.out.rename(new)
+            self.out, self.run_id = new, run_id
+        return self.run_id
+
     def audit(self, B: Path) -> dict:
         """What the triggering change itself did to the frozen declarations (§4.7, path A): the
         base against the change's head (in replay, the change commit). Independent of repair."""
@@ -692,6 +708,7 @@ class Run:
         if not out.exists():
             return {"outcome": "incomplete", "error": (g.stderr or "gate audit produced no result")[-500:]}
         a = json.loads(out.read_text())
+        explain_hidden(a, B, H)
         s = a["summary"]
         detail = (f"{s['statements_changed']} statement(s), {s['definitions_changed']} definition(s) changed, "
                   f"{s['removed']} removed; {s['new_sorry']} newly depend on sorry; "
@@ -973,6 +990,40 @@ def refresh_comparison(report: dict, case_dir: Path) -> None:
             if human and human["proof"] != base["proof"]:
                 h["similarity_to_human"] = edit_similarity(h["bot_diff"], h["human_diff"])
                 h["possible_memorization"] = h["similarity_to_human"] >= 0.9
+
+
+CONST = re.compile(r"\(c (\S+) \[([^\]]*)\]\)")  # a constant and its universe levels in StmtCanon's dump
+
+
+def hidden_difference(before: str, after: str) -> str | None:
+    """Where two canonical fingerprints differ, in words, for a declaration whose before and after
+    print identically: the printer hides universe levels, and often implicit arguments and instances."""
+    if before == after:
+        return None
+    b, a = Counter(CONST.findall(before)), Counter(CONST.findall(after))
+    gone, new = b - a, a - b
+    levels = sorted({(n, x, y) for n, x in gone for m, y in new if m == n})
+    if levels:
+        return "universe levels, which the printer hides: " + "; ".join(
+            f"`{n}.{{{x}}}` → `{n}.{{{y}}}`" for n, x, y in levels[:5])
+    if gone or new:
+        return "constants: " + ", ".join([f"`{n}` removed" for n, _ in sorted(gone)][:5]
+                                         + [f"`{n}` added" for n, _ in sorted(new)][:5])
+    i = next((k for k, (x, y) in enumerate(zip(before, after)) if x != y), min(len(before), len(after)))
+    return f"the elaborated term, not its printed form: `…{before[max(0, i - 40):i + 60]}…` → `…{after[max(0, i - 40):i + 60]}…`"
+
+
+def explain_hidden(audit: dict, B: Path, H: Path) -> None:
+    """Add `hidden_difference` to the audit's statement changes whose before and after print alike
+    (SPQR PR 106: 26 of them), from the canonical fingerprints in the snapshots. Display only:
+    the fingerprint decided, and this does not change what the audit reports."""
+    same = [x for x in audit.get("statements_changed", []) if x.get("before") == x.get("after")]
+    if not same or not (B.exists() and H.exists()):
+        return
+    b, h = json.loads(B.read_text())["records"], json.loads(H.read_text())["records"]
+    for x in same:
+        x["hidden_difference"] = hidden_difference(b.get(x["decl"], {}).get("canon", ""),
+                                                   h.get(x["decl"], {}).get("canon", ""))
 
 
 def summarize_gate(g: dict) -> dict:

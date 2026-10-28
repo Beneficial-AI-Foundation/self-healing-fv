@@ -38,11 +38,14 @@ def link_latest(case_runs: Path, run_dir: Path) -> None:
 
 
 def render(report_json: Path, work: Path, audit_focus: str | None = None) -> Path:
-    from .pipeline import refresh_comparison
+    from .pipeline import explain_hidden, refresh_comparison
     rep = json.loads(report_json.read_text())
     if audit_focus:
         rep["audit_focus"] = audit_focus
-    refresh_comparison(rep, work / rep["case_id"].replace("/", "-"))
+    case_dir = work / rep["case_id"].replace("/", "-")
+    refresh_comparison(rep, case_dir)
+    if rep.get("audit", {}).get("statements_changed"):
+        explain_hidden(rep["audit"], case_dir / "snapshots" / "B.json", case_dir / "snapshots" / "H.json")
     # Content comes from the run; presentation from the code rendering it now. Record both.
     rep.setdefault("renders", []).append({"at": provenance.now().isoformat(timespec="seconds"),
                                           "tool": provenance.tool_code()})
