@@ -87,7 +87,7 @@ A typical run takes 10–20 minutes. Most of that is building and fingerprinting
 | `--gate-human-fix` / `--no-gate-human-fix` | Also run the human's historical fix through the gate, as if the bot had proposed it. This checks the gate against real data. It is on by default for escalations, and costs one more clean rebuild (2–7 minutes). |
 | `--attempt-anyway` | Run the agent even on theorems whose statement no longer type-checks. This is for demos, to show that the bot will not change the statement. |
 | `--no-agent` | Run the no-model sweep only. A theorem it does not repair is not attempted, so no model is called and no key is needed. |
-| `--auth api-key` | Run the agent on an API key instead of its harness's login (CI). Each adapter names its key variable (`ANTHROPIC_API_KEY` for `claude-code`). The key is handed to the agent alone, not to builds or the gate. |
+| `--auth api-key` | Run the agent on an API key instead of its harness's login (CI). Each adapter names its key variable (`ANTHROPIC_API_KEY` for `claude-code`). The key is handed to the agent alone, not to builds or the gate. On Linux, `claude-code` then needs bubblewrap (`apt-get install bubblewrap`) to keep the key out of the commands it runs. |
 | `--per-run-usd N`, `--per-run-minutes N` | Override the target config's per-run caps for this run. The report records the override. |
 | `--keep` | Keep the candidate and gate workspaces under `work/<case>/run-<run id>/` for inspection. They are deleted by default. |
 | `--agent NAME` | The agent adapter. Default: the target config's `[agent].adapter` (`claude-code`). |

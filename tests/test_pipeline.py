@@ -279,6 +279,29 @@ def test_claude_code_gets_the_api_key_only_when_given_one(tmp_path, monkeypatch)
     assert env["CLAUDE_CODE_SUBPROCESS_ENV_SCRUB"] == "1"
 
 
+def test_a_claude_code_crash_reports_its_error_line(tmp_path, monkeypatch):
+    # Actions run 2 (SCI-1717): Claude Code exited before its first turn, and the report's reason
+    # showed only the minified source it prints ahead of the error.
+    import sys
+    from shfv.agents.base import Budget, RepairTask
+    from shfv.agents.claude_code import ClaudeCode
+    fake = tmp_path / "bin" / "claude"
+    fake.parent.mkdir()
+    fake.write_text(f"#!{sys.executable}\nimport sys\n"
+                    "sys.stderr.write('1 | import{Le}from\"/$bunfs/root/chunk.js\";' * 200 + '\\n\\n'"
+                    " + 'error: bubblewrap is required for subprocess env scrubbing\\n      at $7o (chunk.js)\\n')\n"
+                    "sys.exit(1)\n")
+    fake.chmod(0o755)
+    monkeypatch.setenv("PATH", str(fake.parent) + os.pathsep + os.environ["PATH"])
+    (tmp_path / "ws").mkdir()
+    task = RepairTask("toy/123", "Toy.broken", "broken", "Toy.lean", 3, ["unsolved goals"],
+                      "aeneas", "PR 41", "leanprover/lean4:v4.28.0")
+    att = ClaudeCode("m", api_key="given").run(task, tmp_path / "ws", Budget(1, 1, 2), tmp_path / "logs",
+                                               lambda *a, **k: None)
+    assert att.stop == "error" and att.turns == 0
+    assert att.error.startswith("error: bubblewrap is required") and "at $7o" in att.error
+
+
 def test_api_key_auth_takes_the_adapters_key_out_of_the_pipeline_environment(tmp_path, monkeypatch, capsys):
     from shfv import cli
 
