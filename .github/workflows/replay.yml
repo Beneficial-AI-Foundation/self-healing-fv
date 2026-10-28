@@ -223,7 +223,9 @@ jobs:
           cp -R "$SHFV_WORK/${CASE/\//-}/logs/." "$STATS/replay-logs/" 2>/dev/null || true
 
       # Keep only what this case uses (its packages and its base and change builds), so entries
-      # restored by prefix from other cases do not pile up in the next save (10 GB per repo).
+      # restored by prefix from other cases do not pile up in the next save (10 GB per repo). Mathlib
+      # is left out: 5.5-7 GB per revision unpacked, against 45-97 s per state for its own cache
+      # (ACTIONS.md, run 1). The project builds are what save time (ACTIONS.md, "Replay store cache").
       - name: Trim the replay store
         id: trim
         if: ${{ !cancelled() && steps.store.outputs.cache-hit != 'true' && steps.clone.outputs.change != '' }}
@@ -236,7 +238,9 @@ jobs:
           keep=$(for c in "$BASE" "$CHANGE"; do git -C "$CLONE" show "$c:$ROOT_DIR/lake-manifest.json" 2>/dev/null \
             | python3 -c 'import json, sys; [print(p["name"] + "@" + p["rev"]) for p in json.load(sys.stdin)["packages"] if p.get("rev")]'; done)
           for d in "$SHFV_WORK"/_store/pkgs/*; do
-            if [ -e "$d" ] && ! grep -qxF "$(basename "$d")" <<< "$keep"; then rm -rf "$d"; fi
+            if [ -e "$d" ] && { [[ "$(basename "$d")" == mathlib@* ]] || ! grep -qxF "$(basename "$d")" <<< "$keep"; }; then
+              rm -rf "$d"
+            fi
           done
           for d in "$SHFV_WORK"/_store/builds/*; do
             if [ -e "$d" ] && [ "$(basename "$d")" != "$BASE" ] && [ "$(basename "$d")" != "$CHANGE" ]; then rm -rf "$d"; fi

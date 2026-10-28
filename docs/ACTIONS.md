@@ -55,12 +55,25 @@ The workflow caches the store between runs. The steps follow the `.lake` cache t
 | Step | What it does |
 |---|---|
 | Restore the replay store | Key `shfv-store-<os>-<repo>-<pins>-<change commit>`, where `<pins>` hashes the base and change commits' `lean-toolchain` and `lake-manifest.json`. Exact hit: the same case again. Prefix hits, in order: another case with the same pins, then any case of the same repo. The job summary says which. |
-| Trim the replay store | After the replay, keep only this case's packages and its base and change builds, so entries restored from other cases do not pile up (the cache holds 10 GB per repo). |
+| Trim the replay store | After the replay, keep only this case's packages and its base and change builds, so entries restored from other cases do not pile up (the cache holds 10 GB per repo). Mathlib is left out (below). |
 | Save the replay store | Unless the restore was an exact hit. |
 
 The work folder is `/mnt/shfv/work` on runners with a larger `/mnt`, otherwise under `$RUNNER_TEMP`. The cache is tied to that path, so runs on different runner types do not share it.
 
-**What it saves.** Measured on a laptop, not yet on Actions: see below.
+**What it saves, measured on a laptop** (18 cores, 2026-10-28, tool `3817137`). The time to prepare a case (build base, fixed and broken states), by what the store holds when the case's workspaces are built:
+
+| Store holds | dalek PR 278 (`aef8b10f`) | SPQR PR 359 (`20b2b498`) | Actions situation |
+|---|---|---|---|
+| nothing | 861 s | 291 s | a cache miss |
+| this case's packages only | 823 s | 191 s | a prefix hit on another case with the same pins, whose project builds are far from this commit |
+| packages + the previous case's builds (dalek PR 232, SPQR PR 287) | 458 s | 191 s | a prefix hit on a nearby case |
+| packages + this case's own builds | 171 s | 115 s | an exact hit: the same case again |
+
+- **The project builds are the saving.** On an exact hit, the dalek base and fixed builds take 15 s each instead of about 650 s. Packages save 38 s (dalek) and 100 s (SPQR).
+- **A neighbouring case helps only if its pins match.** SPQR PR 287 changed the Lean and Mathlib pins, so its builds did not help PR 359 at all. Dalek PR 232 shared PR 278's base pins and saved 365 s.
+- **The broken state is always rebuilt** (105 s dalek, 30 s SPQR): the cache does not hold it.
+- **Mathlib is left out of the cache.** It is 5.5–7 GB per revision unpacked, and PR 278 needs two, which would fill most of the 10 GB per repo. Mathlib's own cache took 45–97 s per state on run 1. Without Mathlib, a case's entry is about 1 GB before compression (Aeneas, the other packages, two project builds of about 0.25 GB).
+- **Not measured on Actions yet.** There, a restore also downloads and unpacks the entry, and the store is copied rather than cloned (ext4), so the gains will be smaller than on the laptop. The cold run 2 replay took 12.4 min on the 8-core runner. The next dispatch will show the restore time and the hit kind in the job summary.
 
 ## Where secrets go
 
