@@ -997,8 +997,8 @@ def refresh_comparison(report: dict, case_dir: Path) -> None:
     diff = report.get("gate", {}).get("diff", "")
     for h in report.get("human_fix", []):
         f, key = h["file"], next((e["decl"] for e in report["repairs"] if e["theorem"] == h["theorem"]), None)
-        if not key:
-            continue
+        if not key or not (case_dir / "base" / f).exists() or not (case_dir / "broken" / f).exists():
+            continue  # no replay trees here (another --work, or deleted): keep what the run recorded
         base = decl_text((case_dir / "base" / f).read_text(), key)
         broken = (case_dir / "broken" / f).read_text()
         fixed = case_dir / "fixed" / f

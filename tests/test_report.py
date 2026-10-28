@@ -103,3 +103,13 @@ def test_a_multi_line_agent_command_stays_on_the_live_line():
     s = Tty()
     Progress(s).live("turn 3: cat <<'EOF' > X.lean\ntheorem t : True := by\n  trivial\nEOF")
     assert "\n" not in s.getvalue() and "'EOF' > X.lean theorem t" in s.getvalue()
+
+
+def test_render_keeps_the_recorded_comparison_when_the_replay_trees_are_elsewhere(tmp_path):
+    import json
+    from shfv import cli
+    human = {"theorem": "T", "file": "A.lean", "human_diff": "-a\n+b", "bot_diff": "-a\n+b", "similarity_to_human": 1.0}
+    (tmp_path / "run").mkdir()
+    (tmp_path / "run" / "report.json").write_text(json.dumps(minimal_report(human_fix=[human])))
+    md = cli.render(tmp_path / "run" / "report.json", tmp_path / "no-such-work")  # used to raise FileNotFoundError
+    assert md.exists() and json.loads((tmp_path / "run" / "report.json").read_text())["human_fix"][0] == human
