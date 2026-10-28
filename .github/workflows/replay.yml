@@ -99,6 +99,20 @@ jobs:
       - name: Install Claude Code
         run: npm install -g --no-fund --no-audit "@anthropic-ai/claude-code@$CLAUDE_CODE_VERSION"
 
+      # Claude Code scrubs the key from the commands it runs (CLAUDE_CODE_SUBPROCESS_ENV_SCRUB), and on
+      # Linux that needs bubblewrap; without it Claude Code exits before its first turn (run 2). Ubuntu
+      # 24.04 may block the unprivileged user namespaces bubblewrap uses, so allow them if the probe fails.
+      - name: Install bubblewrap
+        if: inputs.agent
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq bubblewrap
+          if ! bwrap --ro-bind / / --unshare-user --unshare-net true; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+            bwrap --ro-bind / / --unshare-user --unshare-net true
+          fi
+          bwrap --version
+
       # The lean4checker builds that the gate caches per toolchain (G5).
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
         with:

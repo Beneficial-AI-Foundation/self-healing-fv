@@ -13,7 +13,7 @@ gh workflow run replay.yml -R Beneficial-AI-Foundation/self-healing-fv \
   -f case=dalek-lean-verify/e65b46d0                                       # no-model sweep only
 
 gh workflow run replay.yml -R Beneficial-AI-Foundation/self-healing-fv \
-  -f case=dalek-lean-verify/9d82afb9 -f agent=true -f per_run_usd=3      # with the agent
+  -f case=dalek-lean-verify/aef8b10f -f agent=true -f per_run_usd=3      # with the agent
 
 gh run watch -R Beneficial-AI-Foundation/self-healing-fv                  # follow it
 gh run download <run id> -R Beneficial-AI-Foundation/self-healing-fv     # fetch the artifacts
@@ -46,7 +46,7 @@ Artifacts are kept for 90 days. The repo is private, so only people with access 
 
 ## Where secrets go
 
-The single `replay` job has a read-only token, and the checkout does not keep it on disk. The key reaches only the replay step, and only when `agent` is on. There, `shfv repair --auth api-key` takes it out of the pipeline's environment and hands it to Claude Code alone, so the replay builds and the gate never see it. Claude Code is also told to scrub it from the commands it runs (`CLAUDE_CODE_SUBPROCESS_ENV_SCRUB`). This is weaker than the V1 design, which holds the key in a metering proxy and runs candidate code in a container with no secrets and no network (§3.4, §9.3). For the pilot, the code built is BAIF's own public history.
+The single `replay` job has a read-only token, and the checkout does not keep it on disk. The key reaches only the replay step, and only when `agent` is on. There, `shfv repair --auth api-key` takes it out of the pipeline's environment and hands it to Claude Code alone, so the replay builds and the gate never see it. Claude Code is also told to scrub it from the commands it runs (`CLAUDE_CODE_SUBPROCESS_ENV_SCRUB`), which on Linux needs bubblewrap; the workflow installs it when `agent` is on. This is weaker than the V1 design, which holds the key in a metering proxy and runs candidate code in a container with no secrets and no network (§3.4, §9.3). For the pilot, the code built is BAIF's own public history.
 
 ## Why this repo and not a fork
 
@@ -58,6 +58,7 @@ DESIGN.md first planned the pilot on a fork of the target repo. It runs here ins
 |---|---|---|---|---|---|---|---|
 | [2026-10-27](https://github.com/Beneficial-AI-Foundation/self-healing-fv/actions/runs/40471516417) | `dalek-lean-verify/e65b46d0`, no agent | `ubuntu-latest`, private repo: 2 cores, 7.7 GB + 3 GB swap, 72 GB disk (43 GB free after cleanup) | failed: the replay could not rebuild the case | 1h57m (setup 2.6 min, building base and fixed 1h45m) | 5.0 GB + 2.4 GB swap, no OOM kill | 55.5 GB, 16 GB free | $0 |
 | [2026-10-27](https://github.com/Beneficial-AI-Foundation/self-healing-fv/actions/runs/40497476458) | `dalek-lean-verify/e65b46d0`, no agent | `self-healing-fv`, larger runner: 8 cores, 31 GB, 300 GB SSD | **accepted**: the sweep repaired the 1 broken proof, the gate passed every check | 56 min (setup 3 min, replay 30.5 min, gate 15.7 min) | 11.3 GB, no swap | 78.5 GB, 211 GB free | $0 model; about $1.25 of runner time |
+| [2026-10-28](https://github.com/Beneficial-AI-Foundation/self-healing-fv/actions/runs/40652654439) | `dalek-lean-verify/aef8b10f`, agent, $3 cap | `self-healing-fv` | failed: Claude Code exited before its first turn (no bubblewrap), so the case escalated | 24 min (replay 12.4 min, gate 5.5 min) | 10.0 GB, no swap | 80.0 GB | $0 model (no API call); about $0.55 of runner time |
 
 **Run 1: the standard private-repo runner does not fit a dalek replay.**
 - **Time.** Building the base and fixed states (in parallel, 2 cores) took 1h45m, with many dalek files at 5–10 minutes each (`Scalar52.ToBytes` 592 s). In the base state `Scalar52/MontgomeryReduce.lean` ran past the replay's 15-minute per-file limit (`FILE_TIMEOUT_S`) and was killed, so the base "did not build" and the replay stopped before the broken state. The sweep and the gate never ran.
@@ -71,3 +72,5 @@ DESIGN.md first planned the pilot on a fork of the target repo. It runs here ins
 - **Memory.** Peak 11.3 GB of 31 GB, no swap; Lean processes peaked at 14 GB PSS with up to 18 at once. Half the runner's memory would do for this case, but a 4-core runner would roughly double the build times.
 - **Disk.** Peak 78.5 GB used, 211 GB free.
 - **Cost.** Larger runners are billed per minute ($0.022 a minute for 8 cores), so about $1.25 for the run; the sweep made no model call.
+
+**Run 2: the agent did not start.** PR 278 (6 broken proofs) is a case the sweep does not fix, so the agent has to run; PR 41, the first choice, is fixed by the sweep. Claude Code exited at once: with `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB` set it needs bubblewrap on Linux to sandbox the commands it runs, and the runner has none (on macOS it uses the system sandbox, so local runs never hit this). The pipeline recorded an `infrastructure-failure`, made no further attempts, and escalated; the gate rejected the candidate because the unrepaired proofs were still `sorry`. The key appears nowhere in the log or the artifacts (GitHub masks the one place the variable is set). Fixed: the workflow installs bubblewrap and checks that it works when `agent` is on, and the report now leads with Claude Code's `error:` line instead of the minified source printed before it.

@@ -157,7 +157,10 @@ class ClaudeCode:
         if timed_out.is_set():
             att.stop = "timeout"
         elif result is None:
-            att.error = ("".join(stderr) or "")[-2000:]
+            # A crash prints minified source first; lead with its "error:" line so the report shows it.
+            err = "".join(stderr)
+            first = next((l.strip() for l in err.splitlines() if l.startswith("error:")), "")
+            att.error = (first + "\n\n" + err[-2000:]).strip() if first else err[-2000:]
         return att
 
 
