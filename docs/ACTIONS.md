@@ -44,6 +44,24 @@ Give the key its own spend limit with the provider (§9.3): that is the only lim
 
 Artifacts are kept for 90 days. The repo is private, so only people with access to it can see them.
 
+## Replay store cache
+
+A replay builds three states of the target (base, fixed, broken) from historical commits. `replay/replay_case.py` keeps what it builds in a **replay store**, `$SHFV_WORK/_store`, and seeds each state's build from it:
+- `pkgs/<name>@<rev>/`: built Lake packages (Mathlib with its unpacked cache, Aeneas, ...);
+- `builds/<commit>/`: the project's `.lake/build` after a green build of that commit. A seed from another commit only speeds things up: Lake re-checks every hash and rebuilds what changed.
+
+The workflow caches the store between runs. The steps follow the `.lake` cache that Lara (Lacramioara Astefanoaei) wrote for [secure-messaging's CI](https://github.com/Beneficial-AI-Foundation/secure-messaging/blob/6ba44239abbca2abba26b145675bb1d766e6591f/.github/workflows/ci.yml#L62-L81) (veritooling): one cache, restored by exact key or by prefix, and saved only when there was no exact hit. Sergiu's later rule there (save only on `main`, or when no entry exists) has no counterpart here, since replays are dispatched by hand.
+
+| Step | What it does |
+|---|---|
+| Restore the replay store | Key `shfv-store-<os>-<repo>-<pins>-<change commit>`, where `<pins>` hashes the base and change commits' `lean-toolchain` and `lake-manifest.json`. Exact hit: the same case again. Prefix hits, in order: another case with the same pins, then any case of the same repo. The job summary says which. |
+| Trim the replay store | After the replay, keep only this case's packages and its base and change builds, so entries restored from other cases do not pile up (the cache holds 10 GB per repo). |
+| Save the replay store | Unless the restore was an exact hit. |
+
+The work folder is `/mnt/shfv/work` on runners with a larger `/mnt`, otherwise under `$RUNNER_TEMP`. The cache is tied to that path, so runs on different runner types do not share it.
+
+**What it saves.** Measured on a laptop, not yet on Actions: see below.
+
 ## Where secrets go
 
 The single `replay` job has a read-only token, and the checkout does not keep it on disk. The key reaches only the replay step, and only when `agent` is on. There, `shfv repair --auth api-key` takes it out of the pipeline's environment and hands it to Claude Code alone, so the replay builds and the gate never see it. Claude Code is also told to scrub it from the commands it runs (`CLAUDE_CODE_SUBPROCESS_ENV_SCRUB`), which on Linux needs bubblewrap; the workflow installs it when `agent` is on. This is weaker than the V1 design, which holds the key in a metering proxy and runs candidate code in a container with no secrets and no network (§3.4, §9.3). For the pilot, the code built is BAIF's own public history.
