@@ -333,7 +333,7 @@ workspace; MCP runs outside that command sandbox. See
 | `cannot enforce the turn cap …` at start | The target config sets a cap the adapter (e.g. `codex`) cannot enforce. Turn it off under `[budget.<adapter>]` (section 7), or pass `--allow-unenforced-caps` to run anyway; the report says which caps were not enforced. |
 | Laptop busy during a run | Lower `lean_num_threads` in the target config. |
 | Disk filling up | Delete old `<work>/<case>/run-*` directories (only present with `--keep`). The replay workspaces can be rebuilt. |
-| A case you ran before rebuilds from scratch | Its workspaces are in the old `work/` folder in this repo. Set `SHFV_WORK` to that folder, or move it to `~/baif/shfv-work/`. |
+| A case you ran before rebuilds from scratch | Its workspaces are in the old `work/` folder in this repo. Set `SHFV_WORK` to that folder, or move it to `~/baif/shfv-work/`. On macOS, `cp -cR base broken fixed logs snapshots ~/baif/shfv-work/<case>/` (run inside `work/<case>/`, after `mkdir ~/baif/shfv-work/<case>`) makes a copy-on-write clone in seconds that takes no extra disk, and leaves the old `run-*` folders behind. A rebuild clones Aeneas and fetches the Mathlib cache, which can stall on a slow network. |
 
 ## 9. Limits of this prototype
 
