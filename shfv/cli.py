@@ -24,7 +24,7 @@ from . import provenance
 from . import report as report_mod
 from .agents.claude_code import ClaudeCode
 from .agents.codex_cli import CodexCLI
-from .pipeline import ROOT, Run, check_capabilities, fmt_s
+from .pipeline import BOT_REPO, ROOT, Run, check_capabilities, fmt_s
 
 ADAPTERS = {"claude-code": ClaudeCode, "codex": CodexCLI}
 EXAMPLES = ROOT / "docs" / "examples" / "reports"
@@ -111,6 +111,21 @@ def write_index(to: Path) -> None:
     index.write_text("\n".join(lines) + "\n" + (f"\n{notes}\n" if notes else ""))
 
 
+def scan_tripwire(run_dirs: list[Path], repo: Path | None, out: Path | None) -> int:
+    """The tripwire over finished runs, e.g. ones made before it existed. Exit 1 if any is flagged."""
+    from . import tripwire
+    results, flagged = {}, False
+    for d in run_dirs:
+        d = d.resolve()
+        r = tripwire.scan_record(d, runs_root=d.parent.parent, repo=repo, bot_repo=BOT_REPO)
+        results[str(d)] = r
+        flagged |= r["verdict"] == "flagged"
+        print(f"{d.parent.name}/{d.name}: {tripwire.describe(r)}")
+    if out:
+        out.write_text(json.dumps(results, indent=1, ensure_ascii=False))
+    return 1 if flagged else 0
+
+
 def doctor(config: Path, repo: Path | None = None) -> int:
     """Check what a run needs before spending anything (review finding 16)."""
     from gates import proc
@@ -187,7 +202,13 @@ def main(argv: list[str] | None = None) -> int:
                    help="run directories, case directories (their latest run) or runs directories (every case's latest)")
     c.add_argument("--out", type=Path, help="write the Markdown summary here (default: stdout)")
     c.add_argument("--csv", type=Path, help="also write the per-theorem table as CSV")
+    t = sub.add_parser("tripwire", help="scan finished runs' transcripts for looks outside the workspace (§8.5)")
+    t.add_argument("runs", type=Path, nargs="+", help="run directories (runs/<case>/<run id>)")
+    t.add_argument("--repo", type=Path, help="the target clone, to name it in the findings")
+    t.add_argument("--json", type=Path, help="also write every run's full result here")
     a = ap.parse_args(argv)
+    if a.cmd == "tripwire":
+        return scan_tripwire(a.runs, a.repo, a.json)
     if a.cmd == "compare-human":
         from . import human_compare
         return human_compare.main(a.runs, a.out, a.csv)
