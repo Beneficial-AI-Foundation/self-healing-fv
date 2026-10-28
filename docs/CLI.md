@@ -12,7 +12,7 @@ You need:
 |---|---|
 | [`elan`](https://github.com/leanprover/elan) | Lean toolchains. Each case uses its own pinned toolchain, which elan installs on first use. |
 | [`uv`](https://docs.astral.sh/uv/) | Runs the Python tools (Python ≥ 3.11, no other dependencies). |
-| [`claude`](https://docs.claude.com/en/docs/claude-code) (Claude Code), logged in | The repair agent. It runs on whatever account Claude Code is logged in with. |
+| An agent CLI, logged in: [`claude`](https://docs.claude.com/en/docs/claude-code) (Claude Code, the default) or [`codex`](https://developers.openai.com/codex) (Codex CLI 0.164.0, section 7) | The repair agent. It runs on whatever account its CLI is logged in with, or on an API key (`--auth api-key`). Not needed with `--no-agent`. |
 | A local clone of the target repo | Source of the historical commits. Default: `~/baif/curve25519-dalek-lean-verify`; override with `--repo`. |
 | Disk space | Replay workspaces with built Mathlib: several GB per case. Copies are copy-on-write on APFS. |
 
@@ -20,11 +20,11 @@ From the repo root:
 
 ```
 uv sync
-uv run shfv doctor       # checks elan, lake, uv, Claude Code, the Lean LSP MCP server, the target clone
+uv run shfv doctor       # checks elan, lake, uv, the agent's CLI, the Lean LSP MCP server, the target clone
 uv run pytest            # about 2 minutes; builds a small Lean project, checks the gate and the pipeline
 ```
 
-If both pass, the Lean toolchain, the gate and the pipeline work on your machine. `doctor` does not check that Claude Code is logged in, because that would spend tokens: run `claude` once interactively if unsure.
+If both pass, the Lean toolchain, the gate and the pipeline work on your machine. `doctor` checks the target config's agent adapter (`--agent codex` for another), and the MCP server only for the `lsp` tool profile. It does not check that the agent's CLI is logged in, because that would spend tokens: run `claude` once interactively (or `codex login`) if unsure.
 
 The replay workspaces live in `~/baif/shfv-work/`, or under `$SHFV_WORK` if you set it. Keep them outside this repo and outside the target clones: an agent that searches upward from its workspace would otherwise find this repo's docs and earlier run records (DESIGN.md §8.5). `doctor` warns if the workspaces or the run records (`--runs`) sit inside this repo or a clone. The first run of a case builds them: it fetches the Mathlib cache and builds the base, broken and fixed states, which takes a few minutes. Later runs reuse them. Workspaces made before 2026-10-28 are under `work/` in this repo; set `SHFV_WORK` to that folder to reuse them.
 
@@ -86,14 +86,16 @@ A typical run takes 10–20 minutes. Most of that is building and fingerprinting
 | `--label NAME` | Add a suffix to the run id, e.g. `demo`. Every run already gets its own directory (section 5), so you need this only to tag a run. |
 | `--gate-human-fix` / `--no-gate-human-fix` | Also run the human's historical fix through the gate, as if the bot had proposed it. This checks the gate against real data. It is on by default for escalations, and costs one more clean rebuild (2–7 minutes). |
 | `--attempt-anyway` | Run the agent even on theorems whose statement no longer type-checks. This is for demos, to show that the bot will not change the statement. |
-| `--no-agent` | Run the no-model sweep only. A theorem it does not repair is not attempted, so no model is called and no key is needed. |
-| `--auth api-key` | Run the agent on an API key instead of its harness's login (CI). Each adapter names its key variable (`ANTHROPIC_API_KEY` for `claude-code`). The key is handed to the agent alone, not to builds or the gate. On Linux, `claude-code` then needs bubblewrap (`apt-get install bubblewrap`) to keep the key out of the commands it runs. |
+| `--no-agent` | Run the no-model sweep only. A theorem it does not repair is not attempted, so no model is called and no key is needed. The run id ends in `no-model` instead of the model's name. |
+| `--auth api-key` | Run the agent on an API key instead of its harness's login (CI). Each adapter names its key variable (`ANTHROPIC_API_KEY` for `claude-code`, `CODEX_API_KEY` for `codex`). The key is handed to the agent alone, not to builds or the gate. On Linux, `claude-code` then needs bubblewrap (`apt-get install bubblewrap`) to keep the key out of the commands it runs. |
 | `--per-run-usd N`, `--per-run-minutes N` | Override the target config's per-run caps for this run. The report records the override. |
+| `--allow-unenforced-caps` | Run an adapter that cannot enforce a configured cap instead of refusing (section 7: Codex has no turn cap and no dollar cap within a session). The terminal warns, and the report's Agent row names the caps that were not enforced. |
 | `--keep` | Keep the candidate and gate workspaces under `<work>/<case>/run-<run id>/` for inspection. They are deleted by default. |
 | `--agent NAME` | The agent adapter. Default: the target config's `[agent].adapter` (`claude-code`). |
 | `--audit-focus TEXT` | Show the audit's before/after first for declarations whose name contains `TEXT` (e.g. `clamped`). |
 | `--config PATH` | The *target config*: a TOML file describing the repo being repaired (section 7). Default: `targets/<repo>.toml`, from the case id. |
 | `--repo PATH` | The local clone of the target repo. Default: `~/baif/<repo name>`. |
+| `--replay-record PATH` | Use this replay record instead of `data/replay/<repo>/<sha8>.json`. |
 | `--work PATH` | Where the replay workspaces and build products live. Default: `$SHFV_WORK`, else `~/baif/shfv-work/`. |
 | `--runs PATH` | Where reports are written: `<runs>/<case>/<run id>/`. Default: `runs/`. |
 
@@ -124,11 +126,12 @@ The exit status of `shfv repair` is 0 when the run completed, whatever its verdi
 
 ## 4. Read the report
 
-`report.md` is exactly the comment the bot would post on the PR. It is written for a reviewer who has not read the design, and it opens with one of three verdicts:
+`report.md` is exactly the comment the bot would post on the PR. It is written for a reviewer who has not read the design, and it opens with one of four verdicts:
 
 | Verdict | Meaning |
 |---|---|
 | ✅ **accepted** | Every broken proof was repaired and the gate accepted the whole change, kernel replay included. It may carry a 🏷️ flag (below). |
+| 🟡 **passed every check that ran** (`passed-without-kernel-replay`) | Every broken proof was repaired and every gate check that ran passed, but the kernel replay (G5) did not run. Not accepted. |
 | ⚠️ **needs a human** (`escalated`) | At least one theorem was not repaired. The report says why for each one. |
 | ⛔ **failed** | The run itself failed (setup, build environment, or gate unavailable). It says nothing about the proofs. |
 
@@ -136,7 +139,8 @@ Per theorem, the outcome is one of:
 
 | Outcome | Meaning |
 |---|---|
-| `repaired` | Accepted by the gate. |
+| `repaired` | Accepted by the gate. The Repaired table says whether the sweep (no model) or the agent made the repair. |
+| `passed-checks` | Every gate check that ran passed, but the kernel replay (G5) did not run, so it is not accepted. |
 | `statement-must-change` | The statement no longer type-checks. A person who owns the spec must decide the new statement. The report shows the Lean error, the statement, and how the extracted function it uses changed. |
 | `proof-hard` | No accepted repair within the budget. The reason is given: the agent gave up, a cap was reached, the file did not build, or the gate rejected the candidate and which checks failed. |
 | `blocked-on` | Waits on another theorem that must be fixed first. |
@@ -159,9 +163,9 @@ Count results both ways: all accepted, and accepted with no flag. DESIGN.md §4.
 
 If the native-code stop is in a repaired or added declaration, or in one that did not use native code at the base, the repair is not accepted: the verdict is `gate-unavailable`, because the repair itself would go unchecked.
 
-Right after the summary, **Changes made by the triggering change itself (audit)** says whether the human change altered any frozen statement, definition or trust assumption: `no-change`, `changed` (trust changes first: theorems that newly depend on `sorry`, new axioms, changed trusted models; then the statements, collapsed, with before and after), or `incomplete` (something could not be compared; never read as "no change"). The bot does not judge these changes; it shows them to a spec owner.
+Right after the summary, **Changes made by the triggering change itself (audit)** says whether the human change altered any frozen statement, definition or trust assumption: `no-change`, `changed` (trust changes first: theorems that newly depend on `sorry`, new axioms, changed trusted models; then the statements, collapsed, with before and after), or `incomplete` (something could not be compared; never read as "no change"). The bot does not judge these changes; it shows them to a spec owner. A statement whose before and after print identically changed in something the printer hides; the report then names it from the fingerprints (e.g. universe levels in SPQR PR 106).
 
-The **Gate** table lists each check (section 6) with ✅/❌ and the first violations. **The repair the bot proposes** is the diff as it applies to the change's head; if the gate did not accept it, it is labelled an **unaccepted suggestion**. **Cost** is computed from token counts at the list prices in the target config: an API-equivalent estimate of the agent's model calls only (builds are not included). It says "unknown" when the model has no price entry, and "at least" when a session was stopped before reporting full usage. In replays, **Compared with the human fix** shows whether the human changed the statement, how big each edit was, and how alike the two edits are. An edit 90% or more like the human's is flagged for review as possible recall of the public fix. The **agent's own notes** are model output: they are shown quoted, with links and @-mentions disabled, and they never decide anything.
+The **Gate** table lists each check (section 6) with ✅/❌ and the first violations. **The repair the bot proposes** is the diff as it applies to the change's head; if the gate did not accept it, it is labelled an **unaccepted suggestion**. **Cost** is computed from token counts at the list prices in the target config: an API-equivalent estimate of the agent's model calls only (builds are not included). It says "unknown" when the model has no price entry, and "at least" when a session was stopped before reporting full usage. The **Agent** row counts turns in the harness's own unit, which differs between agents (Claude Code: model API calls; Codex: completed agent messages), so turn counts are not comparable across agents. In replays, **Compared with the human fix** shows whether the human changed the statement, how big each edit was, and how alike the two edits are: the changed lines of the two edits are compared, and a line only re-indented counts as unchanged. An edit 90% or more like the human's is flagged for review as possible recall of the public fix. The **agent's own notes** are model output: they are shown quoted, with links and @-mentions disabled, and they never decide anything.
 
 The **Tripwire** line, just above the footer, says whether any attempt looked where the answer could be. In a replay the human fix is on disk, and nothing stops an agent from reading it; the tripwire detects, it does not prevent (a read sandbox is V1, DESIGN.md §9.3). It scans every attempt's transcript and edits for: reads or searches outside the workspace and `context/` (in the replay trees, the work folder, run records, this repo, the target clone, the home folder, session histories); `git` commands that read history; network commands; and Lean code doing file or process IO. Reads of Lean toolchain sources, `/tmp` scratch files and the attempt's own run folder are counted but not flagged, because they cannot hold the human fix. The line reads "no reads outside the workspace that could reach the human fix", or "⚠️ Tripwire: N look(s) outside the workspace" with the first few, each with whether it succeeded, failed, or was denied by the harness. Review a flagged replay before using its numbers, and re-run it if a flag could have reached the human fix. `report.json` has the details under `tripwire` (field list: [REPORT.md](REPORT.md)).
 
@@ -170,17 +174,20 @@ The **Tripwire** line, just above the footer, says whether any attempt looked wh
 ```
 runs/<repo>-<sha8>/
   latest -> <run id>         the newest run of this case
-  <run id>/                  one directory per run, never overwritten, e.g. 20261023T081950Z-claude-opus-5-5
+  <run id>/                  one directory per run, never overwritten, e.g. 20261023T081950Z-claude-opus-5-5,
+                             or <time>-no-model when no model was called (the sweep did it all, or nothing
+                             was attempted)
     report.md                the PR comment
     report.json              the run record: provenance (below), inputs, every attempt (model, tokens,
                              cost, turns, time), gate verdict, outcomes, timings
-    attempts/NN-<theorem>/
+    attempts/NN-<theorem>[-attemptN]/   one per agent attempt
       prompt.md              exactly what the agent was told
-      transcript.jsonl       the full agent session (stream-json)
-      suggestion.lean        the file as the agent left it, when the attempt was not used
+      transcript.jsonl       the full agent session (the harness's JSON event stream)
+      suggestion.patch       the attempt's edits as a diff, when the attempt was rolled back
 ~/baif/shfv-work/<repo>-<sha8>/   (or $SHFV_WORK)
   base/ broken/ fixed/       replay workspaces (broken = stubbed broken state)
-  snapshots/B.json, K.json   cached gate snapshots of base and stubbed broken state
+  snapshots/B.json, K.json, H.json   cached gate snapshots of base, stubbed broken state and the change's head
+  snapshots/audit.json       the audit of the change itself
   run-<run id>/candidate/    the agent's workspace: a copy of the broken state, no .git; build output
                              of modules with no source (e.g. ones only the human fix has) is removed
   run-<run id>/context/      read-only context for the agent (the extraction diff)
@@ -204,7 +211,7 @@ Every `report.json` has a `provenance` block, and the footer of `report.md` repe
 - the **self-healing-fv commit**, and whether the code had uncommitted changes. Such a run is marked *+ uncommitted changes*, and the report warns that it cannot be reproduced from a commit;
 - the **gate version** (`gate version`, a hash of the gate's sources);
 - a hash of the **agent prompt** template;
-- the **model** and the **Claude Code version**;
+- the **agent adapter**, the **model**, and the agent harness's own **version** (e.g. Claude Code's or Codex CLI's);
 - a hash of the **target config**, and the target's **Lean toolchain**;
 - every later **re-render** (`shfv render`), with the code that did it.
 
@@ -265,7 +272,7 @@ The checks:
 
 | Check | Passes when |
 |---|---|
-| **G0 scope** (textual, before any build) | The diff changes only the proof bodies of broken theorems, plus added theorems/lemmas in the same files. No protected file is touched (extracted code, trusted models, lakefile, toolchain, manifest). No statement, attribute or text between declarations changes. No `sorry`, `admit`, `axiom`, `opaque`, `@[extern]`, `@[implemented_by]`, `debug.*` options, `maxHeartbeats 0` or metaprogramming. |
+| **G0 scope** (textual, before any build) | The diff changes only the proof bodies of broken theorems, plus added theorems/lemmas in the same files. No protected file is touched (extracted code, trusted models, lakefile, toolchain, manifest). No statement, attribute or text between declarations changes. No `sorry` or `sorryAx`, `admit`, `axiom`, `opaque`, `unsafe`, `import`, `@[extern]`, `@[implemented_by]`, `@[csimp]`, `debug.*` options, `maxHeartbeats 0`, kernel bypasses (`addDecl`, `skipKernelTC`, `trustCompiler`, `ofReduceBool`) or metaprograms (`run_cmd`, `run_tac`, `run_elab`, `#eval`). |
 | **G1 statements** | Every frozen declaration has the same fingerprint (kind, elaborated type, and body for definitions) in the stubbed broken state and in the candidate. The fingerprints ignore binder names, so renaming a bound variable does not count as a change, but any change of meaning does. |
 | **G2 trust base** | Each declaration's axioms stay within the three standard Lean axioms plus what it had at the base. So no new `sorry`, no new axioms, and no `native_decide` where the base had none. A repaired theorem may still reach lemmas that were already unproved (`sorry`) at the base, the same ones it reached there and no others: the repair is then accepted but **flagged** ("inherited sorry" in the summary line, 🏷️ in the report, `gate.inherited_sorry` in report.json), so results can be counted with and without such repairs. Every added lemma is used by a repaired theorem. |
 | **G3 clean build** | The fresh copy builds green and covers every audited module. |
@@ -281,21 +288,26 @@ A target repo is described by `targets/<repo>.toml`: `dalek-lean-verify`, `spqr`
 
 - `[lean]`: the build targets, the root modules (every project module they import is audited), and `lean_num_threads`, which defaults to 8 so the machine stays usable.
 - `[protected]`: files the bot may never touch.
-- `[agent]`: the adapter, the default model, and the tool profile (`minimal` or `lsp`). An adapter that cannot meet the profile refuses to start.
-- `[budget]`: caps per theorem (cost in USD, minutes, turns), per run (cost, minutes; one deadline for the whole run), and `attempts_per_theorem`. Turns and minutes mean the same for every model. They are prototype guesses, to be set from pilot data.
+- `[agent]`: the adapter, the default model, and the tool profile (`minimal` or `lsp`). An adapter that cannot meet the profile refuses to start. The agent gets the Lean LSP tools only with `lsp`, even if its adapter supports them.
+- `[budget]`: caps per theorem (cost in USD, minutes, turns), per run (cost, minutes; one deadline for the whole run), and `attempts_per_theorem`. Minutes mean the same for every agent and model; turns do not (Claude Code counts model API calls, Codex completed agent messages). An adapter that cannot enforce the turn cap, or a dollar cap within a session when the model has a price, refuses to start unless you pass `--allow-unenforced-caps`. The caps are prototype guesses, to be set from pilot data.
 - `[prices."<model>"]`: USD per million tokens (input, output, cache read, 5-minute and 1-hour cache writes). Cost is computed from these for every adapter; the agent harness's own figure is only a cross-check. A model without an entry has cost "unknown" and no dollar cap.
 - `[repair]`: `sweep = true` runs the no-model sweep before the agent.
 
 ### Codex CLI
 
 Use Codex 0.164.0 with an explicit Codex model (the existing target defaults name a Claude
-model): `uv run shfv repair --case dalek-lean-verify/9d82afb9 --agent codex --model gpt-6.1-sol`.
+model): `uv run shfv repair --case dalek-lean-verify/9d82afb9 --agent codex --model gpt-6.1-sol --allow-unenforced-caps`.
 Each theorem gets a fresh `codex exec` session, the shared repair prompt, structured diagnosis,
 and the pinned Lean LSP MCP server for the `lsp` profile. The gate and report are unchanged.
+`uv run shfv doctor --agent codex` checks the setup.
 
 The minutes deadline kills the process group. Codex has no CLI turn or dollar cap; these are
-declared unsupported. Usage is priced by the pipeline; existing target configs have no Codex
-prices, so cost is `no-price`. Interrupted usage is marked incomplete.
+declared unsupported, so a run refuses to start while the target config sets a turn cap (or a
+dollar cap, for a priced model) unless you pass `--allow-unenforced-caps`. The report then names
+the caps that were not enforced. A Codex turn is a completed agent message, not a model API call.
+Usage is priced by the pipeline; existing target configs have no Codex prices, so cost is
+`no-price`. Cache writes are counted as the more expensive kind, and reasoning tokens are part of
+output (recorded separately as `reasoning_output`). Interrupted usage is marked incomplete.
 
 Use `--auth api-key` with `CODEX_API_KEY` provisioned for CI. The adapter accepts the key through
 the shared contract. Key runs use
@@ -313,7 +325,8 @@ workspace; MCP runs outside that command sandbox. See
 | `no case record or replay record` | The case id must match a file in `data/replay/<repo>/`. |
 | The first run of a case is slow | It is building the replay workspaces and fetching the Mathlib cache. Later runs reuse them. |
 | `gate-unavailable` in the report, or exit status 2 | The gate could not run, or refused to decide. The reasons are listed in the report's Gate section and in `report.json` (`gate.unavailable`, or `error`). Common causes: the base didn't build, a snapshot made by an older gate version or another config, a build timeout. Nothing is accepted in that case. |
-| `infrastructure-failure` on the first attempt | Usually Claude Code is not logged in, or the `claude` CLI is missing. Run `claude` once interactively. |
+| `infrastructure-failure` on the first attempt | Usually the agent's CLI is missing or not logged in. Run `uv run shfv doctor`, then `claude` once interactively (or `codex login`). The attempt's `error` in `report.json` has the CLI's own message. |
+| `cannot enforce the turn cap …` at start | The adapter (e.g. `codex`) has no turn or dollar cap. Pass `--allow-unenforced-caps` to run anyway; the report says which caps were not enforced. |
 | Laptop busy during a run | Lower `lean_num_threads` in the target config. |
 | Disk filling up | Delete old `<work>/<case>/run-*` directories (only present with `--keep`). The replay workspaces can be rebuilt. |
 | A case you ran before rebuilds from scratch | Its workspaces are in the old `work/` folder in this repo. Set `SHFV_WORK` to that folder, or move it to `~/baif/shfv-work/`. |
@@ -324,4 +337,4 @@ workspace; MCP runs outside that command sandbox. See
 - **Kernel replay stops at native code.** Modules with `native_decide` or `bv_decide` proofs are only partly re-checked by G5, and such acceptances are flagged (section 4). A complete re-check is V1 (DESIGN.md §11, question 21). Live CI is V1 (DESIGN.md §9); the prototype replays one case at a time on Actions ([ACTIONS.md](ACTIONS.md)).
 - **Agent adapters:** Claude Code and Codex CLI; Codex's budget and isolation limits are described above.
 - **Complete-case acceptance.** A change is accepted only if every broken theorem is repaired (DESIGN.md §4.3).
-- **Not built yet:** the sandbox and metering proxy for the agent (DESIGN.md §3.4, §9.5). Until then the cost caps are Claude Code's own enforcement plus the pipeline's accounting, not a hard limit, and nothing stops an agent from reading outside its workspace: the tripwire (section 4) only detects it.
+- **Not built yet:** the sandbox and metering proxy for the agent (DESIGN.md §3.4, §9.5). Until then the cost caps are the agent harness's own enforcement (Claude Code has one, Codex none) plus the pipeline's accounting between attempts, not a hard limit, and nothing stops an agent from reading outside its workspace: the tripwire (section 4) only detects it.

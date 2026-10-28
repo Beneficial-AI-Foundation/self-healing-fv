@@ -22,7 +22,7 @@ The last line on stdout has the form `<VERDICT> · <counts by outcome> · <cost>
 
 | Command | 0 | 1 | Other |
 |---|---|---|---|
-| `shfv repair` | The run completed, whatever its verdict (`accepted`, `escalated`, `passed-without-kernel-replay`) | The run failed (`verdict: failed`), or it could not start (unknown case, adapter cannot meet the tool profile) | 130: interrupted (a partial record is still written); 2: bad arguments |
+| `shfv repair` | The run completed, whatever its verdict (`accepted`, `escalated`, `passed-without-kernel-replay`) | The run failed (`verdict: failed`), or it could not start (unknown case, adapter cannot meet the tool profile, or cannot enforce a configured cap without `--allow-unenforced-caps`) | 130: interrupted (a partial record is still written); 2: bad arguments |
 | `shfv render` | Re-rendered | – | – |
 | `shfv export` | Exported | A run has no provenance, or was made with uncommitted code | – |
 | `shfv doctor` | Every check passed | Something is missing | – |
@@ -49,7 +49,7 @@ Exit 2 is also argparse's code for bad arguments. Exit 2 never means a pass.
 |---|---|---|
 | `format` | int | Record format, currently `2` |
 | `case_id` | str | `<repo>/<sha8>` |
-| `run_id` | str | E.g. `20261026T094120Z-claude-opus-5-5[-label]` |
+| `run_id` | str | E.g. `20261026T094120Z-claude-opus-5-5[-label]`; `<time>-no-model[-label]` when the run called no model |
 | `started_at` | str | UTC, ISO 8601 |
 | `verdict` | str | The overall result (section 4) |
 | `repairs` | list | One entry per proof-repair target (section 5) |
@@ -64,7 +64,7 @@ Exit 2 is also argparse's code for bad arguments. Exit 2 never means a pass.
 | `provenance` | object | What produced the run (section 9) |
 | `inputs` | object | `repo`, `base_commit`, `change_commit`, `change_pr`, `change_pr_url`, `change_subject`, `cause`, `causes`, `pin_changes`, `fix_commits`, `generated`, `repo_lean_root` |
 | `config` | object | `path`, `sha256` (first 12 hex) and `budget` of the target config; `budget` includes any per-run override, and `budget_overrides` lists them (`--per-run-usd`, `--per-run-minutes`) |
-| `agent` | object | `adapter`, `model`, `enabled` (false with `--no-agent`: the sweep only), `auth` (`login` or `api-key`) |
+| `agent` | object | `adapter`, `model`, `enabled` (false with `--no-agent`: the sweep only), `auth` (`login` or `api-key`), `tool_profile` (`minimal` or `lsp`), `turns_unit` (what a turn counts for this adapter: `API calls` for Claude Code, `agent messages` for Codex), `unenforced_caps` (caps the adapter could not enforce, allowed by `--allow-unenforced-caps`; empty otherwise) |
 | `gate_version` | str | Hash of the gate's sources |
 | `toolchain` | str | The target's Lean toolchain in the broken state |
 | `error` | object | Only when the run failed: `outcome` (`gate-unavailable` or `infrastructure-failure`) and `detail` |
@@ -104,7 +104,7 @@ Each entry of `repairs` has `theorem` (fully qualified), `file`, `decl` (name as
 
 Each entry of `escalations` has `theorem`, `file`, `line`, `outcome` (always `statement-must-change` for now), `errors` (Lean's messages), `statement` (as it stands), `definition` (when a definition body no longer type-checks, else null), `extraction_change` (a list of `{name, before, after}` signatures of extracted functions named in the errors) and `rename_only` (always null for now).
 
-Each attempt object has `adapter`, `model`, `resolved_model`, `stop` (`done`, `gave-up`, `max-turns`, `budget`, `timeout` or `error`), `tokens`, `tokens_complete`, `cost_usd`, `cost_status`, `reported_cost_usd`, `turns`, `seconds`, `final_message`, `diagnosis`, `transcript`, `error`.
+Each attempt object has `adapter`, `model`, `resolved_model`, `stop` (`done`, `gave-up`, `max-turns`, `budget`, `timeout` or `error`), `tokens`, `tokens_complete`, `cost_usd`, `cost_status`, `reported_cost_usd`, `turns`, `seconds`, `final_message`, `diagnosis`, `transcript`, `error`. `turns` is in the adapter's own unit (`agent.turns_unit`), so it is not comparable across adapters.
 
 `diagnosis` is the agent's structured self-report, or null if it gave none or it did not match the schema: `outcome` (`repaired` or `gave-up`), `summary`, `failure_scope` (`none`, `local` or `global`), `suspects_statement`, `statement_doubt`, `helpers_added`. `final_message` and `diagnosis` are model output: advisory and untrusted. Never act on them as if they were checked.
 
@@ -136,7 +136,7 @@ The output of `gate audit` on the base and the change's head:
 |---|---|
 | `outcome` | `no-change`, `changed`, `incomplete`, or `not-applicable` (generated cases have no human change) |
 | `complete` | Whether every declaration could be compared |
-| `statements_changed`, `definitions_changed` | Each `{decl, module, before, after}` (pretty-printed for display; the fingerprint decided) |
+| `statements_changed`, `definitions_changed` | Each `{decl, module, before, after}` (pretty-printed for display; the fingerprint decided). A statement whose `before` and `after` print identically also has `hidden_difference`: where the fingerprints differ, e.g. universe levels (added by the pipeline from the snapshots, display only) |
 | `removed` | Frozen declarations gone from the head |
 | `axioms_changed` | Each `{decl, added, removed}` |
 | `trusted_models_changed` | Paths of trusted-model files whose text changed |
@@ -148,7 +148,7 @@ The output of `gate audit` on the base and the change's head:
 
 ## 8. The `human_fix` section (replay only)
 
-Per broken theorem: `human_changed_statement`, `human_removed`, `human_added_sorry`, `base_proof_lines`, `human_proof_lines`, `bot_proof_lines`, `human_diff`, `bot_diff`, `statement_before`/`statement_after` (when the human changed it), `similarity_to_human` (0 to 1) and `possible_memorization` (true at 0.9 or more: the bot's edit may recall the public fix).
+Per broken theorem: `human_changed_statement`, `human_removed`, `human_added_sorry`, `base_proof_lines`, `human_proof_lines`, `bot_proof_lines`, `human_diff`, `bot_diff`, `statement_before`/`statement_after` (when the human changed it), `similarity_to_human` (0 to 1: how alike the changed lines of the two edits are, whitespace-normalized; a line only re-indented counts as unchanged) and `possible_memorization` (true at 0.9 or more: the bot's edit may recall the public fix).
 
 ## 9. Cost and provenance
 
@@ -158,7 +158,7 @@ Per broken theorem: `human_changed_statement`, `human_removed`, `human_added_sor
 |---|---|
 | `cost_usd` | API-equivalent cost of the agent's model calls, from token counts and the target config's price table. Null when unknown. Builds are not included. |
 | `cost_status` | `computed`, `partial` (a session stopped before reporting full usage: a lower bound), `no-price` (the model has no price entry) or `unknown` |
-| `tokens` | Summed `input`, `output`, `cache_read`, `cache_write_5m`, `cache_write_1h` |
+| `tokens` | Summed `input`, `output`, `cache_read`, `cache_write_5m`, `cache_write_1h`; for Codex also `reasoning_output` (already part of `output`, not priced again) |
 | `reported_cost_usd` | The agent harness's own figure, a cross-check only |
 | `resolved_models` | The model versions the harness actually ran |
 | `attempts`, `turns`, `agent_seconds`, `wall_seconds` | Counts and times |

@@ -1,16 +1,17 @@
 """The repair pipeline for one historical case (DESIGN.md §3.3), replay mode.
 
   S1 input     case record (data/mined) + replay ground truth (data/replay)
-  S2 context   replay workspaces (base, stubbed broken, fixed), gate snapshots B and K,
-               broken set, statement-broken theorems, extraction diff
-  S4 repair    one fresh agent session per broken theorem, leaves first, within budgets
+  S2 context   replay workspaces (base, stubbed broken, fixed), gate snapshots B, K and H,
+               broken set, statement-broken theorems, extraction diff; the audit of the
+               change itself (`gate audit`, §4.7)
+  S4 repair    per broken theorem, leaves first, within budgets: the no-model sweep, then
+               fresh agent sessions (patch, then fresh with feedback), each followed by a
+               pre-gate (the file builds, G0 holds) and rolled back if it fails
   S5 gate      `gate diff` → `gate scope` → `gate snapshot --apply --clean` → `gate compare`
   S6/S7        outcome per theorem, report.json (run record) and report.md (PR comment)
 
-The gate is reached only through its CLI (§4.5, §4.8). Not in this slice: the automation
-sweep and attempt schedule (TODO §3.3 S4: one agent attempt per theorem), pre-gate feedback to
-the agent (TODO §3.3 S4), the audit (TODO §4.7), S3 differential tests (V1), component
-acceptance (V1, §4.3), and the metering proxy and sandbox (TODO §3.4, §9.5).
+The gate is reached only through its CLI (§4.5, §4.8). Not built yet: S3 differential tests
+(V1), component acceptance (V1, §4.3), and the metering proxy and sandbox (TODO §3.4, §9.5).
 """
 from __future__ import annotations
 
