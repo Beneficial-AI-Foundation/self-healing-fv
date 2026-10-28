@@ -42,8 +42,10 @@ def untrusted(text: str, limit: int = 1500) -> str:
     return "\n".join("> " + line for line in text.splitlines()) or "> (empty)"
 
 
-def usd(x) -> str:
-    return "cost unknown" if x is None else f"${x:.2f}"
+def usd(x, status: str | None = None) -> str:
+    """A cost in a table or a line; the cost status says whether it is a bound (costs.describe)."""
+    bound = {"upper-bound": "at most ", "partial": "at least "}.get(status, "")
+    return "cost unknown" if x is None else f"{bound}${x:.2f}"
 
 
 def fmt_s(s) -> str:
@@ -362,7 +364,7 @@ def render(r: dict) -> str:
         out.append(f"**Why:** {e.get('reason') or OUTCOME_TEXT.get(e['outcome'], '')}.")
         for a in e.get("attempts", []):
             out.append(f"- attempt: {a['adapter']} `{a['model']}`, stopped: {a['stop']}, {a['turns']} turns, "
-                       f"{usd(a.get('cost_usd'))}, {fmt_s(a['seconds'])}")
+                       f"{usd(a.get('cost_usd'), a.get('cost_status'))}, {fmt_s(a['seconds'])}")
             d = a.get("diagnosis")
             if d and d.get("outcome") == "gave-up":
                 out.append(f"  - the agent's diagnosis (model output, advisory): failure `{d['failure_scope']}`"
@@ -398,7 +400,7 @@ def render(r: dict) -> str:
         for e in repaired:
             a = e["attempts"][-1] if e["attempts"] else {}
             by = ("sweep, no model" if e.get("repaired_by") == "sweep" else
-                  f"agent: {a.get('turns', 0)} turns · {usd(a.get('cost_usd'))} · {fmt_s(a.get('seconds'))}")
+                  f"agent: {a.get('turns', 0)} turns · {usd(a.get('cost_usd'), a.get('cost_status'))} · {fmt_s(a.get('seconds'))}")
             out.append(f"| {link(r, e['file'], e.get('line'), short_name(e['theorem']))} | "
                        f"{diff_size(hf.get(e['theorem'], {}).get('bot_diff'))} | {by} |")
         out.append("")

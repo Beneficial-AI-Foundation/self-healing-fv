@@ -105,6 +105,17 @@ def test_a_multi_line_agent_command_stays_on_the_live_line():
     assert "\n" not in s.getvalue() and "'EOF' > X.lean theorem t" in s.getvalue()
 
 
+def test_a_bounded_cost_says_so_in_every_table():
+    att = {"adapter": "codex", "model": "m", "stop": "done", "turns": 3, "cost_usd": 0.14, "cost_status": "upper-bound",
+           "seconds": 58}
+    rep = {"theorem": "T", "file": "A.lean", "decl": "T", "outcome": "repaired", "attempts": [att]}
+    md = render(minimal_report(verdict="accepted", broken={"proofs": ["T"], "statements": []}, repairs=[rep],
+                               gate={"verdict": "accepted", "checks": {}}))
+    assert "agent: 3 turns · at most $0.14" in md
+    from shfv.report import usd
+    assert usd(0.5, "partial") == "at least $0.50" and usd(0.5, "computed") == "$0.50" and usd(None) == "cost unknown"
+
+
 def test_render_keeps_the_recorded_comparison_when_the_replay_trees_are_elsewhere(tmp_path):
     import json
     from shfv import cli
