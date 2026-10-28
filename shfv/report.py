@@ -318,8 +318,11 @@ def render(r: dict) -> str:
     out.append(f"| **Cause** | {cause_text(r)} |")
     out.append(f"| **Broken** | {n_proofs} proof{'s' * (n_proofs != 1)} · {n_stmts} statement{'s' * (n_stmts != 1)} |")
     if t.get("attempts"):
+        unit = r["agent"].get("turns_unit")  # turns count different things per agent harness
+        unenforced = r["agent"].get("unenforced_caps")
         out.append(f"| **Agent** | {r['agent']['adapter']}, `{r['agent']['model']}` · {t['attempts']} attempt"
-                   f"{'s' * (t['attempts'] != 1)} · {t['turns']} turns |")
+                   f"{'s' * (t['attempts'] != 1)} · {t['turns']} turns" + (f" ({unit})" if unit else "")
+                   + (f" · ⚠️ not enforced by this agent: {'; '.join(unenforced)}" if unenforced else "") + " |")
         out.append(f"| **Cost** | {costs.describe(t.get('cost_status', 'computed'), t.get('cost_usd'), r['agent']['model'])}"
                    f" · agent {fmt_s(t['agent_seconds'])} · "
                    f"whole run {fmt_s(t['wall_seconds'])} |")

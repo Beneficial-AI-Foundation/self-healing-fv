@@ -68,8 +68,11 @@ Progress = Callable[[str], None]
 class AgentAdapter(Protocol):
     name: str
     model: str
-    # Declared capabilities (§7.1); an adapter that cannot meet a tool profile refuses to start.
+    # Declared capabilities (§7.1); an adapter that cannot meet a tool profile refuses to start, and so
+    # does one without `turn_limit` or `budget_usd` when such a cap is configured, unless allowed.
     capabilities: dict
+    # What `Attempt.turns` counts for this harness (e.g. "API calls"): turns are not comparable across adapters.
+    turns_unit: str
     # The environment variable holding its model key under `--auth api-key` (e.g. ANTHROPIC_API_KEY).
     # The pipeline takes it out of its own environment and passes it as `api_key`; the adapter keeps
     # it out of the commands its agent runs. V1 passes a metering-proxy token instead (§3.4, §9.3).

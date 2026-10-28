@@ -36,6 +36,9 @@ class CodexCLI:
     capabilities = {"tool_calling": True, "mcp": True, "skills": False,
                     "structured_output": True, "lsp_tools": True,
                     "turn_limit": False, "budget_usd": False}
+    # A turn is one completed agent message; the exec stream does not report model API calls, and
+    # its own `turn.started` encloses the whole tool loop.
+    turns_unit = "agent messages"
 
     def __init__(self, model: str, lean_threads: int = 8, api_key: str | None = None):
         self.model = model

@@ -127,7 +127,7 @@ class FakeAgent:
     """Scripted agent: script[decl] -> (stop, new proof body or None, extra text to add before it), or a
     list of those, one per attempt; a 4th element is the structured diagnosis to return."""
     name = "fake"
-    capabilities = {"tool_calling": True, "mcp": False, "lsp_tools": False}
+    capabilities = {"tool_calling": True, "mcp": False, "lsp_tools": False, "turn_limit": True, "budget_usd": True}
 
     def __init__(self, script: dict, model: str = "fake-model", partial: bool = False):
         self.script, self.model, self.partial, self.calls, self.tasks = script, model, partial, [], []
@@ -323,7 +323,7 @@ def test_api_key_auth_takes_the_adapters_key_out_of_the_pipeline_environment(tmp
         raise StopRun
     monkeypatch.setitem(cli.ADAPTERS, "other", OtherAdapter)
     monkeypatch.setattr(cli, "Run", fake_run)
-    monkeypatch.setattr(cli, "check_capabilities", lambda agent, profile: None)
+    monkeypatch.setattr(cli, "check_capabilities", lambda *args, **kwargs: [])
     argv = ["repair", "--case", "dalek-lean-verify/e65b46d0", "--agent", "other", "--auth", "api-key"]
     monkeypatch.delenv("OTHER_PROVIDER_KEY", raising=False)
     with pytest.raises(SystemExit):
@@ -386,6 +386,39 @@ def test_adapter_without_lsp_tools_cannot_run_the_lsp_profile():
     with pytest.raises(SystemExit, match="lsp_tools"):
         pipeline.check_capabilities(FakeAgent({}), "lsp")
     pipeline.check_capabilities(FakeAgent({}), "minimal")  # tool calling is enough
+
+
+def test_an_adapter_that_cannot_enforce_a_configured_cap_refuses_unless_allowed():
+    from shfv.agents.claude_code import ClaudeCode
+    from shfv.agents.codex_cli import CodexCLI
+    budget = {"per_theorem_turns": 80, "per_theorem_usd": 5.0}
+    assert pipeline.check_capabilities(ClaudeCode("m"), "lsp", budget, priced=True) == []
+    with pytest.raises(SystemExit, match=r"per_theorem_turns = 80.*--allow-unenforced-caps"):
+        pipeline.check_capabilities(CodexCLI("m"), "lsp", budget)
+    unpriced = pipeline.check_capabilities(CodexCLI("m"), "lsp", budget, allow_unenforced=True)
+    assert len(unpriced) == 1 and "turn cap" in unpriced[0]  # no price: no dollar cap for any adapter
+    priced = pipeline.check_capabilities(CodexCLI("m"), "lsp", budget, priced=True, allow_unenforced=True)
+    assert len(priced) == 2 and "dollar cap within a session" in priced[1]
+    assert pipeline.check_capabilities(CodexCLI("m"), "lsp", None) == []  # --no-agent: no caps apply
+
+
+def test_the_minimal_profile_gives_no_lsp_tools_even_to_an_adapter_that_has_them():
+    from shfv.agents.codex_cli import CodexCLI
+    assert pipeline.tool_options(CodexCLI("m"), "minimal") == (False, True)
+    assert pipeline.tool_options(CodexCLI("m"), "lsp") == (True, True)
+    assert pipeline.tool_options(FakeAgent({}), "lsp") == (False, False)  # the profile check refuses this first
+
+
+def test_the_report_says_what_turns_count_and_which_caps_were_not_enforced():
+    rep = {"case_id": "toy/1", "verdict": "escalated", "gate_version": "g",
+           "inputs": {"repo": "o/r", "change_commit": "c" * 40, "change_subject": "s", "cause": "aeneas"},
+           "agent": {"adapter": "codex", "model": "m", "turns_unit": "agent messages",
+                     "unenforced_caps": ["the turn cap (per_theorem_turns = 80)"]},
+           "broken": {"proofs": ["T"], "statements": []}, "repairs": [], "escalations": [],
+           "totals": {"attempts": 1, "turns": 4, "cost_usd": None, "cost_status": "no-price", "agent_seconds": 5,
+                      "wall_seconds": 9}}
+    md = render(rep)
+    assert "4 turns (agent messages)" in md and "not enforced by this agent: the turn cap (per_theorem_turns = 80)" in md
 
 
 def test_retry_gets_the_build_errors_and_succeeds(toy_case, monkeypatch):

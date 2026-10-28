@@ -231,5 +231,8 @@ def test_cli_passes_codex_key_and_model_without_starting_repair(monkeypatch, cap
         cli.main(argv)
     assert "CODEX_API_KEY" in capsys.readouterr().err
     monkeypatch.setenv("CODEX_API_KEY", "test-key-not-real")
-    with pytest.raises(StopBeforeRepair):
+    with pytest.raises(SystemExit, match="cannot enforce the turn cap"):  # the target config sets one
         cli.main(argv)
+    monkeypatch.setenv("CODEX_API_KEY", "test-key-not-real")
+    with pytest.raises(StopBeforeRepair):
+        cli.main(argv + ["--allow-unenforced-caps"])

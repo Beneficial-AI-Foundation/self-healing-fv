@@ -28,9 +28,11 @@ tool_profile = "lsp"
 
 [budget]
 # Prototype caps. Defaults are to be set from pilot runs (§3.3 S4, §8.5); these are guesses.
-# Turns and minutes mean the same for every agent and model. per_run_minutes is one deadline for
-# the whole run (preparation, attempts, builds, gate). The dollar caps apply only to models with a
-# price entry below; they are best effort until the metering proxy exists (§9.5, SCI-1717).
+# Minutes mean the same for every agent and model; turns do not (Claude Code counts model API
+# calls, Codex completed agent messages). per_run_minutes is one deadline for the whole run
+# (preparation, attempts, builds, gate). The dollar caps apply only to models with a price entry
+# below; they are best effort until the metering proxy exists (§9.5, SCI-1717). An adapter that
+# cannot enforce the turn or dollar cap (Codex) refuses to start without --allow-unenforced-caps.
 per_theorem_usd = 5.0
 per_theorem_minutes = 25
 per_theorem_turns = 80

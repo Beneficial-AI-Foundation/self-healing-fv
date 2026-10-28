@@ -41,7 +41,8 @@ class ClaudeCode:
     name = "claude-code"
     api_key_env = "ANTHROPIC_API_KEY"
     capabilities = {"tool_calling": True, "mcp": True, "skills": True, "structured_output": True,
-                    "lsp_tools": True}
+                    "lsp_tools": True, "turn_limit": True, "budget_usd": True}
+    turns_unit = "API calls"  # a turn is one model API call (`num_turns`, `--max-turns`)
 
     def __init__(self, model: str, lean_threads: int = 8, api_key: str | None = None):
         self.model = model

@@ -106,14 +106,35 @@ def replace_body(src: str, name: str, body: str) -> str:
 PROFILES = {"minimal": ["tool_calling"], "lsp": ["tool_calling", "lsp_tools"]}  # DESIGN.md §7.3
 
 
-def check_capabilities(agent: AgentAdapter, profile: str) -> None:
-    """An adapter that cannot meet the tool profile refuses to start (§7.1), rather than run with less."""
+def check_capabilities(agent: AgentAdapter, profile: str, budget: dict | None = None, priced: bool = False,
+                       allow_unenforced: bool = False) -> list[str]:
+    """An adapter that cannot meet the tool profile refuses to start (§7.1), rather than run with less.
+    So does one that cannot enforce a configured cap (`budget`: the target's [budget]; `priced`: the
+    model has prices, so a dollar cap applies), unless `allow_unenforced`: then the caps it cannot
+    enforce are returned, for the run to warn and record. The minutes cap is the pipeline's own."""
     if profile not in PROFILES:
         raise SystemExit(f"unknown tool profile {profile!r} (known: {', '.join(PROFILES)})")
     caps = getattr(agent, "capabilities", {}) or {}
     missing = [c for c in PROFILES[profile] if not caps.get(c)]
     if missing:
         raise SystemExit(f"adapter {agent.name} lacks {', '.join(missing)} for tool profile {profile!r}")
+    unenforced = []
+    if budget and budget.get("per_theorem_turns") and not caps.get("turn_limit"):
+        unenforced.append(f"the turn cap (per_theorem_turns = {budget['per_theorem_turns']})")
+    if budget and priced and not caps.get("budget_usd"):
+        unenforced.append(f"the dollar cap within a session (per_theorem_usd = {budget.get('per_theorem_usd')}; "
+                          "the pipeline checks dollars only between attempts)")
+    if unenforced and not allow_unenforced:
+        raise SystemExit(f"adapter {agent.name} cannot enforce {' or '.join(unenforced)}. Pass "
+                         "--allow-unenforced-caps to run anyway; the report then says which caps were not enforced.")
+    return unenforced
+
+
+def tool_options(agent: AgentAdapter, profile: str) -> tuple[bool, bool]:
+    """(lsp_tools, structured) for the agent's tasks: Lean LSP tools only when the chosen profile asks
+    for them, so `minimal` means minimal even for an adapter that has them (§7.3)."""
+    caps = getattr(agent, "capabilities", {}) or {}
+    return "lsp_tools" in PROFILES[profile] and bool(caps.get("lsp_tools")), bool(caps.get("structured_output"))
 
 
 def broken_deps(broken: list[dict], base_records: dict) -> dict[str, set[str]]:
@@ -138,11 +159,13 @@ class Run:
     def __init__(self, case_id: str, config: Path, agent: AgentAdapter, repo: Path, work: Path, runs: Path,
                  attempt_anyway: bool = False, gate_human_fix: bool | None = None, keep: bool = False,
                  label: str | None = None, replay_path: Path | None = None, use_agent: bool = True,
-                 budget_overrides: dict | None = None):
+                 budget_overrides: dict | None = None, unenforced_caps: list[str] | None = None):
         self.case_id, self.agent, self.repo = case_id, agent, repo.expanduser()
         self.use_agent = use_agent  # False: the sweep only, no model call (and no key needed)
+        self.unenforced_caps = unenforced_caps or []  # caps the adapter cannot enforce (check_capabilities)
         with open(config, "rb") as f:
             self.cfg = tomllib.load(f)
+        self.profile = self.cfg["agent"].get("tool_profile", "lsp")
         # Per-run caps from the command line (e.g. a CI dispatch input); the report records them.
         self.budget_overrides = budget_overrides or {}
         self.cfg["budget"].update(self.budget_overrides)
@@ -250,8 +273,7 @@ class Run:
         toolchain = (self.broken / "lean-toolchain").read_text().strip()
         deps = broken_deps([b for b in broken if b.get("name")], base_records)
         repaired: list[str] = []
-        lsp = bool(getattr(self.agent, "capabilities", {}).get("lsp_tools"))
-        structured = bool(getattr(self.agent, "capabilities", {}).get("structured_output"))
+        lsp, structured = tool_options(self.agent, self.profile)
         for i, b in enumerate(broken, 1):
             key = f"{b['file']}::{b['key']}"
             src = (cand / b["file"]).read_text()
@@ -324,11 +346,11 @@ class Run:
                 if att.cost_usd is not None:
                     spent_usd += att.cost_usd
                 if prices is not None and att.cost_status != "computed":
-                    # Killed before reporting usage: count the whole cap it was given (Claude Code
-                    # enforces it itself), so the run cap stays an upper bound; stop paid attempts if
-                    # even that is unknown.
+                    # Killed before reporting usage: count the whole cap it was given (an adapter with
+                    # `budget_usd` enforces it itself), so the run cap stays an upper bound; stop paid
+                    # attempts if even that is unknown.
                     spent_usd = spent_usd - (att.cost_usd or 0) + (budget.usd or 0)
-                    unaccounted = budget.usd is None
+                    unaccounted = budget.usd is None or not getattr(self.agent, "capabilities", {}).get("budget_usd")
                 entry["attempts"].append(att.to_json())
                 # Pre-gate (feedback only; the gate alone decides): the file builds, and G0 holds.
                 builds, errors = self.build_module(cand, b)
@@ -549,7 +571,9 @@ class Run:
                                    "sha256": hashlib.sha256(self.config.read_bytes()).hexdigest()[:12],
                                    "budget": self.cfg["budget"], "budget_overrides": self.budget_overrides},
                         "agent": {"adapter": self.agent.name, "model": self.agent.model, "enabled": self.use_agent,
-                                  "auth": getattr(self.agent, "auth", None)},
+                                  "auth": getattr(self.agent, "auth", None), "tool_profile": self.profile,
+                                  "turns_unit": getattr(self.agent, "turns_unit", None),
+                                  "unenforced_caps": self.unenforced_caps},
                         "gate_version": gate_version, "repairs": [], "escalations": []}
         try:
             t0 = time.time()
