@@ -101,7 +101,8 @@ jobs:
 
       # Claude Code scrubs the key from the commands it runs (CLAUDE_CODE_SUBPROCESS_ENV_SCRUB), and on
       # Linux that needs bubblewrap; without it Claude Code exits before its first turn (run 2). Ubuntu
-      # 24.04 may block the unprivileged user namespaces bubblewrap uses, so allow them if the probe fails.
+      # 24.04 blocks the unprivileged user namespaces bubblewrap uses (the probe failed on run 2's retry),
+      # so allow them on this throwaway VM if the probe fails.
       - name: Install bubblewrap
         if: inputs.agent
         run: |
