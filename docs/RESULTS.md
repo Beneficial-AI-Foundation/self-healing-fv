@@ -1,6 +1,6 @@
 # Results so far
 
-As of 2026-10-27; newest numbers from tool commit `fe5aaff`. Each section names the tool commit its numbers come from and links its source.
+As of 2026-10-28; newest numbers from tool commit `ab55672` (§6). Each section names the tool commit its numbers come from and links its source.
 
 This page holds the headline numbers and is updated as results come in. The method is [DESIGN.md §8](DESIGN.md#8-evaluation). The dated experiments in [experiments/](experiments/) and the reports in [examples/reports](examples/reports/README.md) have the full tables and caveats. Every case below ran once per configuration, so none of these numbers has a variance estimate.
 
@@ -60,10 +60,11 @@ Source: [ACTIONS.md "Pilot results"](ACTIONS.md#pilot-results).
 
 ## 6. What we found while testing
 
-- **Replay read isolation** ([codex-vs-claude.md](experiments/codex-vs-claude.md), "Tripwire"). Neither agent opened a file in a base, broken or fixed tree.
-  - Codex read this repo's own `AGENTS.md` in 8 of 48 attempts. In 3 attempts it also ran file-name searches across the replay trees, which matched nothing.
-  - Claude read nothing above its run directory in 49 attempts. Claude Code denied the 3 commands that tried.
-  - Codex's sandbox restricts writes, not reads, and the replay workspaces sit inside this repo.
+- **Replay read isolation** ([replay-isolation.md](experiments/replay-isolation.md), tool `ab55672`). In a replay the human fix is on disk, and nothing stops an agent from reading it. That is a measurement problem, not a bot problem: live CI has no human fix. Every report now carries a tripwire that flags looks outside the agent's workspace. It was also run over every earlier run record with transcripts.
+  - **No agent read the human fix**, and no Lean code did file or process IO. Scanned: 1,671 tool calls in 128 attempts (80 Claude, 48 Codex) across 26 runs.
+  - 10 runs were flagged. In 6 Codex runs it was the `AGENTS.md` hunt: 8 reads of this repo's `AGENTS.md`, and file-name searches over the replay trees that matched nothing. In 4 Claude runs it was `git` history commands in the candidate, which failed (no repository) or were blocked by Claude Code.
+  - Nothing touched the human fix, so no case was re-run and the numbers above stand.
+  - Since then, workspaces are outside this repo, so the `AGENTS.md` route is gone. Preventing reads (a read sandbox) is V1, for security ([DESIGN.md §9.3](DESIGN.md#93-secrets-and-permissions)).
 - **Two places where the gate may be too strict** ([human-fix-comparison.md](experiments/human-fix-comparison.md), [examples/reports](examples/reports/README.md)). Whether to relax either rule is an owner decision ([DESIGN.md §4.2](DESIGN.md#42-what-is-frozen)); neither has been changed.
   - **dalek PRs 343 and 101.** In 13 of 56 theorem statement breaks, the statement no longer type-checked but the human kept its text. In 11 of the 13, the human changed the file's namespace or `open` lines instead, which is an edit outside proof bodies that G0 does not allow.
   - **SPQR PR 106.** Renames in a trusted model make the whole case ineligible.

@@ -26,7 +26,7 @@ uv run pytest            # about 2 minutes; builds a small Lean project, checks 
 
 If both pass, the Lean toolchain, the gate and the pipeline work on your machine. `doctor` does not check that Claude Code is logged in, because that would spend tokens: run `claude` once interactively if unsure.
 
-The replay workspaces live under `work/`, or under `$SHFV_WORK` if you set it. The first run of a case builds them: it fetches the Mathlib cache and builds the base, broken and fixed states, which takes a few minutes. Later runs reuse them.
+The replay workspaces live in `~/baif/shfv-work/`, or under `$SHFV_WORK` if you set it. Keep them outside this repo and outside the target clones: an agent that searches upward from its workspace would otherwise find this repo's docs and earlier run records (DESIGN.md §8.5). `doctor` warns if the workspaces or the run records (`--runs`) sit inside this repo or a clone. The first run of a case builds them: it fetches the Mathlib cache and builds the base, broken and fixed states, which takes a few minutes. Later runs reuse them. Workspaces made before 2026-10-28 are under `work/` in this repo; set `SHFV_WORK` to that folder to reuse them.
 
 ## 2. Pick a case
 
@@ -89,12 +89,12 @@ A typical run takes 10–20 minutes. Most of that is building and fingerprinting
 | `--no-agent` | Run the no-model sweep only. A theorem it does not repair is not attempted, so no model is called and no key is needed. |
 | `--auth api-key` | Run the agent on an API key instead of its harness's login (CI). Each adapter names its key variable (`ANTHROPIC_API_KEY` for `claude-code`). The key is handed to the agent alone, not to builds or the gate. On Linux, `claude-code` then needs bubblewrap (`apt-get install bubblewrap`) to keep the key out of the commands it runs. |
 | `--per-run-usd N`, `--per-run-minutes N` | Override the target config's per-run caps for this run. The report records the override. |
-| `--keep` | Keep the candidate and gate workspaces under `work/<case>/run-<run id>/` for inspection. They are deleted by default. |
+| `--keep` | Keep the candidate and gate workspaces under `<work>/<case>/run-<run id>/` for inspection. They are deleted by default. |
 | `--agent NAME` | The agent adapter. Default: the target config's `[agent].adapter` (`claude-code`). |
 | `--audit-focus TEXT` | Show the audit's before/after first for declarations whose name contains `TEXT` (e.g. `clamped`). |
 | `--config PATH` | The *target config*: a TOML file describing the repo being repaired (section 7). Default: `targets/<repo>.toml`, from the case id. |
 | `--repo PATH` | The local clone of the target repo. Default: `~/baif/<repo name>`. |
-| `--work PATH` | Where the replay workspaces and build products live. Default: `work/`, or `$SHFV_WORK`. |
+| `--work PATH` | Where the replay workspaces and build products live. Default: `$SHFV_WORK`, else `~/baif/shfv-work/`. |
 | `--runs PATH` | Where reports are written: `<runs>/<case>/<run id>/`. Default: `runs/`. |
 
 ### Recipes
@@ -163,6 +163,8 @@ Right after the summary, **Changes made by the triggering change itself (audit)*
 
 The **Gate** table lists each check (section 6) with ✅/❌ and the first violations. **The repair the bot proposes** is the diff as it applies to the change's head; if the gate did not accept it, it is labelled an **unaccepted suggestion**. **Cost** is computed from token counts at the list prices in the target config: an API-equivalent estimate of the agent's model calls only (builds are not included). It says "unknown" when the model has no price entry, and "at least" when a session was stopped before reporting full usage. In replays, **Compared with the human fix** shows whether the human changed the statement, how big each edit was, and how alike the two edits are. An edit 90% or more like the human's is flagged for review as possible recall of the public fix. The **agent's own notes** are model output: they are shown quoted, with links and @-mentions disabled, and they never decide anything.
 
+The **Tripwire** line, just above the footer, says whether any attempt looked where the answer could be. In a replay the human fix is on disk, and nothing stops an agent from reading it; the tripwire detects, it does not prevent (a read sandbox is V1, DESIGN.md §9.3). It scans every attempt's transcript and edits for: reads or searches outside the workspace and `context/` (in the replay trees, the work folder, run records, this repo, the target clone, the home folder, session histories); `git` commands that read history; network commands; and Lean code doing file or process IO. Reads of Lean toolchain sources, `/tmp` scratch files and the attempt's own run folder are counted but not flagged, because they cannot hold the human fix. The line reads "no reads outside the workspace that could reach the human fix", or "⚠️ Tripwire: N look(s) outside the workspace" with the first few, each with whether it succeeded, failed, or was denied by the harness. Review a flagged replay before using its numbers, and re-run it if a flag could have reached the human fix. `report.json` has the details under `tripwire` (field list: [REPORT.md](REPORT.md)).
+
 ## 5. What is on disk
 
 ```
@@ -176,12 +178,23 @@ runs/<repo>-<sha8>/
       prompt.md              exactly what the agent was told
       transcript.jsonl       the full agent session (stream-json)
       suggestion.lean        the file as the agent left it, when the attempt was not used
-work/<repo>-<sha8>/
+~/baif/shfv-work/<repo>-<sha8>/   (or $SHFV_WORK)
   base/ broken/ fixed/       replay workspaces (broken = stubbed broken state)
   snapshots/B.json, K.json   cached gate snapshots of base and stubbed broken state
+  run-<run id>/candidate/    the agent's workspace: a copy of the broken state, no .git; build output
+                             of modules with no source (e.g. ones only the human fix has) is removed
+  run-<run id>/context/      read-only context for the agent (the extraction diff)
 ```
 
-`runs/` and `work/` are not committed to git. Run records contain model transcripts, so review them before sharing.
+`runs/` and the work folder are not committed to git. Run records contain model transcripts, so review them before sharing.
+
+### Checking older runs with the tripwire
+
+```
+uv run shfv tripwire ~/baif/self-healing-fv/runs/spqr-52ad65cd/20261027T121231Z-gpt-6.1-sol [more run dirs] [--json all.json]
+```
+
+This applies the report's tripwire (section 4) to finished runs, including runs made before it existed: one line per run, exit status 1 if any is flagged. It finds the agent's workspace from each attempt's prompt.
 
 ### Telling runs apart: provenance
 
@@ -219,7 +232,7 @@ The gate (`gates/`) is separate from the agent and the pipeline: model-free, det
 
 ```
 CFG=targets/dalek-lean-verify.toml
-CASE=work/dalek-lean-verify-e65b46d0
+CASE=~/baif/shfv-work/dalek-lean-verify-e65b46d0
 
 uv run gate snapshot --config $CFG --tree $CASE/base   --out B.json    # the base commit
 uv run gate snapshot --config $CFG --tree $CASE/broken --out K.json    # the stubbed broken state
@@ -302,7 +315,8 @@ workspace; MCP runs outside that command sandbox. See
 | `gate-unavailable` in the report, or exit status 2 | The gate could not run, or refused to decide. The reasons are listed in the report's Gate section and in `report.json` (`gate.unavailable`, or `error`). Common causes: the base didn't build, a snapshot made by an older gate version or another config, a build timeout. Nothing is accepted in that case. |
 | `infrastructure-failure` on the first attempt | Usually Claude Code is not logged in, or the `claude` CLI is missing. Run `claude` once interactively. |
 | Laptop busy during a run | Lower `lean_num_threads` in the target config. |
-| Disk filling up | Delete old `work/<case>/run-*` directories (only present with `--keep`). The replay workspaces can be rebuilt. |
+| Disk filling up | Delete old `<work>/<case>/run-*` directories (only present with `--keep`). The replay workspaces can be rebuilt. |
+| A case you ran before rebuilds from scratch | Its workspaces are in the old `work/` folder in this repo. Set `SHFV_WORK` to that folder, or move it to `~/baif/shfv-work/`. |
 
 ## 9. Limits of this prototype
 
@@ -310,4 +324,4 @@ workspace; MCP runs outside that command sandbox. See
 - **Kernel replay stops at native code.** Modules with `native_decide` or `bv_decide` proofs are only partly re-checked by G5, and such acceptances are flagged (section 4). A complete re-check is V1 (DESIGN.md §11, question 21). Live CI is V1 (DESIGN.md §9); the prototype replays one case at a time on Actions ([ACTIONS.md](ACTIONS.md)).
 - **Agent adapters:** Claude Code and Codex CLI; Codex's budget and isolation limits are described above.
 - **Complete-case acceptance.** A change is accepted only if every broken theorem is repaired (DESIGN.md §4.3).
-- **Not built yet:** the sandbox and metering proxy for the agent (DESIGN.md §3.4, §9.5). Until then the cost caps are Claude Code's own enforcement plus the pipeline's accounting, not a hard limit.
+- **Not built yet:** the sandbox and metering proxy for the agent (DESIGN.md §3.4, §9.5). Until then the cost caps are Claude Code's own enforcement plus the pipeline's accounting, not a hard limit, and nothing stops an agent from reading outside its workspace: the tripwire (section 4) only detects it.

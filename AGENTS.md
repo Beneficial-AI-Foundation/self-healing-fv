@@ -34,7 +34,7 @@ The prototype replays historical cases locally and writes a report; it opens no 
 | `.github/` | `workflows/replay.yml`, the manually dispatched replay on a hosted runner; `scripts/runner_stats.py` samples memory and disk during it |
 | `data/` | The committed dataset: `mined/<repo>.jsonl` case records, `replay/<repo>/<sha8>.json` replay ground truth. |
 
-Not in git: `work/` (replay workspaces), `runs/` (run records), `data/raw/`, clones of target repos, `.lake/`.
+Not in git: `runs/` (run records), `data/raw/`, clones of target repos, `.lake/`. Replay workspaces live outside this repo, in `~/baif/shfv-work/` (or `$SHFV_WORK`), so an agent working in one does not find this repo by walking up (`docs/DESIGN.md` §8.5); older ones may still be in `work/`.
 
 ## Running tests
 

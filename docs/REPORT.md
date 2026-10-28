@@ -27,6 +27,7 @@ The last line on stdout has the form `<VERDICT> · <counts by outcome> · <cost>
 | `shfv export` | Exported | A run has no provenance, or was made with uncommitted code | – |
 | `shfv doctor` | Every check passed | Something is missing | – |
 | `shfv compare-human` | Written | A path holds no run record | – |
+| `shfv tripwire` | No run flagged | A run is flagged | – |
 
 So exit 0 does not mean "repaired". Always read `verdict`.
 
@@ -67,6 +68,8 @@ Exit 2 is also argparse's code for bad arguments. Exit 2 never means a pass.
 | `gate_version` | str | Hash of the gate's sources |
 | `toolchain` | str | The target's Lean toolchain in the broken state |
 | `error` | object | Only when the run failed: `outcome` (`gate-unavailable` or `infrastructure-failure`) and `detail` |
+| `tripwire` | object | Whether any attempt looked outside its workspace (section 10). Absent in runs made before 2026-10-28. |
+| `workspace` | object | Set when an agent workspace was made: `pruned_build_modules` (count) and `pruned_examples`, the stale build output removed from the candidate (modules with no source in it) |
 | `renders` | list | Added by `shfv render`: `at` and `tool` for each re-render |
 | `audit_focus` | str | Set by `--audit-focus` |
 
@@ -171,3 +174,18 @@ Per broken theorem: `human_changed_statement`, `human_removed`, `human_added_sor
 | `config_sha256` | Hash of the target config |
 | `agent` | `adapter`, `model`, `harness` (e.g. the Claude Code version) |
 | `python`, `platform`, `machine` | The environment |
+
+## 10. The `tripwire` section
+
+Detection only: in a replay the human fix is on disk, and nothing stops an agent from reading it (a read sandbox is V1, DESIGN.md §9.3). The scan reads every attempt's transcript and edits (shfv/tripwire.py; CLI.md section 4).
+
+| Field | Meaning |
+|---|---|
+| `verdict` | `clean`, `flagged`, `incomplete` (a transcript is missing) or `error` (the scan itself failed; the run is unchecked) |
+| `attempts`, `tool_calls` | What was scanned |
+| `transcripts_missing` | Attempts without a transcript |
+| `flags`, `n_flags` | Each flag: `attempt`, `tool`, `route`, `area`, `paths`, `detail` (the command or path, model output: display it neutralized), `result` (`ok`, `failed`, `denied` or `unknown`), `flag: true`. At most 100 are listed; `n_flags` counts all. |
+| `counts` | Every event by `route` or `route:area`, flagged or not |
+| `read_sandbox` | What stopped reads: `none` in the prototype |
+
+Routes: `outside-read` (a path outside the workspace and `context/`), `history` (a `git` command that reads commits), `network`, `lean-io` (Lean code doing file or process IO, in `lean_run_code`, an edit or a command); not flagged: `git-local` (`git status`, a working-tree diff) and `lean-run-code` (a call without IO). Areas of `outside-read`: flagged `replay-trees`, `work`, `run-records`, `target-clone`, `bot-repo`, `agent-history`, `home`; not flagged `own-run-folder`, `toolchain`, `tmp`, `system`.
