@@ -81,6 +81,8 @@ Separately, an **audit** compares the statements before and after the triggering
 
 The prototype runs historical replays on a laptop. It writes the report and opens no PRs.
 
+**What we reuse:** the statement fingerprint `StmtCanon.lean` from Liao's [auto_verify_dalek](https://github.com/Beneficial-AI-Foundation/auto_verify_dalek); the Lean FRO's kernel re-checkers [`lean4checker`](https://github.com/leanprover/lean4checker) and `leanchecker`; the [Lean LSP MCP server](https://github.com/oOo0oOo/lean-lsp-mcp) for the agent's Lean tools; and the GitHub Actions runner Alessandro set up for the pilot. Full credits are in [DESIGN.md §12](DESIGN.md#12-credits).
+
 ## 4. What an acceptance guarantees, and what it does not
 
 The gate is the trusted core. The agent, the orchestration and the report do not need to be trusted: if they misbehave, the worst case is a failed repair or a needless escalation. The gate is model-free, deterministic, and has no dependency on the rest of the code.
