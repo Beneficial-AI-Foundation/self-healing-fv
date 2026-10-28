@@ -89,7 +89,7 @@ A typical run takes 10–20 minutes. Most of that is building and fingerprinting
 | `--no-agent` | Run the no-model sweep only. A theorem it does not repair is not attempted, so no model is called and no key is needed. The run id ends in `no-model` instead of the model's name. |
 | `--auth api-key` | Run the agent on an API key instead of its harness's login (CI). Each adapter names its key variable (`ANTHROPIC_API_KEY` for `claude-code`, `CODEX_API_KEY` for `codex`). The key is handed to the agent alone, not to builds or the gate. On Linux, `claude-code` then needs bubblewrap (`apt-get install bubblewrap`) to keep the key out of the commands it runs. |
 | `--per-run-usd N`, `--per-run-minutes N` | Override the target config's per-run caps for this run. The report records the override. |
-| `--allow-unenforced-caps` | Run an adapter that cannot enforce a configured cap instead of refusing (section 7: Codex has no turn cap and no dollar cap within a session). The terminal warns, and the report's Agent row names the caps that were not enforced. |
+| `--allow-unenforced-caps` | Run an adapter that cannot enforce a configured cap instead of refusing (section 7: Codex has no turn cap and no dollar cap within a session; the shipped target configs turn those off for Codex, so you need this only when a config sets one). The terminal warns, and the report's Agent row names the caps that were not enforced. |
 | `--keep` | Keep the candidate and gate workspaces under `<work>/<case>/run-<run id>/` for inspection. They are deleted by default. |
 | `--agent NAME` | The agent adapter. Default: the target config's `[agent].adapter` (`claude-code`). |
 | `--audit-focus TEXT` | Show the audit's before/after first for declarations whose name contains `TEXT` (e.g. `clamped`). |
@@ -289,22 +289,24 @@ A target repo is described by `targets/<repo>.toml`: `dalek-lean-verify`, `spqr`
 - `[lean]`: the build targets, the root modules (every project module they import is audited), and `lean_num_threads`, which defaults to 8 so the machine stays usable.
 - `[protected]`: files the bot may never touch.
 - `[agent]`: the adapter, the default model, and the tool profile (`minimal` or `lsp`). An adapter that cannot meet the profile refuses to start. The agent gets the Lean LSP tools only with `lsp`, even if its adapter supports them.
-- `[budget]`: caps per theorem (cost in USD, minutes, turns), per run (cost, minutes; one deadline for the whole run), and `attempts_per_theorem`. Minutes mean the same for every agent and model; turns do not (Claude Code counts model API calls, Codex completed agent messages). An adapter that cannot enforce the turn cap, or a dollar cap within a session when the model has a price, refuses to start unless you pass `--allow-unenforced-caps`. The caps are prototype guesses, to be set from pilot data.
+- `[budget]`: caps per theorem (cost in USD, minutes, turns), per run (cost, minutes; one deadline for the whole run), and `attempts_per_theorem`. Minutes mean the same for every agent and model; turns do not (Claude Code counts model API calls, Codex completed agent messages). A `[budget.<adapter>]` table overrides these for one agent adapter, and `false` turns a cap off: the shipped configs set `per_theorem_turns = false` and `per_theorem_usd = false` under `[budget.codex]`, so Codex is capped by minutes, and by `per_run_usd` between attempts. An adapter that cannot enforce a cap left on (the turn cap, or a dollar cap within a session when the model has a price) refuses to start unless you pass `--allow-unenforced-caps`. The caps are prototype guesses, to be set from pilot data.
 - `[prices."<model>"]`: USD per million tokens (input, output, cache read, 5-minute and 1-hour cache writes). Cost is computed from these for every adapter; the agent harness's own figure is only a cross-check. A model without an entry has cost "unknown" and no dollar cap. An entry with `upper_bound = true` holds rates that bound the true price from above (e.g. a model priced per request by prompt length, at its long-prompt rates); its cost is reported as "at most".
 - `[repair]`: `sweep = true` runs the no-model sweep before the agent.
 
 ### Codex CLI
 
 Use Codex 0.164.0 with an explicit Codex model (the existing target defaults name a Claude
-model): `uv run shfv repair --case dalek-lean-verify/9d82afb9 --agent codex --model gpt-6.1-sol --allow-unenforced-caps`.
+model): `uv run shfv repair --case dalek-lean-verify/9d82afb9 --agent codex --model gpt-6.1-sol`.
 Each theorem gets a fresh `codex exec` session, the shared repair prompt, structured diagnosis,
 and the pinned Lean LSP MCP server for the `lsp` profile. The gate and report are unchanged.
 `uv run shfv doctor --agent codex` checks the setup.
 
 The minutes deadline kills the process group. Codex has no CLI turn or dollar cap; these are
-declared unsupported, so a run refuses to start while the target config sets a turn cap (or a
-dollar cap, for a priced model) unless you pass `--allow-unenforced-caps`. The report then names
-the caps that were not enforced. A Codex turn is a completed agent message, not a model API call.
+declared unsupported, and the target configs turn them off for Codex (`[budget.codex]`, section 7),
+so its theorems are capped by minutes and its dollars are checked only between attempts. If a
+config sets a turn cap (or a per-theorem dollar cap, for a priced model) for Codex, the run refuses
+to start unless you pass `--allow-unenforced-caps`, and the report then names the caps that were
+not enforced. A Codex turn is a completed agent message, not a model API call.
 Usage is priced by the pipeline. The target configs price `gpt-6.1-sol` at OpenAI's long-prompt
 rates (over 272K input tokens per request) for every token. Codex reports usage per turn, summed
 over many requests, so the cost is an upper bound and the report says "at most". Cache writes are
@@ -328,7 +330,7 @@ workspace; MCP runs outside that command sandbox. See
 | The first run of a case is slow | It is building the replay workspaces and fetching the Mathlib cache. Later runs reuse them. |
 | `gate-unavailable` in the report, or exit status 2 | The gate could not run, or refused to decide. The reasons are listed in the report's Gate section and in `report.json` (`gate.unavailable`, or `error`). Common causes: the base didn't build, a snapshot made by an older gate version or another config, a build timeout. Nothing is accepted in that case. |
 | `infrastructure-failure` on the first attempt | Usually the agent's CLI is missing or not logged in. Run `uv run shfv doctor`, then `claude` once interactively (or `codex login`). The attempt's `error` in `report.json` has the CLI's own message. |
-| `cannot enforce the turn cap …` at start | The adapter (e.g. `codex`) has no turn or dollar cap. Pass `--allow-unenforced-caps` to run anyway; the report says which caps were not enforced. |
+| `cannot enforce the turn cap …` at start | The target config sets a cap the adapter (e.g. `codex`) cannot enforce. Turn it off under `[budget.<adapter>]` (section 7), or pass `--allow-unenforced-caps` to run anyway; the report says which caps were not enforced. |
 | Laptop busy during a run | Lower `lean_num_threads` in the target config. |
 | Disk filling up | Delete old `<work>/<case>/run-*` directories (only present with `--keep`). The replay workspaces can be rebuilt. |
 | A case you ran before rebuilds from scratch | Its workspaces are in the old `work/` folder in this repo. Set `SHFV_WORK` to that folder, or move it to `~/baif/shfv-work/`. |

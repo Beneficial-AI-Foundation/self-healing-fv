@@ -24,7 +24,7 @@ from . import provenance
 from . import report as report_mod
 from .agents.claude_code import ClaudeCode
 from .agents.codex_cli import CodexCLI
-from .pipeline import BOT_REPO, ROOT, WORK, Run, check_capabilities, fmt_s
+from .pipeline import BOT_REPO, ROOT, WORK, Run, agent_budget, check_capabilities, fmt_s
 
 ADAPTERS = {"claude-code": ClaudeCode, "codex": CodexCLI}
 EXAMPLES = ROOT / "docs" / "examples" / "reports"
@@ -272,7 +272,7 @@ def main(argv: list[str] | None = None) -> int:
     agent = ADAPTERS[adapter](model=model, lean_threads=cfg["lean"].get("lean_num_threads", 8),
                               **({"api_key": api_key} if api_key else {}))
     unenforced = check_capabilities(agent, cfg["agent"].get("tool_profile", "lsp"),
-                                    None if a.no_agent else cfg["budget"],
+                                    None if a.no_agent else agent_budget(cfg["budget"], adapter),
                                     priced=model in cfg.get("prices", {}), allow_unenforced=a.allow_unenforced_caps)
     overrides = {k: v for k, v in (("per_run_usd", a.per_run_usd), ("per_run_minutes", a.per_run_minutes))
                  if v is not None}

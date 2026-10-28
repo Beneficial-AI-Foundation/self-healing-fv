@@ -36,7 +36,7 @@ class RepairTask:
 class Budget:
     usd: float | None         # None: not enforced (no price for the model)
     minutes: float
-    turns: int
+    turns: int | None         # None: no turn cap (the target turned it off for this adapter)
 
 
 @dataclass

@@ -36,6 +36,11 @@ per_run_usd = 20.0
 per_run_minutes = 120
 attempts_per_theorem = 2
 
+[budget.codex]
+# As in dalek-lean-verify.toml: Codex is capped by time, and by per_run_usd between attempts.
+per_theorem_turns = false
+per_theorem_usd = false
+
 [repair]
 sweep = true
 

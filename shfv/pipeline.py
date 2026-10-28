@@ -107,12 +107,21 @@ def replace_body(src: str, name: str, body: str) -> str:
 PROFILES = {"minimal": ["tool_calling"], "lsp": ["tool_calling", "lsp_tools"]}  # DESIGN.md §7.3
 
 
+def agent_budget(budget: dict, adapter: str) -> dict:
+    """The target's [budget] for one adapter (§9.5): `[budget.<adapter>]` overrides the shared caps,
+    and a cap set to false there is off for that adapter (e.g. one its harness cannot enforce)."""
+    out = {k: v for k, v in budget.items() if not isinstance(v, dict)}
+    out.update(budget.get(adapter, {}))
+    return {k: v for k, v in out.items() if v is not False}
+
+
 def check_capabilities(agent: AgentAdapter, profile: str, budget: dict | None = None, priced: bool = False,
                        allow_unenforced: bool = False) -> list[str]:
     """An adapter that cannot meet the tool profile refuses to start (§7.1), rather than run with less.
-    So does one that cannot enforce a configured cap (`budget`: the target's [budget]; `priced`: the
-    model has prices, so a dollar cap applies), unless `allow_unenforced`: then the caps it cannot
-    enforce are returned, for the run to warn and record. The minutes cap is the pipeline's own."""
+    So does one that cannot enforce a configured cap (`budget`: the target's [budget] for this adapter,
+    see agent_budget; `priced`: the model has prices, so a dollar cap applies), unless
+    `allow_unenforced`: then the caps it cannot enforce are returned, for the run to warn and record.
+    The minutes caps and per_run_usd (checked between attempts) are the pipeline's own."""
     if profile not in PROFILES:
         raise SystemExit(f"unknown tool profile {profile!r} (known: {', '.join(PROFILES)})")
     caps = getattr(agent, "capabilities", {}) or {}
@@ -122,7 +131,7 @@ def check_capabilities(agent: AgentAdapter, profile: str, budget: dict | None = 
     unenforced = []
     if budget and budget.get("per_theorem_turns") and not caps.get("turn_limit"):
         unenforced.append(f"the turn cap (per_theorem_turns = {budget['per_theorem_turns']})")
-    if budget and priced and not caps.get("budget_usd"):
+    if budget and budget.get("per_theorem_usd") and priced and not caps.get("budget_usd"):
         unenforced.append(f"the dollar cap within a session (per_theorem_usd = {budget.get('per_theorem_usd')}; "
                           "the pipeline checks dollars only between attempts)")
     if unenforced and not allow_unenforced:
@@ -169,7 +178,7 @@ class Run:
         self.profile = self.cfg["agent"].get("tool_profile", "lsp")
         # Per-run caps from the command line (e.g. a CI dispatch input); the report records them.
         self.budget_overrides = budget_overrides or {}
-        self.cfg["budget"].update(self.budget_overrides)
+        self.cfg["budget"] = agent_budget(self.cfg["budget"], agent.name) | self.budget_overrides
         self.config = config.resolve()
         self.work, self.attempt_anyway, self.keep = work.resolve(), attempt_anyway, keep
         self.gate_human_fix = gate_human_fix
@@ -328,7 +337,7 @@ class Run:
                 continue
             # 2. Agent attempts: patch the old proof, then a fresh session with the failure as feedback.
             theorem_deadline = time.monotonic() + 60 * min(bud["per_theorem_minutes"], remaining_min)
-            theorem_usd = None if remaining_usd is None else min(bud["per_theorem_usd"], remaining_usd)
+            theorem_usd = None if remaining_usd is None else min(bud.get("per_theorem_usd", remaining_usd), remaining_usd)
             feedback, outcome = "", None
             max_attempts = int(bud.get("attempts_per_theorem", 2))
             for n in range(1, max_attempts + 1):
@@ -338,7 +347,7 @@ class Run:
                 if minutes_left <= 1 or (usd_left is not None and usd_left <= 0.05) or unaccounted:
                     break
                 task.feedback, task.strategy, task.attempt = feedback, "patch" if n == 1 else "fresh", n
-                budget = Budget(usd=usd_left, minutes=minutes_left, turns=bud["per_theorem_turns"])
+                budget = Budget(usd=usd_left, minutes=minutes_left, turns=bud.get("per_theorem_turns"))
                 self.p.step(f"[{i}/{len(broken)}] {b['key']} → agent attempt {n} ({self.agent.name}, {self.agent.model})")
                 log_dir = log_root if n == 1 else log_root.with_name(log_root.name + f"-attempt{n}")
                 att = self.agent.run(task, cand, budget, log_dir, self.p.live)

@@ -160,9 +160,9 @@ class FakeAgent:
 
 
 def run_case(toy_case, monkeypatch, script, label, per_run_usd=10.0, model="fake-model", partial=False,
-             expect_error=False, **run_options):
+             expect_error=False, extra_config="", **run_options):
     cfg = toy_case["root"] / f"toy-{label}.toml"
-    cfg.write_text(CONFIG.format(per_run_usd=per_run_usd))
+    cfg.write_text(CONFIG.format(per_run_usd=per_run_usd) + extra_config)
     monkeypatch.setattr(pipeline, "load_case", lambda cid, path=None: (toy_case["record"], toy_case["replay"]))
     agent = FakeAgent(script, model=model, partial=partial)
     run = Run(toy_case["case_id"], cfg, agent, toy_case["repo"], toy_case["work"], toy_case["root"] / "runs",
@@ -240,6 +240,14 @@ def test_crash_is_an_infrastructure_failure(toy_case, monkeypatch):
     rep, _, _ = run_case(toy_case, monkeypatch, script, "crash")
     assert rep["repairs"][0]["outcome"] == "infrastructure-failure"
     assert rep["repairs"][0]["attempts"][0]["cost_status"] == "unknown"
+
+
+def test_a_per_agent_budget_reaches_the_agent_and_the_report(toy_case, monkeypatch):
+    extra = "[budget.fake]\nper_theorem_turns = false\nper_theorem_minutes = 5\n"
+    rep, agent, _ = run_case(toy_case, monkeypatch, GOOD, "peragent", extra_config=extra)
+    budget = agent.calls[0][3]
+    assert budget.turns is None and budget.minutes <= 5
+    assert "per_theorem_turns" not in rep["config"]["budget"] and "fake" not in rep["config"]["budget"]
 
 
 def test_run_cost_budget_stops_further_attempts(toy_case, monkeypatch):
@@ -402,6 +410,25 @@ def test_an_adapter_that_cannot_enforce_a_configured_cap_refuses_unless_allowed(
     assert pipeline.check_capabilities(CodexCLI("m"), "lsp", None) == []  # --no-agent: no caps apply
 
 
+def test_per_agent_budget_turns_off_caps_for_one_adapter_only():
+    budget = {"per_theorem_turns": 80, "per_theorem_usd": 5.0, "per_run_usd": 20.0, "per_theorem_minutes": 25,
+              "codex": {"per_theorem_turns": False, "per_theorem_usd": False, "per_theorem_minutes": 30}}
+    assert pipeline.agent_budget(budget, "codex") == {"per_run_usd": 20.0, "per_theorem_minutes": 30}
+    assert pipeline.agent_budget(budget, "claude-code") == {k: v for k, v in budget.items() if k != "codex"}
+
+
+@pytest.mark.parametrize("target", ["dalek-lean-verify", "spqr", "symcrypt"])
+def test_codex_runs_on_the_shipped_configs_without_the_flag_but_an_explicit_cap_still_refuses(target):
+    import tomllib
+    from shfv.agents.codex_cli import CodexCLI
+    with open(pipeline.ROOT / "targets" / f"{target}.toml", "rb") as f:
+        budget = tomllib.load(f)["budget"]
+    assert pipeline.check_capabilities(CodexCLI("m"), "lsp", pipeline.agent_budget(budget, "codex"), priced=True) == []
+    budget["codex"]["per_theorem_turns"] = 50  # someone sets a cap Codex cannot enforce
+    with pytest.raises(SystemExit, match="per_theorem_turns = 50"):
+        pipeline.check_capabilities(CodexCLI("m"), "lsp", pipeline.agent_budget(budget, "codex"), priced=True)
+
+
 def test_the_minimal_profile_gives_no_lsp_tools_even_to_an_adapter_that_has_them():
     from shfv.agents.codex_cli import CodexCLI
     assert pipeline.tool_options(CodexCLI("m"), "minimal") == (False, True)
@@ -444,3 +471,23 @@ def test_scope_violation_is_caught_before_the_gate_and_fed_back(toy_case, monkey
 def test_delete_tactic_block_removes_the_tactic_and_its_sub_block():
     src = "theorem t : True := by\n  skip\n  · constructor\n    exact x\n  trivial\n"
     assert pipeline.delete_tactic_block(src, 3) == "theorem t : True := by\n  skip\n  trivial\n"
+
+
+@pytest.mark.parametrize("turns", [None, 80])
+def test_claude_code_passes_a_turn_cap_only_when_one_is_set(turns, monkeypatch, tmp_path):
+    from shfv.agents import claude_code
+    from shfv.agents.base import Budget, RepairTask
+    seen = []
+
+    def popen(cmd, **kwargs):
+        seen.append(cmd)
+        raise RuntimeError("stop before launching")
+    monkeypatch.setattr(claude_code.subprocess, "Popen", popen)
+    task = RepairTask("toy/123", "Toy.broken", "broken", "Toy.lean", 3, ["unsolved goals"],
+                      "aeneas", "PR 41", "leanprover/lean4:v4.28.0")
+    with pytest.raises(RuntimeError, match="stop before launching"):
+        claude_code.ClaudeCode("m").run(task, tmp_path, Budget(usd=None, minutes=1, turns=turns), tmp_path / "log",
+                                        lambda s: None)
+    assert ("--max-turns" in seen[0]) == (turns is not None)
+    if turns:
+        assert seen[0][seen[0].index("--max-turns") + 1] == "80"

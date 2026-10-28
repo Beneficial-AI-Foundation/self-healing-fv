@@ -31,8 +31,9 @@ tool_profile = "lsp"
 # Minutes mean the same for every agent and model; turns do not (Claude Code counts model API
 # calls, Codex completed agent messages). per_run_minutes is one deadline for the whole run
 # (preparation, attempts, builds, gate). The dollar caps apply only to models with a price entry
-# below; they are best effort until the metering proxy exists (§9.5, SCI-1717). An adapter that
-# cannot enforce the turn or dollar cap (Codex) refuses to start without --allow-unenforced-caps.
+# below; they are best effort until the metering proxy exists (§9.5, SCI-1717). [budget.<adapter>]
+# overrides these for one agent adapter; false turns a cap off. An adapter that cannot enforce a
+# cap left on refuses to start without --allow-unenforced-caps.
 per_theorem_usd = 5.0
 per_theorem_minutes = 25
 per_theorem_turns = 80
@@ -40,6 +41,12 @@ per_run_usd = 20.0
 per_run_minutes = 120
 # Attempts per theorem: 1 patches the old proof; later ones start fresh, told why the last failed.
 attempts_per_theorem = 2
+
+[budget.codex]
+# Codex CLI cannot stop a session at a turn count or a dollar amount, so its theorems are capped by
+# time; dollars are checked only between attempts, against per_run_usd.
+per_theorem_turns = false
+per_theorem_usd = false
 
 [repair]
 # The no-model sweep (§3.3 S4) before any agent: leftover tactics, timeouts, unsolved goals.

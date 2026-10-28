@@ -82,9 +82,10 @@ class ClaudeCode:
         prompt = build_prompt(task)
         (log_dir / "prompt.md").write_text(prompt)
         cmd = ["claude", "-p", prompt, "--model", self.model, "--output-format", "stream-json", "--verbose",
-               "--max-turns", str(budget.turns),
                "--setting-sources", "project", "--strict-mcp-config", "--mcp-config", str(mcp),
                "--no-session-persistence", "--allowedTools", *ALLOWED, "--disallowedTools", *DISALLOWED]
+        if budget.turns is not None:
+            cmd += ["--max-turns", str(budget.turns)]
         if budget.usd is not None:  # Claude Code's own cap, as a second line behind the pipeline's
             cmd += ["--max-budget-usd", f"{budget.usd:.2f}"]
         if task.context_dir:
