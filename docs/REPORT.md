@@ -157,7 +157,7 @@ Per broken theorem: `human_changed_statement`, `human_removed`, `human_added_sor
 | Field | Meaning |
 |---|---|
 | `cost_usd` | API-equivalent cost of the agent's model calls, from token counts and the target config's price table. Null when unknown. Builds are not included. |
-| `cost_status` | `computed`, `partial` (a session stopped before reporting full usage: a lower bound), `no-price` (the model has no price entry) or `unknown` |
+| `cost_status` | `computed`, `upper-bound` (the price entry has `upper_bound = true`: priced at the model's highest rates, e.g. GPT-6.1 Sol's long-prompt rates, because usage totals cannot tell which requests were long), `partial` (a session stopped before reporting full usage: a lower bound), `no-price` (the model has no price entry) or `unknown` |
 | `tokens` | Summed `input`, `output`, `cache_read`, `cache_write_5m`, `cache_write_1h`; for Codex also `reasoning_output` (already part of `output`, not priced again) |
 | `reported_cost_usd` | The agent harness's own figure, a cross-check only |
 | `resolved_models` | The model versions the harness actually ran |

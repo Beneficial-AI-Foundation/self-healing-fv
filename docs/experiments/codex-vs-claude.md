@@ -78,6 +78,8 @@ The older Claude runs reached the same outcome on all 49 theorems at a similar c
 | PR 493 | accepted 3 / 3 | 2m13s | 40 / 551k / 80k / 7k | $0.89 | 7m56s |
 | PR 679 | accepted 15 / 15 | 17m45s | 362 / 5.88M / 470k / 70k | $6.34 | 27m14s |
 
+**Note, 2026-10-28: Codex cost.** The `no-price` entries above predate the `gpt-6.1-sol` price entry. Priced afterwards from the recorded tokens at OpenAI's list prices, the 7 Codex runs cost at most $10.56: that is the long-prompt rate (over 272K input tokens per request) for every token, which is what the target configs now use. At the short-prompt rate they would cost $5.50. Codex reports usage per turn, summed over many requests, so which rate applied cannot be told; the real figure lies between the two. Claude's $18.27 is computed from complete usage at Anthropic's list prices.
+
 ### The repairs compared with each other and with the human fix
 
 From `shfv compare-human` on each set of same-commit runs ([Codex](codex-vs-claude-human-fix-codex-fe5aaff.md), [Claude](codex-vs-claude-human-fix-claude-fe5aaff.md), with CSVs). Codex-vs-Claude similarity uses the same `edit_similarity` as the reports: changed lines only, 1.00 = the same lines up to whitespace.

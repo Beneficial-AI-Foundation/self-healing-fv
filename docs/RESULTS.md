@@ -38,7 +38,7 @@ Tool `fe5aaff`, gate `2adac41`, the 7 cases where an agent runs: dalek PRs 278 a
 The costs differed:
 - Agent time was about the same: 62m45s for Codex and 63m31s for Claude.
 - Codex wrote 89k output tokens and Claude 213k.
-- Claude cost $18.27. Codex has no price entry, so its cost is unknown.
+- Claude cost $18.27. Codex had no price entry at the time. Priced afterwards from its recorded tokens (OpenAI list prices, read 2026-10-28), Codex cost at most $10.56. That is the long-prompt rate for every token, an upper bound; it would be $5.50 if every request's prompt was under 272K tokens. Codex reports usage per turn, so the real figure is somewhere in between.
 
 **This is not a ranking.** These cases don't separate the agents, since both repaired everything. Each agent ran once, and the dalek cases were used during development.
 

@@ -182,7 +182,7 @@ Every number with its denominator, tool commit and source is in [RESULTS.md](RES
 
 - **Replays only.** It runs historical cases on a laptop, or one at a time on a GitHub-hosted runner by manual dispatch. It opens no PRs.
 - **Three target repos configured:** curve25519-dalek-lean-verify, SparsePostQuantumRatchet-verify (SPQR) and SymCrypt.
-- **Two agents:** Claude Code and Codex CLI. Codex has no price entry yet, so its runs have no cost or dollar cap.
+- **Two agents:** Claude Code and Codex CLI. Codex's cost is an upper bound ("at most"), because its usage reports cannot show which requests were long enough to cost more. Codex cannot enforce a turn or dollar cap itself, so a run must allow that explicitly.
 - **All or nothing.** A case is accepted only if every broken proof is repaired.
 - **Build and import breaks** are not handled.
 - **Cost caps are accounting, not enforcement.** A metering proxy that holds the API key and enforces a hard cap is planned with the GitHub Actions version.

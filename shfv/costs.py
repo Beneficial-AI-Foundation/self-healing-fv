@@ -31,10 +31,21 @@ def price(tokens: dict, prices: dict | None) -> float | None:
     return round(sum(tokens.get(k, 0) * prices[k] for k in FIELDS) / 1e6, 8)
 
 
+def status(prices: dict | None, complete: bool) -> str:
+    """The cost status of priced tokens: `partial` when usage is incomplete (a lower bound),
+    `upper-bound` when the price entry says its rates bound the true price from above (`upper_bound
+    = true`: e.g. a model priced per request by prompt length, at its long-prompt rates)."""
+    if not complete:
+        return "partial"
+    return "upper-bound" if prices and prices.get("upper_bound") else "computed"
+
+
 def describe(status: str, usd: float | None, model: str | None = None) -> str:
     """Human wording for the report."""
     if status == "computed" and usd is not None:
         return f"${usd:.2f} (API-equivalent, from token counts at list prices)"
+    if status == "upper-bound" and usd is not None:
+        return f"at most ${usd:.2f} (API-equivalent upper bound, from token counts at the model's highest list prices)"
     if status == "partial" and usd is not None:
         return f"at least ${usd:.2f} (a session was stopped before reporting full usage)"
     if status == "no-price":

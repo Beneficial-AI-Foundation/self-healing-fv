@@ -62,3 +62,12 @@ output = 10.0
 cache_read = 0.10
 cache_write_5m = 2.50
 cache_write_1h = 4.0
+
+# An upper bound at the long-prompt rates; why, and the source, in targets/dalek-lean-verify.toml.
+[prices."gpt-6.1-sol"]
+input = 4.0
+output = 15.0
+cache_read = 0.20
+cache_write_5m = 5.0
+cache_write_1h = 10.0
+upper_bound = true

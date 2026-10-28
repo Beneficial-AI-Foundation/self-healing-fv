@@ -346,7 +346,7 @@ class Run:
                 price_attempt(att, prices, budget)
                 if att.cost_usd is not None:
                     spent_usd += att.cost_usd
-                if prices is not None and att.cost_status != "computed":
+                if prices is not None and att.cost_status not in ("computed", "upper-bound"):
                     # Killed before reporting usage: count the whole cap it was given (an adapter with
                     # `budget_usd` enforces it itself), so the run cap stays an upper bound; stop paid
                     # attempts if even that is unknown.
@@ -835,9 +835,11 @@ class Run:
             for k, v in a.get("tokens", {}).items():
                 tok[k] = tok.get(k, 0) + v
         statuses = {a.get("cost_status", "unknown") for a in atts}
-        status = ("computed" if statuses == {"computed"} else "no-price" if "no-price" in statuses
+        status = ("computed" if statuses == {"computed"} else
+                  "upper-bound" if statuses <= {"computed", "upper-bound"} else "no-price" if "no-price" in statuses
                   else "partial" if "partial" in statuses else "unknown") if atts else "computed"
-        usd = round(sum(a.get("cost_usd") or 0 for a in atts), 4) if status in ("computed", "partial") else None
+        usd = (round(sum(a.get("cost_usd") or 0 for a in atts), 4)
+               if status in ("computed", "upper-bound", "partial") else None)
         reported = [a.get("reported_cost_usd") for a in atts]
         return {"cost_usd": usd, "cost_status": status, "tokens": tok,
                 "reported_cost_usd": round(sum(reported), 4) if reported and None not in reported else None,
@@ -956,7 +958,7 @@ def price_attempt(att: Attempt, prices: dict | None, budget: Budget) -> None:
         att.cost_status, att.cost_usd = "unknown", None
     else:
         att.cost_usd = costs.price(att.tokens, prices)
-        att.cost_status = "computed" if att.tokens_complete else "partial"
+        att.cost_status = costs.status(prices, att.tokens_complete)
 
 
 def short(name: str) -> str:

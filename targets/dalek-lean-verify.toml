@@ -71,3 +71,21 @@ output = 50.0
 cache_read = 0.25
 cache_write_5m = 12.50
 cache_write_1h = 20.0
+
+# OpenAI Standard-tier list prices for GPT-6.1 Sol (Codex), from
+# https://developers.openai.com/api/docs/pricing and https://developers.openai.com/api/docs/models/gpt-6.1-sol
+# (read 2026-10-28). Prompts of at most 272K input tokens cost $2 input, $0.10 cached input,
+# $10 output, $2.50 / $5.00 cache writes (30 minutes / 12 hours); a request whose prompt is
+# longer costs 2x input and cache and 1.5x output for the whole request. Codex reports usage per
+# turn, summed over many requests (115K to 2.3M input tokens per turn so far), so it cannot tell
+# which tier each request was in. These are the long-prompt rates for every token: an upper bound
+# (`upper_bound`; the report says "at most"), so the dollar cap is never undercounted. The cache
+# write fields hold OpenAI's 30-minute and 12-hour tiers; Codex reports writes without a duration,
+# so they are priced as 12-hour writes.
+[prices."gpt-6.1-sol"]
+input = 4.0
+output = 15.0
+cache_read = 0.20
+cache_write_5m = 5.0
+cache_write_1h = 10.0
+upper_bound = true
