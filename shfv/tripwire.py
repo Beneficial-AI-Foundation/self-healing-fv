@@ -308,8 +308,8 @@ def summarize(events: list[dict], n_attempts: int, n_calls: int, missing: list[s
             "read_sandbox": "none (V1, DESIGN.md §9.3): the tripwire detects, it does not prevent"}
 
 
-def describe(t: dict | None) -> str:
-    """The one line for report.md."""
+def describe(t: dict | None, live: bool = False) -> str:
+    """The one line for report.md. A live run (DESIGN.md §3.6) has no human fix to reach."""
     if not t:
         return "Tripwire: not run (report made before the tripwire existed)."
     harmless = {k.split(":", 1)[1]: v for k, v in t["counts"].items()
@@ -330,7 +330,7 @@ def describe(t: dict | None) -> str:
     if not t["attempts"]:
         return "Tripwire: no agent attempts to scan."
     miss = f" {len(t['transcripts_missing'])} transcript(s) missing, so this is incomplete." if t["transcripts_missing"] else ""
-    return (f"Tripwire: no reads outside the workspace that could reach the human fix ({scanned}"
+    return (f"Tripwire: no reads outside the workspace{'' if live else ' that could reach the human fix'} ({scanned}"
             + (f"; not flagged: {extra}" if extra else "") + ")." + miss)
 
 

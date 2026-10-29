@@ -491,3 +491,97 @@ def test_claude_code_passes_a_turn_cap_only_when_one_is_set(turns, monkeypatch, 
     assert ("--max-turns" in seen[0]) == (turns is not None)
     if turns:
         assert seen[0][seen[0].index("--max-turns") + 1] == "80"
+
+
+# ---------------------------------------------------------------- live input (§3.6)
+
+@pytest.fixture(scope="session")
+def toy_live(tmp_path_factory):
+    """A toy repo for live runs: `main` at the base; branch `pr`, whose head changes the extracted
+    code and keeps the base proofs (a PR that only re-extracts); branch `ok`, whose head builds but
+    writes a new `sorry`."""
+    root = tmp_path_factory.mktemp("live")
+    repo = root / "repo"
+    write_tree(repo, OLD_DOUBLE, specs(BASE_SPEC, BASE_EVEN))
+    git(repo, "init", "-q", "-b", "main")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-qm", "base")
+    base = git(repo, "rev-parse", "HEAD")
+    git(repo, "checkout", "-qb", "pr")
+    (repo / "Toy/Funs.lean").write_text((repo / "Toy/Funs.lean").read_text().replace(OLD_DOUBLE, NEW_DOUBLE))
+    git(repo, "commit", "-qam", "re-extract")
+    head = git(repo, "rev-parse", "HEAD")
+    git(repo, "checkout", "-qb", "ok", base)
+    with open(repo / "Toy/Specs.lean", "a") as f:
+        f.write("\ntheorem later : 1 + 1 = 2 := by sorry\n")
+    git(repo, "commit", "-qam", "add a theorem")
+    ok = git(repo, "rev-parse", "HEAD")
+    git(repo, "checkout", "-q", "main")
+    return {"root": root, "repo": repo, "base": base, "head": head, "ok": ok}
+
+
+def run_live(toy_live, monkeypatch, head, script, label):
+    import mine_history
+    from shfv import live
+    monkeypatch.setitem(mine_history.REPO_CONFIGS, "toy", {
+        **mine_history.CONFIG_DEFAULTS, "github": "example/toy", "extraction": ["Toy/Funs.lean"],
+        "external": ["Toy/FunsExternal.lean"], "proof_roots": ["Toy/"],
+        "toolchain": ["lean-toolchain", "lakefile.toml", "lake-manifest.json"]})
+    cfg = toy_live["root"] / "toy.toml"
+    cfg.write_text(CONFIG.format(per_run_usd=10.0))
+    record = live.live_record("toy", toy_live["repo"], "main", head, pr=12, title="Re-extract")
+    agent = FakeAgent(script)
+    run = Run(record["case_id"], cfg, agent, toy_live["repo"], toy_live["root"] / "work", toy_live["root"] / "runs",
+              label=label, live=record)
+    rep = run.execute()
+    assert "error" not in rep, rep.get("error")
+    md = render(rep)
+    assert "human" not in md.lower(), md  # a live run has no human fix to mention
+    assert "None" not in md.split("<sub>Run")[0]
+    return rep, md, agent
+
+
+def test_live_change_is_repaired_like_a_replay(toy_live, monkeypatch):
+    rep, md, agent = run_live(toy_live, monkeypatch, toy_live["head"], GOOD, "live")
+    assert [c[0] for c in agent.calls] == ["double_spec", "double_even"]
+    assert rep["verdict"] == "accepted" and outcomes(rep) == {"double_spec": "repaired", "double_even": "repaired"}
+    inp = rep["inputs"]
+    assert inp["live"] and inp["base_commit"] == toy_live["base"] and inp["change_commit"] == toy_live["head"]
+    assert inp["causes"] == ["extraction-only"] and inp["fix_commits"] == [] and rep["human_fix"] == []
+    assert rep["live_analysis"]["verdict"] == "break confirmed"
+    # The audit read the stubbed head: the stubs' `sorry` is the bot's and does not count as a change.
+    a = rep["audit"]
+    assert a["head_stubbed"] and a["outcome"] == "no-change" and a["sorry_from_stubs"] >= 2 and not a["sorry_written"]
+    d = rep["delivery_diff"]  # applies to the head as committed, not to the stubs
+    assert ":= by sorry" not in d and "-  have _h := double_spec x" in d, d
+    assert all(e.get("bot_diff") for e in rep["repairs"])
+    assert f"[#12 \"Re-extract\"](https://github.com/example/toy/pull/12) at `{toy_live['head'][:8]}`" in md
+    assert "Changes made by the PR itself" in md
+
+
+def test_live_head_that_builds_has_nothing_to_repair(toy_live, monkeypatch):
+    rep, md, agent = run_live(toy_live, monkeypatch, toy_live["ok"], GOOD, "ok")
+    assert rep["verdict"] == "no-break" and not rep["repairs"] and not agent.calls
+    assert "Nothing to repair" in md
+    # The `sorry` the change wrote is reported from its source text.
+    assert rep["audit"]["outcome"] == "changed" and rep["audit"]["sorry_written"] == ["Toy/Specs.lean::later"]
+    assert "`sorry` written by the PR" in md
+
+
+def test_written_sorry_and_stub_discount(tmp_path):
+    (tmp_path / "b" / "T").mkdir(parents=True)
+    (tmp_path / "h" / "T").mkdir(parents=True)
+    (tmp_path / "b" / "T/A.lean").write_text("theorem x : True := by sorry\ntheorem y : True := trivial\n")
+    (tmp_path / "h" / "T/A.lean").write_text("theorem x : True := by sorry\ntheorem y : True := by sorry\n")
+    (tmp_path / "h" / "T/Funs.lean").write_text("def f : Nat := sorry\n")
+    w = pipeline.written_sorry(tmp_path / "b", tmp_path / "h", ["T/Funs.lean"])
+    assert w == ["T/A.lean::y"]  # x had it already; extracted code is not the change's proof work
+    a = {"outcome": "changed", "complete": True, "statements_changed": [], "definitions_changed": [], "removed": [],
+         "trusted_models_changed": [], "summary": {},
+         "axioms_changed": [{"decl": "y", "added": ["sorryAx"], "removed": []},
+                            {"decl": "z", "added": ["sorryAx", "Foo.ax"], "removed": []}]}
+    pipeline.discount_stub_sorry(a, [])
+    assert a["outcome"] == "changed" and a["axioms_changed"] == [{"decl": "z", "added": ["Foo.ax"], "removed": []}]
+    a["axioms_changed"] = []
+    pipeline.discount_stub_sorry(a, [])
+    assert a["outcome"] == "no-change"

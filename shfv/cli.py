@@ -1,6 +1,8 @@
 """shfv: self-healing CI for verified Rust (prototype CLI). Guide: docs/CLI.md.
 
   shfv repair --case dalek-lean-verify/e65b46d0 --agent claude-code [--model M]
+  shfv repair --repo <clone> --base <sha> --head <sha> [--pr N --title T]   (live input)
+  shfv live-select [--target T --ref R]                                       (the live workflow)
   shfv render runs/<case>/<run id>/report.json
   shfv export runs/<case>/<run id> ... [--to docs/examples/reports]
   shfv compare-human runs/ [--out summary.md] [--csv theorems.csv]
@@ -8,7 +10,9 @@
 `repair` replays one historical case: rebuilds the broken state (base proofs + the change's
 extracted code and pins), runs the repair agent on each broken proof, runs the gate, and writes
 runs/<case>/<run id>/report.json (run record) and report.md (the PR comment). Every run gets its
-own directory; runs/<case>/latest points at the newest.
+own directory; runs/<case>/latest points at the newest. With --base and --head instead of --case,
+it runs on a live change (DESIGN.md §3.6): the head as committed is the broken state, against the
+merge-base, with no human fix; everything after that is the same code.
 """
 from __future__ import annotations
 
@@ -45,7 +49,8 @@ def render(report_json: Path, work: Path, audit_focus: str | None = None) -> Pat
     case_dir = work / rep["case_id"].replace("/", "-")
     refresh_comparison(rep, case_dir)
     if rep.get("audit", {}).get("statements_changed"):
-        explain_hidden(rep["audit"], case_dir / "snapshots" / "B.json", case_dir / "snapshots" / "H.json")
+        head = "K.json" if rep["audit"].get("head_stubbed") else "H.json"  # live: the stubbed head
+        explain_hidden(rep["audit"], case_dir / "snapshots" / "B.json", case_dir / "snapshots" / head)
     # Content comes from the run; presentation from the code rendering it now. Record both.
     rep.setdefault("renders", []).append({"at": provenance.now().isoformat(timespec="seconds"),
                                           "tool": provenance.tool_code()})
@@ -210,8 +215,14 @@ def doctor(config: Path, repo: Path | None = None, work: Path = WORK, runs: Path
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="shfv", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
-    r = sub.add_parser("repair", help="replay one historical case through the pipeline")
-    r.add_argument("--case", required=True, help="<repo>/<sha8>, as in data/replay/")
+    r = sub.add_parser("repair", help="replay one historical case, or run on a live change, through the pipeline")
+    r.add_argument("--case", help="<repo>/<sha8>, as in data/replay/")
+    lv = r.add_argument_group("live input (DESIGN.md §3.6), instead of --case")
+    lv.add_argument("--base", help="base commit or ref, e.g. the PR's base; the run uses its merge-base with --head")
+    lv.add_argument("--head", help="head commit or ref, e.g. the PR's head (must be in the clone)")
+    lv.add_argument("--target", help="target config name (default: the one whose GitHub repo is the clone's origin)")
+    lv.add_argument("--pr", type=int, help="the pull request, for the report")
+    lv.add_argument("--title", help="the pull request's title, or what the change is, for the report and the prompt")
     r.add_argument("--agent", choices=sorted(ADAPTERS), help="agent adapter (default: the target config's [agent].adapter)")
     r.add_argument("--model", help="override the target config's model")
     r.add_argument("--config", type=Path, help="target config (default: targets/<repo>.toml)")
@@ -262,7 +273,20 @@ def main(argv: list[str] | None = None) -> int:
     t.add_argument("runs", type=Path, nargs="+", help="run directories (runs/<case>/<run id>)")
     t.add_argument("--repo", type=Path, help="the target clone, to name it in the findings")
     t.add_argument("--json", type=Path, help="also write every run's full result here")
+    s = sub.add_parser("live-select", help="pick open PRs for the live workflow (.github/workflows/live.yml); reads "
+                       "GitHub only, with $GITHUB_TOKEN")
+    s.add_argument("--target", help="only this target (default: every target config with [live] enabled)")
+    s.add_argument("--ref", help="manual dispatch: this branch, tag or SHA of --target, PR or not")
+    s.add_argument("--skip-checks", action="store_true", help="with --ref: run even if the extraction check did not pass")
+    s.add_argument("--max-runs", type=int, default=2, help="PRs to pick at most (default 2)")
+    s.add_argument("--self-repo", default=os.environ.get("GITHUB_REPOSITORY", "Beneficial-AI-Foundation/self-healing-fv"),
+                   help="this repo, whose run-record artifacts say which heads were already run")
+    s.add_argument("--github-output", type=Path, help="append matrix=… and count=… here ($GITHUB_OUTPUT)")
+    s.add_argument("--summary", type=Path, help="append the selection table here ($GITHUB_STEP_SUMMARY)")
     a = ap.parse_args(argv)
+    if a.cmd == "live-select":
+        from . import live
+        return live.main_select(a.target, a.ref, a.skip_checks, a.max_runs, a.self_repo, a.github_output, a.summary)
     if a.cmd == "tripwire":
         return scan_tripwire(a.runs, a.repo, a.json)
     if a.cmd == "compare-human":
@@ -276,7 +300,23 @@ def main(argv: list[str] | None = None) -> int:
     if a.cmd == "doctor":
         return doctor(a.config, a.repo, a.work, a.runs, a.agent)
 
-    repo_name = a.case.split("/")[0]
+    record = None
+    if a.case and (a.base or a.head):
+        ap.error("give either --case or --base and --head, not both")
+    if a.case:
+        repo_name, case = a.case.split("/")[0], a.case
+    elif a.base and a.head:
+        from . import live
+        repo_name = a.target or (live.target_for_clone(a.repo) if a.repo else None)
+        if not repo_name:
+            ap.error("--target is needed (or --repo with an origin that a target config names)")
+        if not a.repo:
+            with open(a.config or ROOT / "targets" / f"{repo_name}.toml", "rb") as f:
+                a.repo = Path.home() / "baif" / tomllib.load(f)["github"].split("/")[-1]
+        record = live.live_record(repo_name, a.repo.expanduser(), a.base, a.head, a.pr, a.title, ref=a.head)
+        case = record["case_id"]
+    else:
+        ap.error("give --case, or --base and --head")
     config = a.config or ROOT / "targets" / f"{repo_name}.toml"
     with open(config, "rb") as f:
         cfg = tomllib.load(f)
@@ -297,9 +337,9 @@ def main(argv: list[str] | None = None) -> int:
                                     priced=model in cfg.get("prices", {}), allow_unenforced=a.allow_unenforced_caps)
     overrides = {k: v for k, v in (("per_run_usd", a.per_run_usd), ("per_run_minutes", a.per_run_minutes))
                  if v is not None}
-    run = Run(a.case, config, agent, clone, a.work, a.runs, attempt_anyway=a.attempt_anyway,
+    run = Run(case, config, agent, clone, a.work, a.runs, attempt_anyway=a.attempt_anyway,
               gate_human_fix=a.gate_human_fix, keep=a.keep, label=a.label, replay_path=a.replay_record,
-              use_agent=not a.no_agent, budget_overrides=overrides, unenforced_caps=unenforced)
+              use_agent=not a.no_agent, budget_overrides=overrides, unenforced_caps=unenforced, live=record)
     if unenforced:
         run.p.step(f"warning: {agent.name} cannot enforce {' or '.join(unenforced)}; the report will say so")
     if (tool := provenance.tool_code()).get("dirty"):

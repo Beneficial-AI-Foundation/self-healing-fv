@@ -2,7 +2,8 @@
 
 report.md is exactly what the bot would post as a GitHub PR comment (shadow mode, §3.3 S6):
 a hidden marker so the bot can edit its own comment in place, a plain-language summary, the
-gate's checks, the evidence per theorem, and the comparison with the human fix (replay only).
+gate's checks, the evidence per theorem, and the comparison with the human fix (replay only; a
+live run, DESIGN.md §3.6, has no human fix and its report does not mention one).
 Model-written text is quoted, truncated and neutralized (no @-mentions, no live links).
 """
 from __future__ import annotations
@@ -29,6 +30,7 @@ OUTCOME_TEXT = {
     "infrastructure-failure": "the run failed before it could say anything about this theorem",
     "gate-unavailable": "the gate could not decide, so nothing about this theorem was accepted or rejected",
     "passed-checks": "every gate check that ran passed, but the kernel replay (G5) has not run, so it is not accepted",
+    "extraction-setup": "the extracted code does not build at the head, so no proof can be repaired against it",
 }
 
 
@@ -177,11 +179,16 @@ def audit_section(r: dict, focus: str | None = None) -> list[str]:
     a = r.get("audit")
     if not a:
         return []
-    out = ["#### Changes made by the triggering change itself (audit)", ""]
+    live = r.get("inputs", {}).get("live")
+    out = ["#### Changes made by the PR itself (audit)" if live else
+           "#### Changes made by the triggering change itself (audit)", ""]
     if a["outcome"] == "not-applicable":
         return out + ["⚪ Not applicable: this is a generated case with no human change to compare against.", ""]
+    # Live: the head was audited with its failing proofs stubbed, so `sorry` was compared in the sources.
+    stubbed = (" `sorry` is compared in the sources: the head does not build, so it was read with its failing "
+               "proofs stubbed.") if a.get("head_stubbed") else ""
     if a["outcome"] == "no-change":
-        return out + ["✅ No frozen statement, definition or trust assumption changed (complete comparison).", ""]
+        return out + ["✅ No frozen statement, definition or trust assumption changed (complete comparison)." + stubbed, ""]
     if a["outcome"] == "incomplete" and not a.get("summary"):
         return out + [f"⚪ The audit could not run: {a.get('error', 'unknown reason')}", ""]
     s = a.get("summary", {})
@@ -190,15 +197,18 @@ def audit_section(r: dict, focus: str | None = None) -> list[str]:
                 f"({'; '.join(a.get('coverage_problems', [])[:2])}). No change was found among the rest, but this is "
                 "not a clean result.", ""]
         return out
-    out.append(f"⚠️ **The change itself** changed {s['statements_changed']} theorem statement(s) and "
+    out.append(f"⚠️ **The {'PR' if live else 'change'} itself** changed {s['statements_changed']} theorem statement(s) and "
                f"{s['definitions_changed']} definition(s), and removed or renamed {s['removed']} declaration(s). "
-               "The bot does not judge these; a spec owner should check that none weakens a promise.")
+               "The bot does not judge these; a spec owner should check that none weakens a promise." + stubbed)
     out.append("")
     trust = []
     new_sorry = [x["decl"] for x in a["axioms_changed"] if "sorryAx" in x["added"]]
     standard = {"sorryAx", "propext", "Classical.choice", "Quot.sound"}  # sorry listed above; the rest are Lean's own
     new_ax = [(x["decl"], [y for y in x["added"] if y not in standard]) for x in a["axioms_changed"]]
     new_ax = [(d, ys) for d, ys in new_ax if ys]
+    if a.get("sorry_written"):
+        trust.append(f"- **`sorry` written by the PR** ({len(a['sorry_written'])}): "
+                     + ", ".join(f"`{x.split('::', 1)[1]}`" for x in a["sorry_written"][:20]))
     if new_sorry:
         trust.append(f"- **Newly depend on `sorry`** ({len(new_sorry)}): " + ", ".join(f"`{short_name(d)}`" for d in new_sorry[:20]))
     if new_ax:
@@ -250,6 +260,8 @@ def render(r: dict) -> str:
     pr = f"[#{inp['change_pr']} \"{subject}\"]({inp['change_pr_url']})" if inp.get("change_pr_url") \
         else (f"`{inp['change_commit'][:8]}` \"{subject}\"" if inp.get("change_commit")
               else f"the generated change \"{subject}\" (held-out case, no commit history)")
+    if inp.get("live") and inp.get("change_pr_url"):
+        pr += f" at `{inp['change_commit'][:8]}`"  # live: the head that was run, as the PR may move on
     repairs, escal = r.get("repairs", []), r.get("escalations", [])
     repaired = [e for e in repairs if e.get("outcome") in ("repaired", "passed-checks")]
     n_proofs = len(r.get("broken", {}).get("proofs", []))
@@ -300,6 +312,11 @@ def render(r: dict) -> str:
                    "definition changed, no new axioms or `sorry`, and the project rebuilds from scratch. The change is "
                    "**not accepted** yet: acceptance also needs the kernel replay (`lean4checker`), which did "
                    "not run.")
+    elif v == "no-break":
+        out.append("### ✅ Nothing to repair: the head builds")
+        out.append("")
+        out.append(f"{pr} builds green here, so no proof is broken and the bot did nothing. "
+                   "If its Lean check failed, the failure is not one this run reproduces.")
     elif v == "failed":
         err = r.get("error") or {}
         reasons = sorted({e.get("reason") for e in repairs + escal if e.get("reason")})
@@ -308,6 +325,12 @@ def render(r: dict) -> str:
         out.append(f"The run for {pr} could not complete, so it says nothing about the proofs. "
                    + (f"`{err.get('outcome')}`: {err.get('detail', '')[:500]}" if err
                       else "; ".join(reasons)[:500] or "No reason was recorded."))
+    elif any(e["outcome"] == "extraction-setup" for e in escal):
+        out.append("### ⚠️ Needs a human: the extracted code does not build")
+        out.append("")
+        out.append(f"At {pr}, the extracted Lean code itself fails to build, so there is no state to repair proofs "
+                   "against. This usually means the extraction or the hand-written models of external code need "
+                   "updating; the errors are below.")
     else:
         if n_stmts:
             head = f"{n_stmts} theorem statement{'s' * (n_stmts != 1)} no longer type-check{'s' * (n_stmts == 1)}"
@@ -340,6 +363,14 @@ def render(r: dict) -> str:
     else:
         out.append(f"| **Cost** | $0.00: no agent was run · whole run {fmt_s(t.get('wall_seconds'))} |")
     out.append("")
+
+    other = (r.get("live_analysis") or {}).get("other_errors") or []
+    if other:
+        out.append(f"**Errors outside theorem proofs at the head** ({len(other)}; no proof edit can fix these, and "
+                   "they make the case ineligible for acceptance):")
+        out.append("")
+        out.append(fence("\n\n".join(f"{e['file']}:{e.get('line') or ''} {e['msg']}" for e in other[:5]), limit=3000))
+        out.append("")
 
     out += audit_section(r, r.get("audit_focus"))
 
@@ -411,7 +442,7 @@ def render(r: dict) -> str:
             by = ("sweep, no model" if e.get("repaired_by") == "sweep" else
                   f"agent: {a.get('turns', 0)} turns · {usd(a.get('cost_usd'), a.get('cost_status'))} · {fmt_s(a.get('seconds'))}")
             out.append(f"| {link(r, e['file'], e.get('line'), short_name(e['theorem']))} | "
-                       f"{diff_size(hf.get(e['theorem'], {}).get('bot_diff'))} | {by} |")
+                       f"{diff_size((hf.get(e['theorem']) or e).get('bot_diff'))} | {by} |")
         out.append("")
     delivery = r.get("delivery_diff")
     if g and delivery:
@@ -483,7 +514,7 @@ def render(r: dict) -> str:
             out.append("")
         out.append("</details>")
         out.append("")
-    out.append(tripwire.describe(r.get("tripwire")))
+    out.append(tripwire.describe(r.get("tripwire"), live=bool(r.get("inputs", {}).get("live"))))
     out.append("")
     out.append("---")
     out += provenance_lines(r)
