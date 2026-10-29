@@ -376,7 +376,8 @@ def render(r: dict) -> str:
 
     # Escalations first: they are what the reader must act on.
     for e in escal:
-        out.append(f"#### Escalated: {link(r, e['file'], e.get('line'), short_name(e['theorem']))} · `{e['outcome']}`")
+        label = e["file"].rsplit("/", 1)[-1] if e["outcome"] == "extraction-setup" else short_name(e["theorem"])
+        out.append(f"#### Escalated: {link(r, e['file'], e.get('line'), label)} · `{e['outcome']}`")
         out.append("")
         why = ("the body of this definition no longer type-checks against the new extracted code; definitions "
                "are frozen like statements, so changing it is a spec decision" if e.get("definition")

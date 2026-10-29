@@ -651,11 +651,19 @@ class Run:
                     "timeouts": [t["file"] for t in a.get("timeouts", [])]}
             if self.live and self.replay.get("verdict", "").startswith("setup failure"):
                 # The head's extracted code does not build: no proof can be repaired against it (§3.3 S1).
-                for e in self.replay.get("extraction_errors", [])[:5]:
-                    report["escalations"].append({"theorem": e["file"].rsplit("/", 1)[-1], "file": e["file"],
-                                                  "line": e.get("line"), "outcome": "extraction-setup",
-                                                  "errors": [e["msg"]]})
+                # One escalation per file, its first errors with their lines.
+                by_file: dict[str, list[dict]] = {}
+                for e in self.replay.get("extraction_errors", []):
+                    by_file.setdefault(e["file"], []).append(e)
+                for f, errs in by_file.items():
+                    errors = [f"line {e.get('line')}: {e['msg']}" for e in errs[:5]]
+                    if len(errs) > 5:
+                        errors.append(f"… and {len(errs) - 5} more error(s) in this file")
+                    report["escalations"].append({"theorem": f, "file": f, "line": errs[0].get("line"),
+                                                  "outcome": "extraction-setup", "errors": errors})
                 report["broken"] = {"proofs": [], "statements": []}
+                report["toolchain"] = ((self.broken_root / "lean-toolchain").read_text().strip()
+                                       if (self.broken_root / "lean-toolchain").is_file() else None)
                 self.p.step("escalate: the extracted code does not build at the head → extraction-setup")
                 raise _Done
             t0 = time.time()

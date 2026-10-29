@@ -499,7 +499,7 @@ def test_claude_code_passes_a_turn_cap_only_when_one_is_set(turns, monkeypatch, 
 def toy_live(tmp_path_factory):
     """A toy repo for live runs: `main` at the base; branch `pr`, whose head changes the extracted
     code and keeps the base proofs (a PR that only re-extracts); branch `ok`, whose head builds but
-    writes a new `sorry`."""
+    writes a new `sorry`; branch `bad`, whose extracted code does not build."""
     root = tmp_path_factory.mktemp("live")
     repo = root / "repo"
     write_tree(repo, OLD_DOUBLE, specs(BASE_SPEC, BASE_EVEN))
@@ -516,8 +516,13 @@ def toy_live(tmp_path_factory):
         f.write("\ntheorem later : 1 + 1 = 2 := by sorry\n")
     git(repo, "commit", "-qam", "add a theorem")
     ok = git(repo, "rev-parse", "HEAD")
+    git(repo, "checkout", "-qb", "bad", base)
+    with open(repo / "Toy/Funs.lean", "a") as f:
+        f.write("\ndef oops : Nat := missing_a\n\ndef oops2 : Nat := missing_b\n")
+    git(repo, "commit", "-qam", "re-extract with a missing name")
+    bad = git(repo, "rev-parse", "HEAD")
     git(repo, "checkout", "-q", "main")
-    return {"root": root, "repo": repo, "base": base, "head": head, "ok": ok}
+    return {"root": root, "repo": repo, "base": base, "head": head, "ok": ok, "bad": bad}
 
 
 def run_live(toy_live, monkeypatch, head, script, label):
@@ -536,7 +541,7 @@ def run_live(toy_live, monkeypatch, head, script, label):
     rep = run.execute()
     assert "error" not in rep, rep.get("error")
     md = render(rep)
-    assert "human" not in md.lower(), md  # a live run has no human fix to mention
+    assert "human" not in md.lower().replace("needs a human", ""), md  # a live run has no human fix to mention
     assert "None" not in md.split("<sub>Run")[0]
     return rep, md, agent
 
@@ -566,6 +571,15 @@ def test_live_head_that_builds_has_nothing_to_repair(toy_live, monkeypatch):
     # The `sorry` the change wrote is reported from its source text.
     assert rep["audit"]["outcome"] == "changed" and rep["audit"]["sorry_written"] == ["Toy/Specs.lean::later"]
     assert "`sorry` written by the PR" in md
+
+
+def test_live_head_whose_extracted_code_does_not_build_escalates(toy_live, monkeypatch):
+    rep, md, agent = run_live(toy_live, monkeypatch, toy_live["bad"], GOOD, "bad")
+    assert rep["verdict"] == "escalated" and not rep["repairs"] and not agent.calls
+    [e] = rep["escalations"]  # one per file, with each error's line
+    assert e["outcome"] == "extraction-setup" and e["file"] == "Toy/Funs.lean" and len(e["errors"]) == 2
+    assert all(x.startswith("line ") for x in e["errors"]) and rep["toolchain"]
+    assert "the extracted code does not build" in md and "`Funs.lean`]" in md
 
 
 def test_written_sorry_and_stub_discount(tmp_path):
