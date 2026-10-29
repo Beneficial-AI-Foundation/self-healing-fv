@@ -1,0 +1,83 @@
+# Target config for libsignal-verify (Beneficial-AI-Foundation/libsignal-verify), DESIGN.md §3.5.
+# A candidate pilot repo for SCI-1717: Lean v4.31.0, Aeneas nightly-2026.09.30-0855ce1, VCVio.
+# The [lean] and [protected] sections are read by the gate; [agent], [budget], [prices] and
+# [repair] by the pipeline.
+#
+# Three Lake libraries: Libsignal (srcDir "rust": the Aeneas translations under
+# rust/Libsignal/Translated/ and the hand-written proofs under rust/Libsignal/Spec/), Protocols
+# (the PQXDH model on VCVio) and ProtocolsTest (its fixtures). Protocols does not import Libsignal.
+
+name = "libsignal-verify"
+github = "Beneficial-AI-Foundation/libsignal-verify"
+
+[lean]
+# Lake's defaultTargets name all three; the repo's CI (lean-action) builds them all.
+build_targets = ["Libsignal", "Protocols", "ProtocolsTest"]
+root_modules = ["Libsignal", "Protocols", "ProtocolsTest"]
+# Libsignal's modules are under rust/ (its srcDir); the gate and the pipeline find them through
+# Lake (LEAN_SRC_PATH). `src_dirs = { Libsignal = "rust" }` would pin that instead.
+source_roots = ["rust/Libsignal/", "Protocols/", "ProtocolsTest/"]
+lean_num_threads = 8
+
+[protected]
+# One Aeneas profile per crate writes Funs.lean and Types.lean; everything else under Translated/
+# is hand-written (scripts/README.md: "The hand-maintained TypesExternal.lean and
+# FunsExternal.lean are never overwritten").
+extracted = ["rust/Libsignal/Translated/Core/Funs.lean", "rust/Libsignal/Translated/Core/Types.lean",
+             "rust/Libsignal/Translated/Crypto/Funs.lean", "rust/Libsignal/Translated/Crypto/Types.lean",
+             "rust/Libsignal/Translated/Protocol/Funs.lean", "rust/Libsignal/Translated/Protocol/Types.lean",
+             "rust/Libsignal/Translated/RatchetState/Funs.lean", "rust/Libsignal/Translated/RatchetState/Types.lean"]
+# The rest of Translated/: the *External.lean models (about 300 axioms), the Shared/ models of
+# crates several profiles use (Alloc, Core: axioms too), Core/CurveProvider.lean's aliases and the
+# umbrella modules.
+trusted_models = ["rust/Libsignal/Translated/", "rust/Libsignal/Translated.lean"]
+build_config = ["lakefile.toml", "lean-toolchain", "lake-manifest.json", "rust/aeneas-config.yml",
+                "rust/aeneas-config.core.yml", "rust/aeneas-config.crypto.yml", "rust/aeneas-config.protocol.yml",
+                "rust/aeneas-config.cbc.yml", "rust/aeneas-config.ratchet-state.yml", "src-modifications.diff",
+                "scripts/", ".github/"]
+
+[agent]
+adapter = "claude-code"
+model = "claude-opus-5-5"
+tool_profile = "lsp"
+
+[budget]
+# Same prototype caps as dalek (guesses, to be set from pilot data).
+per_theorem_usd = 5.0
+per_theorem_minutes = 25
+per_theorem_turns = 80
+per_run_usd = 20.0
+per_run_minutes = 120
+attempts_per_theorem = 2
+
+[budget.codex]
+# As in dalek-lean-verify.toml: Codex is capped by time, and by per_run_usd between attempts.
+per_theorem_turns = false
+per_theorem_usd = false
+
+[repair]
+sweep = true
+
+# Same list prices as targets/dalek-lean-verify.toml (source and verification there).
+[prices."claude-opus-5-5"]
+input = 4.0
+output = 20.0
+cache_read = 0.20
+cache_write_5m = 5.0
+cache_write_1h = 8.0
+
+[prices."claude-sonnet-5-5"]
+input = 2.0
+output = 10.0
+cache_read = 0.10
+cache_write_5m = 2.50
+cache_write_1h = 4.0
+
+# An upper bound at the long-prompt rates; why, and the source, in targets/dalek-lean-verify.toml.
+[prices."gpt-6.1-sol"]
+input = 4.0
+output = 15.0
+cache_read = 0.20
+cache_write_5m = 5.0
+cache_write_1h = 10.0
+upper_bound = true

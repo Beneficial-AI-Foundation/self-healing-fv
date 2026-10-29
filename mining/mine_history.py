@@ -708,6 +708,10 @@ def mine(repo: Path, cfg_name: str, rev: str | None) -> list[dict]:
                 cleared = sorry_by_change & set(ps["sorry_removed_in"])
                 if cleared:
                     reasons.append(f"removes sorry from {len(cleared)} theorem(s) sorried by change")
+            if reasons == ["message"] and not any(git.show(c["sha"], p["path"]) is not None for p in fg["proof"]):
+                # A "fix" that edits only proof files created after the trigger cannot repair what
+                # the trigger broke (libsignal-verify PR 39, a model fix in files PRs 22-37 added).
+                continue
             if reasons:
                 ps = ps or miner.proof_summary(f["parent"], f["sha"], fg["proof"])
                 followups.append({

@@ -20,7 +20,7 @@ From the repo root:
 
 ```
 uv sync
-uv run shfv doctor       # checks elan, lake, uv, the agent's CLI, the Lean LSP MCP server, the target clone
+uv run shfv doctor       # checks elan, lake, uv, the agent's CLI, the Lean LSP MCP server, the target clone and its layout
 uv run pytest            # about 2 minutes; builds a small Lean project, checks the gate and the pipeline
 ```
 
@@ -152,7 +152,7 @@ Per theorem, the outcome is one of:
 The target repos already carry some trust that predates any change: lemmas still proved by `sorry`, and proofs by native code (`native_decide`, `bv_decide`). The gate accepts a repair near them only if it adds nothing to that trust, and then marks the acceptance with a flag. Each flag shows up in three places:
 - a 🏷️ paragraph under the report's verdict;
 - the CLI's last line, e.g. `ACCEPTED · repaired 6 (inherited sorry 5)`;
-- `report.json`, under `gate.inherited_sorry` and `gate.kernel_replay_incomplete`.
+- `report.json`, under `gate.inherited_sorry`, `gate.kernel_replay_incomplete` and `gate.native_code`.
 
 Count results both ways: all accepted, and accepted with no flag. DESIGN.md §4.3 (*Flagged acceptances*) has the precise rules.
 
@@ -160,6 +160,7 @@ Count results both ways: all accepted, and accepted with no flag. DESIGN.md §4.
 |---|---|---|---|
 | **Inherited sorry** | A repaired theorem still depends on lemmas that were unproved (`sorry`) at the base commit, the same ones its base version used. The report names them. | The repair adds no `sorry` and no dependence on any further unproved lemma; a dependence on a still-broken theorem is rejected. | Nothing new to review: these gaps existed before the change. They remain open proof obligations of the repo. |
 | **Kernel replay incomplete** | The independent kernel re-check (G5) stopped early in a module, at a declaration proved by native code. The re-check cannot run compiled code, so it cannot get past such a proof; the base commit fails the same way. The report names the module and the declaration. | That declaration is unchanged and was already proved this way at the base. The whole module was kernel-checked once during the clean rebuild (G3). Statements (G1), axioms (G2) and the text check (G0, which bans `debug.*` options and metaprogramming) are unaffected. | If the repaired theorem is in that module, read its diff: it had no independent second kernel check. A complete re-check is planned for V1 (DESIGN.md §11, question 21). |
+| **Native code** | A repaired theorem rests on a proof by native code (`native_decide`, `bv_decide`), which trusts Lean's compiler and runtime as well as the kernel. The report names the theorems. Set whether or not the kernel re-check completes (on Lean 4.35 it does). | Its base version rested on native code too; native code new to a theorem is rejected (G2). The flag never changes the verdict. | Nothing new to review unless the repo wants to drop native code; the trust existed before the change. |
 
 If the native-code stop is in a repaired or added declaration, or in one that did not use native code at the base, the repair is not accepted: the verdict is `gate-unavailable`, because the repair itself would go unchecked.
 
@@ -284,7 +285,12 @@ The audit is also a gate command: `gate audit --config T.toml --base B.json --he
 
 ## 7. Configuration and budgets
 
-A target repo is described by `targets/<repo>.toml`: `dalek-lean-verify`, `spqr` and `symcrypt` so far. `shfv doctor --config targets/<repo>.toml --repo PATH` checks the setup for one of them.
+A target repo is described by `targets/<repo>.toml`: `dalek-lean-verify`, `spqr`, `symcrypt` and `libsignal-verify` so far. `shfv doctor --config targets/<repo>.toml --repo PATH` checks the setup for one of them.
+
+`doctor` also checks the config's **layout** against the clone. Every tracked `.lean` file in the Lake project gets one class: audited (under `source_roots`, or a root module's file), trusted model, extracted, build config, unclassified, or ignored (outside the libraries the root modules import: scripts, tests, other `lean_lib`s). Modules are looked up where the gate looks them up (`lake env`, then `[lean] src_dirs`), and Lake is asked only if the dependencies are already fetched. A ✗ means the gate would refuse the tree: a root module has no file, or one top-level name sits in two source directories. A ⚠ is a heuristic warning, never a failure:
+- an unclassified file that a root module imports, or that sits in a library's `srcDir` or namespace;
+- an audited file named `*External.lean`, or `Funs.lean`/`Types.lean` (probably a trusted model or extracted code missing from `[protected]`);
+- an audited file that declares an `axiom`. The axiom itself is frozen by G0 and G1 either way; the warning matters only if the whole file is a trusted model.
 
 - `[lean]`: the build targets, the root modules (every project module they import is audited), and `lean_num_threads`, which defaults to 8 so the machine stays usable.
 - `[protected]`: files the bot may never touch.

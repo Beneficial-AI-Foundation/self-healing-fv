@@ -45,6 +45,17 @@ def test_removed_declaration_and_trusted_model_change():
     assert [r["decl"] for r in a["removed"]] == ["T"] and a["trusted_models_changed"] == ["Toy/FunsExternal.lean"]
 
 
+def test_trusted_model_directory_change_is_reported():
+    # A trusted-model entry naming a directory covers every file under it.
+    cfg = {**CFG, "protected": {**CFG["protected"], "trusted_models": ["Toy/Models/"]}}
+    base, head = pair()
+    base["sources"]["Toy/Models/Ext.lean"] = "axiom ext_seed : Nat\n"
+    head["sources"]["Toy/Models/Ext.lean"] = "axiom ext_seed : Nat\naxiom extra : False\n"
+    head["sources"]["Toy/Models/New.lean"] = "axiom more : False\n"
+    a = audit.audit(cfg, base, head)
+    assert a["trusted_models_changed"] == ["Toy/Models/Ext.lean", "Toy/Models/New.lean"]
+
+
 def test_incomplete_head_never_says_no_change():
     base, head = pair()
     head["build"] = {"ok": False, "failed_modules": ["M"], "errors": []}

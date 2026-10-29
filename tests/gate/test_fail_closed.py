@@ -161,6 +161,8 @@ def test_incomplete_base_cannot_hide_a_new_axiom():
 @pytest.mark.parametrize("field,value,reason", [
     ("gate_version", "000000000000", "made by gate"),
     ("config_sha256", "deadbeef", "different target config"),
+    # One snapshot placing a library under a srcDir that the others do not (e.g. `lake env` failed).
+    ("src_dirs", {"Toy": "src"}, "different source directories"),
 ])
 @pytest.mark.parametrize("which", [0, 1, 2])
 def test_snapshots_must_match_this_gate_and_config(field, value, reason, which):

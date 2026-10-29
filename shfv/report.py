@@ -282,6 +282,15 @@ def render(r: dict) -> str:
                        + ". That declaration is unchanged by the repair and was already proved this way at the base "
                        "commit; the rest of that module was checked by the kernel during the clean rebuild, but "
                        "not re-checked independently.")
+        native = (r.get("gate") or {}).get("native_code") or []
+        if native:
+            out.append("")
+            out.append(f"🏷️ **Rests on native code, as before the change.** {len(native)} repaired theorem"
+                       f"{'s' * (len(native) != 1)} rest{'s' * (len(native) == 1)} on a proof by native code "
+                       "(`native_decide` or `bv_decide`, axiom `Lean.ofReduceBool`), which trusts Lean's compiler and "
+                       f"runtime as well as the kernel. {'It' if len(native) == 1 else 'Each'} already did so at the "
+                       "base commit; the repair adds no native code where there was none: "
+                       + ", ".join(f"`{s}`" for s in distinct_short_names(native)[:8]) + (" …" if len(native) > 8 else ""))
     elif v == "passed-without-kernel-replay":
         out.append(f"### 🟡 Repair passed every check that ran, not accepted yet: {len(repaired)} of {n_proofs} broken "
                    f"proof{'s' * (n_proofs != 1)} fixed")

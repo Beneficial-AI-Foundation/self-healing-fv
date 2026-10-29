@@ -7,6 +7,7 @@ from __future__ import annotations
 import re
 
 from .leandecls import strip_comments
+from .snapshot import module_of
 
 THEOREM_RE = re.compile(r"^\s*(?:@\[[^\]]*\]\s*)*(?:(?:private|protected|nonrec)\s+)*(?:theorem|lemma)\s+([^\s:({\[⦃]+)")
 OPENS = re.compile(r"^\s*(namespace|section|noncomputable\s+section|mutual)\b\s*(\S*)")
@@ -43,7 +44,7 @@ def missing(snapshot: dict) -> tuple[int, list[str]]:
     found: list[tuple[str, str, bool]] = []
     declared_in: dict[str, set[str]] = {}
     for path, text in snapshot.get("sources", {}).items():
-        mod = path[:-len(".lean")].replace("/", ".")
+        mod = module_of(path, snapshot.get("src_dirs"))
         for full, private in source_theorems(text):
             found.append((mod, full, private))
             declared_in.setdefault(full, set()).add(mod)

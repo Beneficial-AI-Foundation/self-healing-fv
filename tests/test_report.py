@@ -48,6 +48,16 @@ def test_incomplete_kernel_replay_is_flagged_on_an_accepted_repair():
     assert "**incomplete** in `ToBytes`" in md
 
 
+def test_native_code_is_flagged_on_an_accepted_repair():
+    rep = {"theorem": "Ns.T", "file": "A.lean", "decl": "Ns.T", "outcome": "repaired", "attempts": []}
+    md = render(minimal_report(verdict="accepted", broken={"proofs": ["Ns.T"], "statements": []}, repairs=[rep],
+                               gate={"verdict": "accepted", "checks": {}, "native_code": ["Ns.T"]}))
+    assert "Rests on native code, as before the change" in md and "`T`" in md
+    assert "Rests on native code" not in render(minimal_report(
+        verdict="accepted", broken={"proofs": ["Ns.T"], "statements": []}, repairs=[rep],
+        gate={"verdict": "accepted", "checks": {}, "native_code": []}))
+
+
 def test_failed_run_without_error_record_gives_the_gate_reason():
     rep = {"theorem": "T", "file": "A.lean", "decl": "T", "outcome": "gate-unavailable", "attempts": [],
            "reason": "kernel replay (G5) could not run: no checker"}
