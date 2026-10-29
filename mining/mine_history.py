@@ -635,6 +635,33 @@ def days_between(a: str, b: str) -> float:
     return abs((parse(b) - parse(a)).total_seconds()) / 86400
 
 
+def change_causes(git: Git, miner: Miner, cfg: dict, parent: str, sha: str,
+                  groups: dict[str, list[dict]] | None = None) -> tuple[dict, dict | None, list[str]]:
+    """(pin_changes, extraction summary, cause labels) of the change parent → sha, from the pin
+    and toolchain diff and the changed file classes. Mining and live runs share this rule."""
+    groups = miner.files_by_class(parent, sha) if groups is None else groups
+    aeneas = cfg["aeneas_package"]
+    core = {aeneas, "lean", *cfg["core_packages"]}
+    pins_before, pins_after = toolchain_pins(git, parent, cfg), toolchain_pins(git, sha, cfg)
+    pin_changes = {k: [pins_before.get(k), pins_after.get(k)]
+                   for k in sorted(set(pins_before) | set(pins_after))
+                   if pins_before.get(k) != pins_after.get(k)}
+    extraction = miner.extraction_summary(parent, sha, groups["extraction"]) if "extraction" in groups else None
+    causes = []
+    if aeneas in pin_changes:
+        causes.append("aeneas")
+    if (core - {aeneas}) & set(pin_changes):
+        causes.append("lean-mathlib")
+    if extraction and not extraction["comment_only"] and "rust" in groups:
+        causes.append("rust")
+    if set(pin_changes) - core:
+        causes.append("lean-dep")  # other lake dependency, e.g. PrimeCert
+    if "extraction" in groups and not causes:
+        # Re-extraction without a Rust or pin change: new functions extracted, config change...
+        causes.append("extraction-config" if "extraction_config" in groups else "extraction-only")
+    return pin_changes, extraction, causes
+
+
 def mine(repo: Path, cfg_name: str, rev: str | None) -> list[dict]:
     cfg = REPO_CONFIGS[cfg_name]
     git = Git(repo)
@@ -659,25 +686,7 @@ def mine(repo: Path, cfg_name: str, rev: str | None) -> list[dict]:
     for t_pos, i in enumerate(trigger_idx):
         c = commits[i]
         groups = groups_by_sha[c["sha"]]
-        pins_before, pins_after = toolchain_pins(git, c["parent"], cfg), toolchain_pins(git, c["sha"], cfg)
-        pin_changes = {k: [pins_before.get(k), pins_after.get(k)]
-                       for k in sorted(set(pins_before) | set(pins_after))
-                       if pins_before.get(k) != pins_after.get(k)}
-
-        extraction = miner.extraction_summary(c["parent"], c["sha"], groups["extraction"]) \
-            if "extraction" in groups else None
-        causes = []
-        if aeneas in pin_changes:
-            causes.append("aeneas")
-        if (core - {aeneas}) & set(pin_changes):
-            causes.append("lean-mathlib")
-        if extraction and not extraction["comment_only"] and "rust" in groups:
-            causes.append("rust")
-        if set(pin_changes) - core:
-            causes.append("lean-dep")  # other lake dependency, e.g. PrimeCert
-        if "extraction" in groups and not causes:
-            # Re-extraction without a Rust or pin change: new functions extracted, config change...
-            causes.append("extraction-config" if "extraction_config" in groups else "extraction-only")
+        pin_changes, extraction, causes = change_causes(git, miner, cfg, c["parent"], c["sha"], groups)
 
         external_files = groups.get("external", [])
         changed_extraction = (extraction["defs_modified"] + extraction["defs_removed"]) if extraction else []
