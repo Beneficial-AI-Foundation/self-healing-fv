@@ -33,21 +33,42 @@ FAILED_RE = re.compile(r"^✖ \[\d+/\d+\] (?:Building|Compiling|Running) (\S+)")
 IMPORT_RE = re.compile(r"^(?:public\s+|private\s+)?(?:meta\s+)?import\s+(\S+)", re.M)
 
 
-def module_file(mod: str) -> str:
-    return mod.replace(".", "/") + ".lean"
+def src_dirs(cfg: dict) -> dict[str, str]:
+    """{library root module: its Lake `srcDir`} from `[lean] src_dirs`. A library declared with
+    `srcDir = "rust"` keeps module `Libsignal.Spec.X` in `rust/Libsignal/Spec/X.lean`
+    (libsignal-verify); libraries not listed keep their modules at the project root."""
+    return {k: v.strip("/") for k, v in cfg["lean"].get("src_dirs", {}).items()}
 
 
-def module_of(path: str) -> str:
+def module_file(mod: str, dirs: dict[str, str] | None = None) -> str:
+    """Project-relative source path of `mod`."""
+    d = (dirs or {}).get(mod.split(".")[0])
+    return (d + "/" if d else "") + mod.replace(".", "/") + ".lean"
+
+
+def module_of(path: str, dirs: dict[str, str] | None = None) -> str:
+    """Module name of a project-relative source path (the inverse of module_file)."""
+    for root, d in (dirs or {}).items():
+        rest = path.removeprefix(d + "/")
+        if rest != path and (rest == root + ".lean" or rest.startswith(root + "/")):
+            path = rest
+            break
     return path[:-len(".lean")].replace("/", ".")
 
 
 def project_modules(tree: Path, cfg: dict) -> dict[str, list[str]]:
-    """Import closure of the root modules over the project's own files: {module: imports}."""
+    """Import closure of the root modules over the project's own files: {module: imports}.
+    Imports with no file in the project are dependencies (Mathlib, Aeneas, ...). A root module
+    with no file is a config error (a missing `src_dirs` entry, say), never an empty library."""
+    dirs = src_dirs(cfg)
     out: dict[str, list[str]] = {}
     todo = list(cfg["lean"]["root_modules"])
+    for mod in todo:
+        if not (tree / module_file(mod, dirs)).is_file():
+            raise FileNotFoundError(f"root module {mod}: no file {module_file(mod, dirs)} in {tree}")
     while todo:
         mod = todo.pop()
-        f = tree / module_file(mod)
+        f = tree / module_file(mod, dirs)
         if mod in out or not f.is_file():
             continue
         imports = IMPORT_RE.findall(leandecls.strip_comments(f.read_text(errors="replace")))
@@ -78,7 +99,7 @@ def run_build(tree: Path, cfg: dict, log: Path | None) -> dict:
         m = DIAG_RE.match(line)
         if m and m.group(1) == "error":
             errors.append({"file": m.group(2), "line": int(m.group(3) or 0), "msg": m.group(5)[:500]})
-            failed.add(module_of(m.group(2)))
+            failed.add(module_of(m.group(2), src_dirs(cfg)))
         m = FAILED_RE.match(line)
         if m:
             failed.add(m.group(1))
@@ -201,7 +222,7 @@ def inputs_hash(cfg: dict, tree: Path) -> str:
     modules and every .lean file under the source roots (extracted code included)."""
     h = hashlib.sha256()
     files = [tree / f for f in ("lean-toolchain", "lake-manifest.json", "lakefile.toml", "lakefile.lean")]
-    files += [tree / module_file(m) for m in cfg["lean"]["root_modules"]]
+    files += [tree / module_file(m, src_dirs(cfg)) for m in cfg["lean"]["root_modules"]]
     for root in cfg["lean"]["source_roots"]:
         files += sorted((tree / root).rglob("*.lean"))
     for f in files:
@@ -240,6 +261,7 @@ def snapshot(cfg: dict, tree: Path, *, clean: bool = False, apply_diff: Path | N
         tree = workdir
     result["tree"] = str(tree)
     result["workspace_project"] = workspace_project(cfg)
+    result["src_dirs"] = dirs = src_dirs(cfg)
     tree = tree / workspace_project(cfg)  # from here on, `tree` is the Lake project
     if clean and (tree / ".lake" / "build").exists():
         raise RuntimeError(f"{tree}: --clean, but the project build output .lake/build exists")
@@ -249,7 +271,7 @@ def snapshot(cfg: dict, tree: Path, *, clean: bool = False, apply_diff: Path | N
 
     result["build"] = build = run_build(tree, cfg, log)
     mods = project_modules(tree, cfg)
-    extracted = {module_of(p) for p in cfg["protected"]["extracted"]}
+    extracted = {module_of(p, dirs) for p in cfg["protected"]["extracted"]}
     audited = sorted(m for m in mods if m not in extracted)
     failed = set(build["failed_modules"]) & set(mods)
     importers: dict[str, set[str]] = {}
@@ -272,11 +294,11 @@ def snapshot(cfg: dict, tree: Path, *, clean: bool = False, apply_diff: Path | N
     records, info = stmtcanon(tree, cfg, observed) if observed else ({}, {"ok": True, "records": 0})
     result["stmtcanon"] = info
     result["records"] = records
-    result["sources"] = {module_file(m): (tree / module_file(m)).read_text() for m in audited}
+    result["sources"] = {module_file(m, dirs): (tree / module_file(m, dirs)).read_text() for m in audited}
     if apply_diff is not None:
         # G5: kernel replay of the modules the diff changed (the rest is rebuilt from unchanged
         # sources). Needs a green build: a failed one is already a G3 rejection.
-        replay_mods = sorted({module_of(p) for p in changed_paths if p.endswith(".lean")} & set(mods))
+        replay_mods = sorted({module_of(p, dirs) for p in changed_paths if p.endswith(".lean")} & set(mods))
         result["kernel_replay"] = kernel.replay(tree, replay_mods, cfg) if build["ok"] else \
             {"ran": False, "error": "the candidate did not build", "modules": {}}
         result["kernel_replay"]["required_modules"] = replay_mods

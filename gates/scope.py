@@ -38,7 +38,7 @@ def short(key: str) -> str:
 
 def full_name(snapshot: dict, file: str, key: str) -> str | None:
     """Fully qualified name of declaration `key` of `file`, from the snapshot's records."""
-    mod, s = module_of(file), short(key)
+    mod, s = module_of(file, snapshot.get("src_dirs")), short(key)
     names = [n for n, r in snapshot.get("records", {}).items()
              if r.get("module") == mod and (n == s or n.endswith("." + s))]
     return min(names, key=len) if names else None

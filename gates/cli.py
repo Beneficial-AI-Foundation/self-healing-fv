@@ -105,7 +105,7 @@ def main(argv: list[str] | None = None) -> int:
                 # The diff is applied only to audited sources; protected paths never reach a build.
                 for f in patch.parse(a.apply.read_text()):
                     for p in {f["old"], f["new"]} - {None}:
-                        roots = {snapshot.module_file(m) for m in cfg["lean"]["root_modules"]}
+                        roots = {snapshot.module_file(m, snapshot.src_dirs(cfg)) for m in cfg["lean"]["root_modules"]}
                         audited = any(p.startswith(r) for r in cfg["lean"]["source_roots"]) or p in roots
                         if snapshot.protected(cfg, p) or not audited:
                             print(f"gate: refusing to apply a diff that touches {p}", file=sys.stderr)

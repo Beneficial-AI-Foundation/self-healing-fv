@@ -43,7 +43,7 @@ import hashlib
 import re
 
 from . import inventory, patch, scope, version
-from .snapshot import config_hash
+from .snapshot import config_hash, module_file
 
 BASE3 = {"propext", "Classical.choice", "Quot.sound"}
 SORRY = "sorryAx"
@@ -259,7 +259,7 @@ def compare(cfg: dict, base: dict, broken: dict, cand: dict, diff: str) -> dict:
                                        "unchanged declaration that already did so at the base")
             elif not r.get("ok"):
                 v5.append({"check": "G5", "msg": f"the Lean kernel rejects a declaration in {m}",
-                           "file": m.replace(".", "/") + ".lean", "output": r.get("output", "")[-600:]})
+                           "file": module_file(m, cand.get("src_dirs")), "output": r.get("output", "")[-600:]})
     checks["G5"] = {"id": "G5", "ok": not v5 if kr.get("ran") else None, "status": "ran" if kr.get("ran") else "not run",
                     "required": True, "violations": v5,
                     "info": {"checker": kr.get("checker"), "modules": sorted(kr.get("modules", {})),
