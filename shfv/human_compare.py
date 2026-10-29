@@ -18,6 +18,7 @@ from difflib import SequenceMatcher
 from pathlib import Path
 
 from . import report as report_mod
+from .modpaths import is_module_file
 
 # Rows of the §8.3 confusion matrix, in display order.
 BOT_GROUPS = ["repaired by the agent", "repaired by the sweep", "statement-must-change", "proof-hard",
@@ -115,7 +116,6 @@ def rows(rep: dict) -> list[dict]:
                  else "changed the statement" if h.get("human_changed_statement") else "kept the statement")
         last = (e.get("attempts") or [{}])[-1]
         helpers = (last.get("diagnosis") or {}).get("helpers_added") if outcome == "repaired" else None
-        module = e["file"].removesuffix(".lean").replace("/", ".")
         h = h or {}
         sim = h.get("similarity_to_human")
         if sim is not None and h.get("bot_diff") and h.get("human_diff"):
@@ -132,7 +132,8 @@ def rows(rep: dict) -> list[dict]:
             "human_edit_lines": edit_lines(h.get("human_diff")), "bot_edit_lines": edit_lines(h.get("bot_diff")),
             "similarity_to_human": sim, "possible_memorization": sim >= 0.9 if sim is not None else None,
             "inherited_sorry": e["theorem"] in inherited if outcome == "repaired" else None,
-            "kernel_replay_incomplete": module in replay_modules if outcome == "repaired" else None,
+            "kernel_replay_incomplete": any(is_module_file(e["file"], m) for m in replay_modules)
+            if outcome == "repaired" else None,
             # Model output (§7.4): advisory, used only to explain proof sizes.
             "helpers_reported": len(helpers) if isinstance(helpers, list) else None,
         })

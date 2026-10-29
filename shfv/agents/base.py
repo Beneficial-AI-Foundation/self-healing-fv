@@ -30,6 +30,7 @@ class RepairTask:
     attempt: int = 1
     strategy: str = "patch"   # patch the old proof, or "fresh": write a new proof from the goal state
     feedback: str = ""        # why the previous attempt failed (build errors, scope violations, give-up)
+    module: str = ""          # the file's Lean module (shfv/modpaths.py); "" = derived from `file`
 
 
 @dataclass

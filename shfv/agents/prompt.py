@@ -59,7 +59,7 @@ def build_prompt(task: RepairTask) -> str:
     if task.context_dir:
         context = (f"\nRead-only context for this change is in `{task.context_dir}` "
                    "(for example `extraction.diff`: how the extracted Lean code changed).\n")
-    module = task.file[:-len(".lean")].replace("/", ".")
+    module = task.module or task.file[:-len(".lean")].replace("/", ".")
     retry = ""
     if task.attempt > 1:
         retry = (f"\nThis is attempt {task.attempt}. A previous attempt failed and its edits were rolled back:\n\n"

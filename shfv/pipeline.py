@@ -30,7 +30,7 @@ from pathlib import Path
 
 from gates import patch, proc  # the diff format and the bounded-subprocess helper, not gate logic
 
-from . import costs, provenance, tripwire
+from . import costs, modpaths, provenance, tripwire
 from .human_compare import edit_similarity
 from .agents.base import AgentAdapter, Attempt, Budget, RepairTask
 from .progress import Progress
@@ -315,7 +315,7 @@ class Run:
                               trigger=trigger, toolchain=toolchain,
                               still_stubbed=[o["key"] for o in broken[i:]],
                               repaired_before=[short(r) for r in repaired], context_dir=ctx, lsp_tools=lsp,
-                              structured=structured)
+                              structured=structured, module=self.modules(cand).module(b["file"]))
             log_root = self.out / "attempts" / f"{i:02d}-{b['key'][:60]}"
             # 1. The no-model sweep (§3.3 S4): cheap fixes for the common error kinds.
             if self.cfg.get("repair", {}).get("sweep", True) and det.get("kind") in SWEEPABLE:
@@ -401,9 +401,13 @@ class Run:
                 self._restub(cand, b)
         return cand_root
 
+    def modules(self, project: Path) -> modpaths.ModulePaths:
+        """Module names <-> source paths in a workspace's Lake project (a library may sit under a srcDir)."""
+        return modpaths.ModulePaths(project, self.cfg["lean"].get("src_dirs"))
+
     def build_module(self, cand: Path, b: dict) -> tuple[bool, str]:
         """Build the theorem's module in the candidate: (ok, its error messages for that file)."""
-        mod = b["file"][:-len(".lean")].replace("/", ".")
+        mod = self.modules(cand).module(b["file"])
         r = proc.run(["lake", "build", mod], cand,
                      {**os.environ, "LEAN_NUM_THREADS": str(self.cfg["lean"]["lean_num_threads"])},
                      timeout=60 * self.cfg["lean"].get("build_timeout_minutes", 90))
@@ -416,7 +420,7 @@ class Run:
 
     def decl_errors(self, cand: Path, b: dict) -> list[dict]:
         """Errors inside the theorem's own declaration, with Lake's classification."""
-        mod = b["file"][:-len(".lean")].replace("/", ".")
+        mod = self.modules(cand).module(b["file"])
         r = proc.run(["lake", "build", mod], cand,
                      {**os.environ, "LEAN_NUM_THREADS": str(self.cfg["lean"]["lean_num_threads"])},
                      timeout=60 * self.cfg["lean"].get("build_timeout_minutes", 90))
@@ -615,7 +619,7 @@ class Run:
             stmt_broken = []
             for key in self.replay.get("statement_broken", []):
                 f, name = key.split("::", 1)
-                full = next((n for n, rec in Bj["records"].items() if rec["module"] == f[:-5].replace("/", ".")
+                full = next((n for n, rec in Bj["records"].items() if rec["module"] == self.modules(self.base).module(f)
                              and (n == name or n.endswith("." + name))), name)
                 errs = [e for e in self.replay.get("statement_errors", []) if e["file"] == f and e["decl"] == name]
                 d = decl_text((self.base / f).read_text(), name)
