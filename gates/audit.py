@@ -20,7 +20,7 @@ every extraction update makes them.
 from __future__ import annotations
 
 from . import inventory, version
-from .snapshot import config_hash, module_file
+from .snapshot import config_hash, protected
 
 BASE3 = {"propext", "Classical.choice", "Quot.sound"}
 
@@ -77,9 +77,10 @@ def audit(cfg: dict, base: dict, head: dict) -> dict:
         if new or gone:
             axioms.append({"decl": name, "added": new, "removed": gone})
     added = sorted(n for n, r in h.items() if n not in b and "error" not in r)
-    trusted = cfg["protected"].get("trusted_models", [])
-    trusted_changed = sorted(p for p in trusted
-                             if base.get("sources", {}).get(p) != head.get("sources", {}).get(p))
+    # Entries ending in "/" are directories (SymCrypt's Intrinsics/, libsignal-verify's Translated/).
+    paths = set(cfg["protected"].get("trusted_models", [])) | set(base.get("sources", {})) | set(head.get("sources", {}))
+    trusted_changed = sorted(p for p in paths if protected(cfg, p) == "trusted_models"
+                             and base.get("sources", {}).get(p) != head.get("sources", {}).get(p))
     findings = bool(statements or bodies or removed or axioms or trusted_changed)
     if findings:
         outcome = "changed"  # differences found are real even if coverage is incomplete
