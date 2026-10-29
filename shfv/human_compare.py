@@ -14,6 +14,7 @@ import json
 import statistics
 import sys
 from collections import Counter
+from difflib import SequenceMatcher
 from pathlib import Path
 
 from . import report as report_mod
@@ -55,6 +56,42 @@ def edit_lines(diff: str | None) -> int | None:
     return sum(1 for l in diff.splitlines() if l[:1] in "+-" and not l.startswith(("+++", "---")))
 
 
+def changed_lines(diff: str) -> list[str]:
+    """The changed lines (+/-) of a unified proof diff, whitespace-normalized. Each hunk is diffed
+    again on normalized lines, so a line that was only re-indented (e.g. under a removed `·`
+    focus) counts as unchanged: Ristretto `mul_spec` (dalek PR 734) scored 0.11 because one
+    edit re-indented 7 lines that the other left alone."""
+    out, old, new, in_hunk = [], [], [], False
+
+    def flush():
+        a, b = [" ".join(l.split()) for l in old], [" ".join(l.split()) for l in new]
+        for tag, i1, i2, j1, j2 in SequenceMatcher(None, a, b, autojunk=False).get_opcodes():
+            if tag != "equal":
+                out.extend(["-" + x for x in a[i1:i2]] + ["+" + y for y in b[j1:j2]])
+        old.clear(), new.clear()
+    for l in diff.splitlines():
+        if l.startswith("@@"):
+            flush()
+            in_hunk = True
+        elif (not in_hunk and l.startswith(("--- ", "+++ "))) or l.startswith("\\"):
+            continue  # file headers; "\ No newline at end of file"
+        elif l[:1] == "-":
+            old.append(l[1:])
+        elif l[:1] == "+":
+            new.append(l[1:])
+        else:
+            old.append(l[1:]), new.append(l[1:])
+    flush()
+    return out
+
+
+def edit_similarity(a: str, b: str) -> float:
+    """How alike two edits of the same old proof are: compares the changed lines (+/-) only, so two
+    small but different edits of a long proof do not look alike (§8.5 memorization flag)."""
+    x, y = changed_lines(a), changed_lines(b)
+    return round(SequenceMatcher(None, x, y).ratio(), 2) if x and y else 0.0
+
+
 def rows(rep: dict) -> list[dict]:
     """One row per broken theorem of a run: repair targets, then escalations."""
     hf = {h["theorem"]: h for h in rep.get("human_fix", [])}
@@ -80,6 +117,9 @@ def rows(rep: dict) -> list[dict]:
         helpers = (last.get("diagnosis") or {}).get("helpers_added") if outcome == "repaired" else None
         module = e["file"].removesuffix(".lean").replace("/", ".")
         h = h or {}
+        sim = h.get("similarity_to_human")
+        if sim is not None and h.get("bot_diff") and h.get("human_diff"):
+            sim = edit_similarity(h["bot_diff"], h["human_diff"])  # recomputed: older records scored re-indents
         out.append({
             "case": rep["case_id"], "pr": (rep.get("inputs") or {}).get("change_pr"), "run_id": rep.get("run_id"),
             "theorem": e["theorem"], "short": short[e["theorem"]], "file": e["file"], "kind": kind, "outcome": outcome,
@@ -90,7 +130,7 @@ def rows(rep: dict) -> list[dict]:
             "base_proof_lines": h.get("base_proof_lines"), "human_proof_lines": h.get("human_proof_lines"),
             "bot_proof_lines": h.get("bot_proof_lines"),
             "human_edit_lines": edit_lines(h.get("human_diff")), "bot_edit_lines": edit_lines(h.get("bot_diff")),
-            "similarity_to_human": h.get("similarity_to_human"), "possible_memorization": h.get("possible_memorization"),
+            "similarity_to_human": sim, "possible_memorization": sim >= 0.9 if sim is not None else None,
             "inherited_sorry": e["theorem"] in inherited if outcome == "repaired" else None,
             "kernel_replay_incomplete": module in replay_modules if outcome == "repaired" else None,
             # Model output (§7.4): advisory, used only to explain proof sizes.
@@ -252,7 +292,7 @@ def render(reps: list[dict], table: list[dict]) -> str:
     out += ["## Per theorem", "",
             "Proof lines are proof-body lines: base → human / bot. Edit is lines removed plus lines added against "
             "the base proof (0: left unchanged). Similarity compares only the changed lines of the two edits "
-            "(`edit_similarity`, 1.00 = the same lines up to whitespace). Flags apply to accepted repairs only.", "",
+            "(`edit_similarity`, 1.00 = the same lines up to whitespace; a line only re-indented counts as unchanged). Flags apply to accepted repairs only.", "",
             "| Case | Theorem | Kind | Bot | Human | Proof lines base → human / bot | Edit human / bot "
             "| Similarity | Flags |",
             "|---|---|---|---|---|---|---|---|---|"]

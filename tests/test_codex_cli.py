@@ -16,7 +16,8 @@ from shfv.pipeline import check_capabilities, price_attempt
 
 DIAGNOSIS = {"outcome": "repaired", "summary": "Updated the proof.", "failure_scope": "none",
              "suspects_statement": False, "statement_doubt": "", "helpers_added": []}
-USAGE = {"input_tokens": 100, "cached_input_tokens": 60, "output_tokens": 20}
+USAGE = {"input_tokens": 100, "cached_input_tokens": 60, "cache_write_input_tokens": 0, "output_tokens": 20,
+         "reasoning_output_tokens": 5}  # the fields of a real 0.164.0 turn.completed event
 
 
 @pytest.fixture
@@ -82,7 +83,8 @@ def test_finish_usage_and_isolation(harness, monkeypatch, tmp_path):
     assert att.stop == "done" and att.diagnosis == DIAGNOSIS
     assert att.final_message == DIAGNOSIS["summary"] and att.turns == 1
     assert att.tokens_complete and att.tokens == {
-        "input": 40, "output": 20, "cache_read": 60, "cache_write_5m": 0, "cache_write_1h": 0}
+        "input": 40, "output": 20, "cache_read": 60, "cache_write_5m": 0, "cache_write_1h": 0,
+        "reasoning_output": 5}
     assert att.resolved_model is None  # public exec events do not normally report it
     assert capture["cwd"] == str(workspace)
     args, settings, env = capture["args"], capture["settings"], capture["env"]
@@ -178,6 +180,17 @@ def test_registration_capabilities_and_version(harness):
 def test_usage_rejects_invalid_counts():
     assert normalize_usage({**USAGE, "cached_input_tokens": 101}) is None
     assert normalize_usage({**USAGE, "output_tokens": True}) is None
+    assert normalize_usage({**USAGE, "reasoning_output_tokens": 21}) is None  # reasoning is part of output
+    assert normalize_usage({**USAGE, "cache_write_input_tokens": -1}) is None
+
+
+def test_cache_writes_are_priced_reasoning_is_not_priced_again():
+    tokens = normalize_usage({**USAGE, "cache_write_input_tokens": 30})
+    assert tokens["cache_write_1h"] == 30 and tokens["input"] == 40  # no duration: the dearer kind; errs high
+    assert normalize_usage({"input_tokens": 100, "output_tokens": 20})["reasoning_output"] == 0  # older streams
+    from shfv import costs
+    prices = {"input": 1, "output": 10, "cache_read": 0, "cache_write_5m": 0, "cache_write_1h": 2}
+    assert costs.price(tokens, prices) == (40 * 1 + 20 * 10 + 30 * 2) / 1e6  # reasoning inside the 20 output
 
 
 def test_pipeline_prices_codex_tokens(harness):
@@ -231,5 +244,21 @@ def test_cli_passes_codex_key_and_model_without_starting_repair(monkeypatch, cap
         cli.main(argv)
     assert "CODEX_API_KEY" in capsys.readouterr().err
     monkeypatch.setenv("CODEX_API_KEY", "test-key-not-real")
-    with pytest.raises(StopBeforeRepair):
+    with pytest.raises(StopBeforeRepair):  # [budget.codex] turns off the caps Codex cannot enforce
         cli.main(argv)
+
+
+def test_doctor_checks_the_chosen_adapter(monkeypatch, capsys, tmp_path):
+    from types import SimpleNamespace
+    from gates import proc
+    from shfv import cli
+    seen = []
+    monkeypatch.setattr(proc, "run", lambda cmd, *a, **k: seen.append(cmd) or SimpleNamespace(
+        returncode=0, stdout=f"{cmd[0]} 1.0", stderr=""))
+    cli.doctor(cli.ROOT / "targets" / "dalek-lean-verify.toml", tmp_path, adapter="codex")
+    out = capsys.readouterr().out
+    assert ["codex", "--version"] in seen and ["claude", "--version"] not in seen
+    assert "Codex CLI login is not checked" in out and "CODEX_API_KEY" in out and "Claude" not in out
+    seen.clear()
+    cli.doctor(cli.ROOT / "targets" / "dalek-lean-verify.toml", tmp_path)  # the target's adapter
+    assert ["claude", "--version"] in seen and "Claude Code login" in capsys.readouterr().out

@@ -81,6 +81,8 @@ Separately, an **audit** compares the statements before and after the triggering
 
 The prototype runs historical replays on a laptop. It writes the report and opens no PRs.
 
+**What we reuse:** the statement fingerprint `StmtCanon.lean` from Liao's [auto_verify_dalek](https://github.com/Beneficial-AI-Foundation/auto_verify_dalek); the Lean FRO's kernel re-checkers [`lean4checker`](https://github.com/leanprover/lean4checker) and `leanchecker`; the [Lean LSP MCP server](https://github.com/oOo0oOo/lean-lsp-mcp) for the agent's Lean tools; and the GitHub Actions runner Alessandro set up for the pilot. Full credits are in [DESIGN.md §12](DESIGN.md#12-credits).
+
 ## 4. What an acceptance guarantees, and what it does not
 
 The gate is the trusted core. The agent, the orchestration and the report do not need to be trusted: if they misbehave, the worst case is a failed repair or a needless escalation. The gate is model-free, deterministic, and has no dependency on the rest of the code.
@@ -180,7 +182,7 @@ Every number with its denominator, tool commit and source is in [RESULTS.md](RES
 
 - **Replays only.** It runs historical cases on a laptop, or one at a time on a GitHub-hosted runner by manual dispatch. It opens no PRs.
 - **Three target repos configured:** curve25519-dalek-lean-verify, SparsePostQuantumRatchet-verify (SPQR) and SymCrypt.
-- **Two agents:** Claude Code and Codex CLI. Codex has no price entry yet, so its runs have no cost or dollar cap.
+- **Two agents:** Claude Code and Codex CLI. Codex's cost is an upper bound ("at most"), because its usage reports cannot show which requests were long enough to cost more. Codex cannot enforce a turn or dollar cap itself, so the target configs cap it by time (and by the run's dollar cap, checked between attempts).
 - **All or nothing.** A case is accepted only if every broken proof is repaired.
 - **Build and import breaks** are not handled.
 - **Cost caps are accounting, not enforcement.** A metering proxy that holds the API key and enforces a hard cap is planned with the GitHub Actions version.

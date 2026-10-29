@@ -1,16 +1,17 @@
 """The repair pipeline for one historical case (DESIGN.md §3.3), replay mode.
 
   S1 input     case record (data/mined) + replay ground truth (data/replay)
-  S2 context   replay workspaces (base, stubbed broken, fixed), gate snapshots B and K,
-               broken set, statement-broken theorems, extraction diff
-  S4 repair    one fresh agent session per broken theorem, leaves first, within budgets
+  S2 context   replay workspaces (base, stubbed broken, fixed), gate snapshots B, K and H,
+               broken set, statement-broken theorems, extraction diff; the audit of the
+               change itself (`gate audit`, §4.7)
+  S4 repair    per broken theorem, leaves first, within budgets: the no-model sweep, then
+               fresh agent sessions (patch, then fresh with feedback), each followed by a
+               pre-gate (the file builds, G0 holds) and rolled back if it fails
   S5 gate      `gate diff` → `gate scope` → `gate snapshot --apply --clean` → `gate compare`
   S6/S7        outcome per theorem, report.json (run record) and report.md (PR comment)
 
-The gate is reached only through its CLI (§4.5, §4.8). Not in this slice: the automation
-sweep and attempt schedule (TODO §3.3 S4: one agent attempt per theorem), pre-gate feedback to
-the agent (TODO §3.3 S4), the audit (TODO §4.7), S3 differential tests (V1), component
-acceptance (V1, §4.3), and the metering proxy and sandbox (TODO §3.4, §9.5).
+The gate is reached only through its CLI (§4.5, §4.8). Not built yet: S3 differential tests
+(V1), component acceptance (V1, §4.3), and the metering proxy and sandbox (TODO §3.4, §9.5).
 """
 from __future__ import annotations
 
@@ -24,12 +25,13 @@ import sys
 import time
 import tomllib
 from datetime import datetime, timezone
-from difflib import SequenceMatcher
+from collections import Counter
 from pathlib import Path
 
 from gates import patch, proc  # the diff format and the bounded-subprocess helper, not gate logic
 
 from . import costs, provenance, tripwire
+from .human_compare import edit_similarity
 from .agents.base import AgentAdapter, Attempt, Budget, RepairTask
 from .progress import Progress
 
@@ -42,6 +44,7 @@ from mine_history import Git, parse_decls  # noqa: E402
 
 WORK = replay_case.WORK  # default replay workspaces: outside this repo (§8.5)
 STUB = ":= by sorry"
+NO_MODEL = "no-model"  # run ids of runs that called no model
 
 
 class GateUnavailable(Exception):
@@ -104,14 +107,44 @@ def replace_body(src: str, name: str, body: str) -> str:
 PROFILES = {"minimal": ["tool_calling"], "lsp": ["tool_calling", "lsp_tools"]}  # DESIGN.md §7.3
 
 
-def check_capabilities(agent: AgentAdapter, profile: str) -> None:
-    """An adapter that cannot meet the tool profile refuses to start (§7.1), rather than run with less."""
+def agent_budget(budget: dict, adapter: str) -> dict:
+    """The target's [budget] for one adapter (§9.5): `[budget.<adapter>]` overrides the shared caps,
+    and a cap set to false there is off for that adapter (e.g. one its harness cannot enforce)."""
+    out = {k: v for k, v in budget.items() if not isinstance(v, dict)}
+    out.update(budget.get(adapter, {}))
+    return {k: v for k, v in out.items() if v is not False}
+
+
+def check_capabilities(agent: AgentAdapter, profile: str, budget: dict | None = None, priced: bool = False,
+                       allow_unenforced: bool = False) -> list[str]:
+    """An adapter that cannot meet the tool profile refuses to start (§7.1), rather than run with less.
+    So does one that cannot enforce a configured cap (`budget`: the target's [budget] for this adapter,
+    see agent_budget; `priced`: the model has prices, so a dollar cap applies), unless
+    `allow_unenforced`: then the caps it cannot enforce are returned, for the run to warn and record.
+    The minutes caps and per_run_usd (checked between attempts) are the pipeline's own."""
     if profile not in PROFILES:
         raise SystemExit(f"unknown tool profile {profile!r} (known: {', '.join(PROFILES)})")
     caps = getattr(agent, "capabilities", {}) or {}
     missing = [c for c in PROFILES[profile] if not caps.get(c)]
     if missing:
         raise SystemExit(f"adapter {agent.name} lacks {', '.join(missing)} for tool profile {profile!r}")
+    unenforced = []
+    if budget and budget.get("per_theorem_turns") and not caps.get("turn_limit"):
+        unenforced.append(f"the turn cap (per_theorem_turns = {budget['per_theorem_turns']})")
+    if budget and budget.get("per_theorem_usd") and priced and not caps.get("budget_usd"):
+        unenforced.append(f"the dollar cap within a session (per_theorem_usd = {budget.get('per_theorem_usd')}; "
+                          "the pipeline checks dollars only between attempts)")
+    if unenforced and not allow_unenforced:
+        raise SystemExit(f"adapter {agent.name} cannot enforce {' or '.join(unenforced)}. Pass "
+                         "--allow-unenforced-caps to run anyway; the report then says which caps were not enforced.")
+    return unenforced
+
+
+def tool_options(agent: AgentAdapter, profile: str) -> tuple[bool, bool]:
+    """(lsp_tools, structured) for the agent's tasks: Lean LSP tools only when the chosen profile asks
+    for them, so `minimal` means minimal even for an adapter that has them (§7.3)."""
+    caps = getattr(agent, "capabilities", {}) or {}
+    return "lsp_tools" in PROFILES[profile] and bool(caps.get("lsp_tools")), bool(caps.get("structured_output"))
 
 
 def broken_deps(broken: list[dict], base_records: dict) -> dict[str, set[str]]:
@@ -136,14 +169,16 @@ class Run:
     def __init__(self, case_id: str, config: Path, agent: AgentAdapter, repo: Path, work: Path, runs: Path,
                  attempt_anyway: bool = False, gate_human_fix: bool | None = None, keep: bool = False,
                  label: str | None = None, replay_path: Path | None = None, use_agent: bool = True,
-                 budget_overrides: dict | None = None):
+                 budget_overrides: dict | None = None, unenforced_caps: list[str] | None = None):
         self.case_id, self.agent, self.repo = case_id, agent, repo.expanduser()
         self.use_agent = use_agent  # False: the sweep only, no model call (and no key needed)
+        self.unenforced_caps = unenforced_caps or []  # caps the adapter cannot enforce (check_capabilities)
         with open(config, "rb") as f:
             self.cfg = tomllib.load(f)
+        self.profile = self.cfg["agent"].get("tool_profile", "lsp")
         # Per-run caps from the command line (e.g. a CI dispatch input); the report records them.
         self.budget_overrides = budget_overrides or {}
-        self.cfg["budget"].update(self.budget_overrides)
+        self.cfg["budget"] = agent_budget(self.cfg["budget"], agent.name) | self.budget_overrides
         self.config = config.resolve()
         self.work, self.attempt_anyway, self.keep = work.resolve(), attempt_anyway, keep
         self.gate_human_fix = gate_human_fix
@@ -155,7 +190,9 @@ class Run:
         self.case_dir = self.work / case_id.replace("/", "-")
         # One directory per run, never reused: runs/<case>/<run id>/, plus runs/<case>/latest.
         self.started = provenance.now()
-        self.run_id = provenance.run_id(self.started, agent.model, label)
+        self.label = label
+        # Named after the model, or `no-model` when none will be called (renamed at the end if none was).
+        self.run_id = provenance.run_id(self.started, agent.model if use_agent else NO_MODEL, label)
         self.case_runs = runs.resolve() / case_id.replace("/", "-")
         self.out = self.case_runs / self.run_id
         self.out.mkdir(parents=True, exist_ok=False)
@@ -246,8 +283,7 @@ class Run:
         toolchain = (self.broken / "lean-toolchain").read_text().strip()
         deps = broken_deps([b for b in broken if b.get("name")], base_records)
         repaired: list[str] = []
-        lsp = bool(getattr(self.agent, "capabilities", {}).get("lsp_tools"))
-        structured = bool(getattr(self.agent, "capabilities", {}).get("structured_output"))
+        lsp, structured = tool_options(self.agent, self.profile)
         for i, b in enumerate(broken, 1):
             key = f"{b['file']}::{b['key']}"
             src = (cand / b["file"]).read_text()
@@ -301,7 +337,7 @@ class Run:
                 continue
             # 2. Agent attempts: patch the old proof, then a fresh session with the failure as feedback.
             theorem_deadline = time.monotonic() + 60 * min(bud["per_theorem_minutes"], remaining_min)
-            theorem_usd = None if remaining_usd is None else min(bud["per_theorem_usd"], remaining_usd)
+            theorem_usd = None if remaining_usd is None else min(bud.get("per_theorem_usd", remaining_usd), remaining_usd)
             feedback, outcome = "", None
             max_attempts = int(bud.get("attempts_per_theorem", 2))
             for n in range(1, max_attempts + 1):
@@ -311,7 +347,7 @@ class Run:
                 if minutes_left <= 1 or (usd_left is not None and usd_left <= 0.05) or unaccounted:
                     break
                 task.feedback, task.strategy, task.attempt = feedback, "patch" if n == 1 else "fresh", n
-                budget = Budget(usd=usd_left, minutes=minutes_left, turns=bud["per_theorem_turns"])
+                budget = Budget(usd=usd_left, minutes=minutes_left, turns=bud.get("per_theorem_turns"))
                 self.p.step(f"[{i}/{len(broken)}] {b['key']} → agent attempt {n} ({self.agent.name}, {self.agent.model})")
                 log_dir = log_root if n == 1 else log_root.with_name(log_root.name + f"-attempt{n}")
                 att = self.agent.run(task, cand, budget, log_dir, self.p.live)
@@ -319,12 +355,12 @@ class Run:
                 price_attempt(att, prices, budget)
                 if att.cost_usd is not None:
                     spent_usd += att.cost_usd
-                if prices is not None and att.cost_status != "computed":
-                    # Killed before reporting usage: count the whole cap it was given (Claude Code
-                    # enforces it itself), so the run cap stays an upper bound; stop paid attempts if
-                    # even that is unknown.
+                if prices is not None and att.cost_status not in ("computed", "upper-bound"):
+                    # Killed before reporting usage: count the whole cap it was given (an adapter with
+                    # `budget_usd` enforces it itself), so the run cap stays an upper bound; stop paid
+                    # attempts if even that is unknown.
                     spent_usd = spent_usd - (att.cost_usd or 0) + (budget.usd or 0)
-                    unaccounted = budget.usd is None
+                    unaccounted = budget.usd is None or not getattr(self.agent, "capabilities", {}).get("budget_usd")
                 entry["attempts"].append(att.to_json())
                 # Pre-gate (feedback only; the gate alone decides): the file builds, and G0 holds.
                 builds, errors = self.build_module(cand, b)
@@ -545,7 +581,9 @@ class Run:
                                    "sha256": hashlib.sha256(self.config.read_bytes()).hexdigest()[:12],
                                    "budget": self.cfg["budget"], "budget_overrides": self.budget_overrides},
                         "agent": {"adapter": self.agent.name, "model": self.agent.model, "enabled": self.use_agent,
-                                  "auth": getattr(self.agent, "auth", None)},
+                                  "auth": getattr(self.agent, "auth", None), "tool_profile": self.profile,
+                                  "turns_unit": getattr(self.agent, "turns_unit", None),
+                                  "unenforced_caps": self.unenforced_caps},
                         "gate_version": gate_version, "repairs": [], "escalations": []}
         try:
             t0 = time.time()
@@ -664,6 +702,8 @@ class Run:
         report["tripwire"] = self.tripwire(report)
         report["totals"] = self.totals(report, time.time() - t_start)
         report["verdict"] = overall(report)
+        if not report["totals"]["attempts"]:
+            report["run_id"] = self.name_without_model()
         if not self.keep:
             shutil.rmtree(self.scratch / "candidate", ignore_errors=True)
             shutil.rmtree(self.scratch / "human-fix", ignore_errors=True)
@@ -680,6 +720,16 @@ class Run:
             return {"version": tripwire.VERSION, "verdict": "error", "error": f"{type(e).__name__}: {e}"[:500],
                     "attempts": 0, "tool_calls": 0, "transcripts_missing": [], "flags": [], "n_flags": 0, "counts": {}}
 
+    def name_without_model(self) -> str:
+        """A run that called no model (the sweep repaired everything, or nothing was attempted) is
+        not named after one: rename its directory to `<time>-no-model[-label]`."""
+        run_id = provenance.run_id(self.started, NO_MODEL, self.label)
+        new = self.case_runs / run_id
+        if run_id != self.run_id and not new.exists():
+            self.out.rename(new)
+            self.out, self.run_id = new, run_id
+        return self.run_id
+
     def audit(self, B: Path) -> dict:
         """What the triggering change itself did to the frozen declarations (§4.7, path A): the
         base against the change's head (in replay, the change commit). Independent of repair."""
@@ -692,6 +742,7 @@ class Run:
         if not out.exists():
             return {"outcome": "incomplete", "error": (g.stderr or "gate audit produced no result")[-500:]}
         a = json.loads(out.read_text())
+        explain_hidden(a, B, H)
         s = a["summary"]
         detail = (f"{s['statements_changed']} statement(s), {s['definitions_changed']} definition(s) changed, "
                   f"{s['removed']} removed; {s['new_sorry']} newly depend on sorry; "
@@ -793,9 +844,11 @@ class Run:
             for k, v in a.get("tokens", {}).items():
                 tok[k] = tok.get(k, 0) + v
         statuses = {a.get("cost_status", "unknown") for a in atts}
-        status = ("computed" if statuses == {"computed"} else "no-price" if "no-price" in statuses
+        status = ("computed" if statuses == {"computed"} else
+                  "upper-bound" if statuses <= {"computed", "upper-bound"} else "no-price" if "no-price" in statuses
                   else "partial" if "partial" in statuses else "unknown") if atts else "computed"
-        usd = round(sum(a.get("cost_usd") or 0 for a in atts), 4) if status in ("computed", "partial") else None
+        usd = (round(sum(a.get("cost_usd") or 0 for a in atts), 4)
+               if status in ("computed", "upper-bound", "partial") else None)
         reported = [a.get("reported_cost_usd") for a in atts]
         return {"cost_usd": usd, "cost_status": status, "tokens": tok,
                 "reported_cost_usd": round(sum(reported), 4) if reported and None not in reported else None,
@@ -914,7 +967,7 @@ def price_attempt(att: Attempt, prices: dict | None, budget: Budget) -> None:
         att.cost_status, att.cost_usd = "unknown", None
     else:
         att.cost_usd = costs.price(att.tokens, prices)
-        att.cost_status = "computed" if att.tokens_complete else "partial"
+        att.cost_status = costs.status(prices, att.tokens_complete)
 
 
 def short(name: str) -> str:
@@ -927,16 +980,6 @@ def pin_summary(record: dict) -> str:
     parts = [f"Lean {pins['lean'][0].split(':')[-1]} → {pins['lean'][1].split(':')[-1]}"] if "lean" in pins else []
     parts += [f"{k} {v[0][:7]} → {v[1][:7]}" for k, v in pins.items() if k in ("aeneas", "mathlib")]
     return f"; {', '.join(parts)}" if parts else ""
-
-
-def edit_similarity(a: str, b: str) -> float:
-    """How alike two edits of the same old proof are: compares the changed lines (+/-) only, so two
-    small but different edits of a long proof do not look alike (§8.5 memorization flag)."""
-    def changed(d: str) -> list[str]:
-        return [l[0] + " ".join(l[1:].split()) for l in d.splitlines()
-                if l[:1] in "+-" and not l.startswith(("+++", "---"))]
-    x, y = changed(a), changed(b)
-    return round(SequenceMatcher(None, x, y).ratio(), 2) if x and y else 0.0
 
 
 def unified(a: str, b: str, path: str) -> str:
@@ -954,8 +997,8 @@ def refresh_comparison(report: dict, case_dir: Path) -> None:
     diff = report.get("gate", {}).get("diff", "")
     for h in report.get("human_fix", []):
         f, key = h["file"], next((e["decl"] for e in report["repairs"] if e["theorem"] == h["theorem"]), None)
-        if not key:
-            continue
+        if not key or not (case_dir / "base" / f).exists() or not (case_dir / "broken" / f).exists():
+            continue  # no replay trees here (another --work, or deleted): keep what the run recorded
         base = decl_text((case_dir / "base" / f).read_text(), key)
         broken = (case_dir / "broken" / f).read_text()
         fixed = case_dir / "fixed" / f
@@ -973,6 +1016,40 @@ def refresh_comparison(report: dict, case_dir: Path) -> None:
             if human and human["proof"] != base["proof"]:
                 h["similarity_to_human"] = edit_similarity(h["bot_diff"], h["human_diff"])
                 h["possible_memorization"] = h["similarity_to_human"] >= 0.9
+
+
+CONST = re.compile(r"\(c (\S+) \[([^\]]*)\]\)")  # a constant and its universe levels in StmtCanon's dump
+
+
+def hidden_difference(before: str, after: str) -> str | None:
+    """Where two canonical fingerprints differ, in words, for a declaration whose before and after
+    print identically: the printer hides universe levels, and often implicit arguments and instances."""
+    if before == after:
+        return None
+    b, a = Counter(CONST.findall(before)), Counter(CONST.findall(after))
+    gone, new = b - a, a - b
+    levels = sorted({(n, x, y) for n, x in gone for m, y in new if m == n})
+    if levels:
+        return "universe levels, which the printer hides: " + "; ".join(
+            f"`{n}.{{{x}}}` → `{n}.{{{y}}}`" for n, x, y in levels[:5])
+    if gone or new:
+        return "constants: " + ", ".join([f"`{n}` removed" for n, _ in sorted(gone)][:5]
+                                         + [f"`{n}` added" for n, _ in sorted(new)][:5])
+    i = next((k for k, (x, y) in enumerate(zip(before, after)) if x != y), min(len(before), len(after)))
+    return f"the elaborated term, not its printed form: `…{before[max(0, i - 40):i + 60]}…` → `…{after[max(0, i - 40):i + 60]}…`"
+
+
+def explain_hidden(audit: dict, B: Path, H: Path) -> None:
+    """Add `hidden_difference` to the audit's statement changes whose before and after print alike
+    (SPQR PR 106: 26 of them), from the canonical fingerprints in the snapshots. Display only:
+    the fingerprint decided, and this does not change what the audit reports."""
+    same = [x for x in audit.get("statements_changed", []) if x.get("before") == x.get("after")]
+    if not same or not (B.exists() and H.exists()):
+        return
+    b, h = json.loads(B.read_text())["records"], json.loads(H.read_text())["records"]
+    for x in same:
+        x["hidden_difference"] = hidden_difference(b.get(x["decl"], {}).get("canon", ""),
+                                                   h.get(x["decl"], {}).get("canon", ""))
 
 
 def summarize_gate(g: dict) -> dict:

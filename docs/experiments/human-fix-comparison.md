@@ -97,3 +97,14 @@ uv run shfv compare-human runs/human-fix-gate \
 ```
 
 Then read the "Human fix gate" column of the per-case table. A human fix that the gate rejects in a case the bot repaired shows a rule that people break in practice. Report the failing check; don't change the rule (AGENTS.md, "The gate is the trusted core").
+
+## Note, 2026-10-28: re-indented lines
+
+The similarities in this experiment count a line that an edit only re-indented as one line removed and one added. So Ristretto `mul_spec` (PR 734) scored 0.11: both edits delete the same first goal, but the bot also dropped the `·` before the next one and re-indented the 7 lines under it. `edit_similarity` (now in `shfv/human_compare.py`) diffs each hunk again with whitespace normalized, so a re-indented line counts as unchanged; `shfv compare-human` recomputes the similarity of older records. The summary and CSV linked above are left as they were. Re-running the command on the same 16 records moves two theorems:
+
+| Case | Theorem | Similarity before | After |
+|---|---|---|---|
+| PR 278 | `negate_hoare_spec` | 0.22 | 0.43 |
+| PR 734 | Ristretto `mul_spec` | 0.11 | 0.50 |
+
+The median (0.50), the range (0.10–1.00), the identical edits (3 of 10) and the possible-memorization flags (3 of 10) are unchanged. The edit-line counts still count raw diff lines. For the tool-`fe5aaff` runs, see the note in [codex-vs-claude.md](codex-vs-claude.md).

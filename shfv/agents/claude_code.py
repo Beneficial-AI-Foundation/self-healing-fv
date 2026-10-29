@@ -39,9 +39,11 @@ STOPS = {"success": "done", "error_max_turns": "max-turns", "error_max_budget_us
 
 class ClaudeCode:
     name = "claude-code"
+    harness, executable, login_hint = "Claude Code", "claude", "run `claude` once interactively"
     api_key_env = "ANTHROPIC_API_KEY"
     capabilities = {"tool_calling": True, "mcp": True, "skills": True, "structured_output": True,
-                    "lsp_tools": True}
+                    "lsp_tools": True, "turn_limit": True, "budget_usd": True}
+    turns_unit = "API calls"  # a turn is one model API call (`num_turns`, `--max-turns`)
 
     def __init__(self, model: str, lean_threads: int = 8, api_key: str | None = None):
         self.model = model
@@ -80,9 +82,10 @@ class ClaudeCode:
         prompt = build_prompt(task)
         (log_dir / "prompt.md").write_text(prompt)
         cmd = ["claude", "-p", prompt, "--model", self.model, "--output-format", "stream-json", "--verbose",
-               "--max-turns", str(budget.turns),
                "--setting-sources", "project", "--strict-mcp-config", "--mcp-config", str(mcp),
                "--no-session-persistence", "--allowedTools", *ALLOWED, "--disallowedTools", *DISALLOWED]
+        if budget.turns is not None:
+            cmd += ["--max-turns", str(budget.turns)]
         if budget.usd is not None:  # Claude Code's own cap, as a second line behind the pipeline's
             cmd += ["--max-budget-usd", f"{budget.usd:.2f}"]
         if task.context_dir:

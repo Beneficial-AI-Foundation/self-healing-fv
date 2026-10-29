@@ -42,8 +42,10 @@ def untrusted(text: str, limit: int = 1500) -> str:
     return "\n".join("> " + line for line in text.splitlines()) or "> (empty)"
 
 
-def usd(x) -> str:
-    return "cost unknown" if x is None else f"${x:.2f}"
+def usd(x, status: str | None = None) -> str:
+    """A cost in a table or a line; the cost status says whether it is a bound (costs.describe)."""
+    bound = {"upper-bound": "at most ", "partial": "at least "}.get(status, "")
+    return "cost unknown" if x is None else f"{bound}${x:.2f}"
 
 
 def fmt_s(s) -> str:
@@ -118,7 +120,7 @@ def gate_table(r: dict, g: dict) -> list[str]:
             why = (c.get("info") or {}).get("checker") if cid == "G5" else None
             mark, text = "⚪", desc + (f": required for acceptance, could not run ({why})" if c.get("required") and why
                                       else ": required for acceptance, did not run" if c.get("required")
-                                      else ": not run in this prototype")
+                                      else ": did not run")
         else:
             mark = "✅" if c["ok"] else "❌"
             text = desc.format(inventory=inv, targets=", ".join(c.get("info", {}).get("targets", ["the project"])),
@@ -214,7 +216,15 @@ def audit_section(r: dict, focus: str | None = None) -> list[str]:
         for x in stmts[:AUDIT_SHOWN]:
             out.append(f"**`{x['decl']}`**")
             out.append("")
-            out.append(fence(f"before:\n{x['before']}\n\nafter:\n{x['after']}", limit=2500))
+            if x["before"] == x["after"]:
+                # The printer hides what changed; the fingerprint, which decided, does not.
+                out.append("Prints the same before and after; the fingerprint differs in "
+                           + (x.get("hidden_difference") or "details the printer hides (universe levels, implicit "
+                              "arguments or instances)") + ":")
+                out.append("")
+                out.append(fence(x["before"], limit=2500))
+            else:
+                out.append(fence(f"before:\n{x['before']}\n\nafter:\n{x['after']}", limit=2500))
             out.append("")
         rest = stmts[AUDIT_SHOWN:]
         if rest:
@@ -310,8 +320,11 @@ def render(r: dict) -> str:
     out.append(f"| **Cause** | {cause_text(r)} |")
     out.append(f"| **Broken** | {n_proofs} proof{'s' * (n_proofs != 1)} · {n_stmts} statement{'s' * (n_stmts != 1)} |")
     if t.get("attempts"):
+        unit = r["agent"].get("turns_unit")  # turns count different things per agent harness
+        unenforced = r["agent"].get("unenforced_caps")
         out.append(f"| **Agent** | {r['agent']['adapter']}, `{r['agent']['model']}` · {t['attempts']} attempt"
-                   f"{'s' * (t['attempts'] != 1)} · {t['turns']} turns |")
+                   f"{'s' * (t['attempts'] != 1)} · {t['turns']} turns" + (f" ({unit})" if unit else "")
+                   + (f" · ⚠️ not enforced by this agent: {'; '.join(unenforced)}" if unenforced else "") + " |")
         out.append(f"| **Cost** | {costs.describe(t.get('cost_status', 'computed'), t.get('cost_usd'), r['agent']['model'])}"
                    f" · agent {fmt_s(t['agent_seconds'])} · "
                    f"whole run {fmt_s(t['wall_seconds'])} |")
@@ -351,7 +364,7 @@ def render(r: dict) -> str:
         out.append(f"**Why:** {e.get('reason') or OUTCOME_TEXT.get(e['outcome'], '')}.")
         for a in e.get("attempts", []):
             out.append(f"- attempt: {a['adapter']} `{a['model']}`, stopped: {a['stop']}, {a['turns']} turns, "
-                       f"{usd(a.get('cost_usd'))}, {fmt_s(a['seconds'])}")
+                       f"{usd(a.get('cost_usd'), a.get('cost_status'))}, {fmt_s(a['seconds'])}")
             d = a.get("diagnosis")
             if d and d.get("outcome") == "gave-up":
                 out.append(f"  - the agent's diagnosis (model output, advisory): failure `{d['failure_scope']}`"
@@ -381,14 +394,15 @@ def render(r: dict) -> str:
         out.append("#### Repaired" if v == "accepted" else "#### Repaired, pending the kernel replay"
                    if v == "passed-without-kernel-replay" else "#### Repairs that passed the agent's own build")
         out.append("")
-        out.append("| Theorem | Edit of the old proof | Agent |")
+        out.append("| Theorem | Edit of the old proof | Repaired by |")
         out.append("|---|---|---|")
         hf = {h["theorem"]: h for h in r.get("human_fix", [])}
         for e in repaired:
             a = e["attempts"][-1] if e["attempts"] else {}
+            by = ("sweep, no model" if e.get("repaired_by") == "sweep" else
+                  f"agent: {a.get('turns', 0)} turns · {usd(a.get('cost_usd'), a.get('cost_status'))} · {fmt_s(a.get('seconds'))}")
             out.append(f"| {link(r, e['file'], e.get('line'), short_name(e['theorem']))} | "
-                       f"{diff_size(hf.get(e['theorem'], {}).get('bot_diff'))} | "
-                       f"{a.get('turns', 0)} turns · {usd(a.get('cost_usd'))} · {fmt_s(a.get('seconds'))} |")
+                       f"{diff_size(hf.get(e['theorem'], {}).get('bot_diff'))} | {by} |")
         out.append("")
     delivery = r.get("delivery_diff")
     if g and delivery:

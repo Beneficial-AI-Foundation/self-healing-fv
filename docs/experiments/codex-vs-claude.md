@@ -78,6 +78,8 @@ The older Claude runs reached the same outcome on all 49 theorems at a similar c
 | PR 493 | accepted 3 / 3 | 2m13s | 40 / 551k / 80k / 7k | $0.89 | 7m56s |
 | PR 679 | accepted 15 / 15 | 17m45s | 362 / 5.88M / 470k / 70k | $6.34 | 27m14s |
 
+**Note, 2026-10-28: Codex cost.** The `no-price` entries above predate the `gpt-6.1-sol` price entry. Priced afterwards from the recorded tokens at OpenAI's list prices, the 7 Codex runs cost at most $10.56: that is the long-prompt rate (over 272K input tokens per request) for every token, which is what the target configs now use. At the short-prompt rate they would cost $5.50. Codex reports usage per turn, summed over many requests, so which rate applied cannot be told; the real figure lies between the two. Claude's $18.27 is computed from complete usage at Anthropic's list prices.
+
 ### The repairs compared with each other and with the human fix
 
 From `shfv compare-human` on each set of same-commit runs ([Codex](codex-vs-claude-human-fix-codex-fe5aaff.md), [Claude](codex-vs-claude-human-fix-claude-fe5aaff.md), with CSVs). Codex-vs-Claude similarity uses the same `edit_similarity` as the reports: changed lines only, 1.00 = the same lines up to whitespace.
@@ -140,6 +142,12 @@ From `shfv compare-human` on each set of same-commit runs ([Codex](codex-vs-clau
 | PR 679 | `PolyDecoder.from_pb_spec` | 27 → 28 / 28 / 26 | 5 / 3 / 5 | 0.50 / 0.60 | 0.25 | 87 / 115 |
 | PR 679 | `Version…try_from_spec` | 18 → 17 / 19 / 19 | 3 / 7 / 7 | 0.20 / 0.40 | 0.29 | 130 / 106 |
 | PR 679 | `MessageType…try_from_spec` | 17 → 16 / 19 / 18 | 3 / 6 / 7 | 0.22 / 0.40 | 0.31 | 32 / 50 |
+
+**Note, 2026-10-28: re-indented lines.** The similarities above count a line that an edit only re-indented (for example under a `·` it removed) as one line removed and one added. `edit_similarity` now diffs each hunk again with whitespace normalized, so such a line counts as unchanged, and `shfv compare-human` recomputes the similarity of older records ([human-fix-comparison.md](human-fix-comparison.md#note-2026-10-28-re-indented-lines)). The table and the linked summaries are left as they were. Re-running on the same 14 records:
+- **Median similarity to the human edit:** Codex 0.28 → 0.33, Claude 0.34 → 0.40. Identical edits (4 of 38 each) and possible-memorization flags (4 of 38 each) are unchanged.
+- **Codex against Claude:** 8 of 44 identical and median 0.40, both unchanged.
+- **The largest moves:** Claude's PR 734 `add_spec` (0.11 → 0.67); PR 734 `mul_spec` for both agents (0.11 → 0.50); Codex's PR 52 `poly_mul_loop_spec` (0.15 → 0.43); PR 278 `negate_hoare_spec` for both agents (0.22 → 0.43). Claude's "34-line" `add_spec` edit above is 4 changed lines once re-indentation is ignored; the edit-line columns still count raw diff lines.
+- Some similarities drop a little (Claude PR 679 `from_pb_loop.body_spec` 0.23 → 0.18): a line one edit only re-indented no longer matches a line the other edit really deleted.
 
 ### Tripwire: reads outside the candidate workspace
 

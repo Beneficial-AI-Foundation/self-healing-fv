@@ -24,7 +24,7 @@ from . import provenance
 from . import report as report_mod
 from .agents.claude_code import ClaudeCode
 from .agents.codex_cli import CodexCLI
-from .pipeline import BOT_REPO, ROOT, WORK, Run, check_capabilities, fmt_s
+from .pipeline import BOT_REPO, ROOT, WORK, Run, agent_budget, check_capabilities, fmt_s
 
 ADAPTERS = {"claude-code": ClaudeCode, "codex": CodexCLI}
 EXAMPLES = ROOT / "docs" / "examples" / "reports"
@@ -38,11 +38,14 @@ def link_latest(case_runs: Path, run_dir: Path) -> None:
 
 
 def render(report_json: Path, work: Path, audit_focus: str | None = None) -> Path:
-    from .pipeline import refresh_comparison
+    from .pipeline import explain_hidden, refresh_comparison
     rep = json.loads(report_json.read_text())
     if audit_focus:
         rep["audit_focus"] = audit_focus
-    refresh_comparison(rep, work / rep["case_id"].replace("/", "-"))
+    case_dir = work / rep["case_id"].replace("/", "-")
+    refresh_comparison(rep, case_dir)
+    if rep.get("audit", {}).get("statements_changed"):
+        explain_hidden(rep["audit"], case_dir / "snapshots" / "B.json", case_dir / "snapshots" / "H.json")
     # Content comes from the run; presentation from the code rendering it now. Record both.
     rep.setdefault("renders", []).append({"at": provenance.now().isoformat(timespec="seconds"),
                                           "tool": provenance.tool_code()})
@@ -94,7 +97,7 @@ def write_index(to: Path) -> None:
                      + f"`{m['case_id'].split('/')[1]}` "
                      f"| [{m['started_at'][:16].replace('T', ' ')} UTC]({f.parent.name}/{f.stem}.md) "
                      f"| `{provenance.short(p['tool'])}` | `{p['gate_version'][:7]}` | `{p['agent']['model']}` "
-                     f"| {m['verdict']} | {n_ok}/{len(m['outcomes'])} | {report_mod.usd(t.get('cost_usd'))} |"))
+                     f"| {m['verdict']} | {n_ok}/{len(m['outcomes'])} | {report_mod.usd(t.get('cost_usd'), t.get('cost_status'))} |"))
     lines = ["# Example reports", "",
              "PR comments the bot produced on historical cases (`shfv repair`), exported with `shfv export`. "
              "Each row is one run; re-running a case with a newer tool adds a row, so results can be compared "
@@ -145,21 +148,25 @@ def location_warnings(work: Path, runs: Path, clones: list[Path]) -> list[str]:
     return out
 
 
-def doctor(config: Path, repo: Path | None = None, work: Path = WORK, runs: Path = ROOT / "runs") -> int:
-    """Check what a run needs before spending anything (review finding 16)."""
+def doctor(config: Path, repo: Path | None = None, work: Path = WORK, runs: Path = ROOT / "runs",
+           adapter: str | None = None) -> int:
+    """Check what a run needs before spending anything (review finding 16), for the target's agent
+    adapter or the one given."""
     from gates import proc
     from .agents.claude_code import LEAN_LSP_MCP
     with open(config, "rb") as f:
         cfg = tomllib.load(f)
     clone = (repo or Path.home() / "baif" / cfg["github"].split("/")[-1]).expanduser()
+    agent = ADAPTERS[adapter or cfg["agent"].get("adapter", "claude-code")]
     checks = [
         ("elan (Lean toolchains)", ["elan", "--version"]),
         ("lake", ["lake", "--version"]),
         ("uv", ["uv", "--version"]),
-        ("Claude Code", ["claude", "--version"]),
-        (f"Lean LSP MCP server ({LEAN_LSP_MCP})", ["uvx", LEAN_LSP_MCP, "--help"]),
+        (f"{agent.harness} (adapter {agent.name})", [agent.executable, "--version"]),
         ("git", ["git", "--version"]),
     ]
+    if cfg["agent"].get("tool_profile", "lsp") == "lsp":
+        checks.insert(4, (f"Lean LSP MCP server ({LEAN_LSP_MCP})", ["uvx", LEAN_LSP_MCP, "--help"]))
     ok = True
     for label, cmd in checks:
         try:
@@ -174,7 +181,8 @@ def doctor(config: Path, repo: Path | None = None, work: Path = WORK, runs: Path
     print(f"{'✓' if work.is_dir() else '•'} replay workspaces: {work}" + ("" if work.is_dir() else " (created on first run)"))
     for w in location_warnings(work, runs, [clone]):
         print(f"⚠ {w}")
-    print("• Claude Code login is not checked (it would spend tokens): run `claude` once interactively if unsure.")
+    print(f"• {agent.harness} login is not checked (it would spend tokens): {agent.login_hint} if unsure, or use "
+          f"--auth api-key with {agent.api_key_env}.")
     return 0 if ok and clone.is_dir() else 1
 
 
@@ -201,6 +209,9 @@ def main(argv: list[str] | None = None) -> int:
                    help="agent authentication: the harness's own login (default), or the adapter's API key "
                         "variable (ANTHROPIC_API_KEY for claude-code), which is then handed to the agent only, "
                         "not to builds or the gate (CI, DESIGN.md §9.3)")
+    r.add_argument("--allow-unenforced-caps", action="store_true",
+                   help="run an adapter that cannot enforce a configured turn or dollar cap (e.g. codex) instead of "
+                        "refusing; the report records which caps were not enforced")
     r.add_argument("--per-run-usd", type=float, help="override the target config's [budget].per_run_usd")
     r.add_argument("--per-run-minutes", type=float, help="override the target config's [budget].per_run_minutes")
     r.add_argument("--keep", action="store_true", help="keep the candidate and gate workspaces")
@@ -211,8 +222,9 @@ def main(argv: list[str] | None = None) -> int:
     g.add_argument("report", type=Path)
     g.add_argument("--audit-focus", help="show these declarations' audit before/after first (substring)")
     g.add_argument("--work", type=Path, default=WORK)
-    d = sub.add_parser("doctor", help="check the setup: Lean toolchain manager, uv, Claude Code, MCP server, target clone")
+    d = sub.add_parser("doctor", help="check the setup: Lean toolchain manager, uv, the agent's CLI, MCP server, target clone")
     d.add_argument("--config", type=Path, default=ROOT / "targets" / "dalek-lean-verify.toml")
+    d.add_argument("--agent", choices=sorted(ADAPTERS), help="agent adapter to check (default: the target config's)")
     d.add_argument("--repo", type=Path, help="local clone of the target repo (default: ~/baif/<github name>)")
     d.add_argument("--work", type=Path, default=WORK)
     d.add_argument("--runs", type=Path, default=ROOT / "runs")
@@ -241,7 +253,7 @@ def main(argv: list[str] | None = None) -> int:
     if a.cmd == "export":
         return export(a.runs, a.to, a.allow_uncommitted)
     if a.cmd == "doctor":
-        return doctor(a.config, a.repo, a.work, a.runs)
+        return doctor(a.config, a.repo, a.work, a.runs, a.agent)
 
     repo_name = a.case.split("/")[0]
     config = a.config or ROOT / "targets" / f"{repo_name}.toml"
@@ -259,12 +271,16 @@ def main(argv: list[str] | None = None) -> int:
         ap.error(f"--auth api-key needs {key_env} in the environment (the {adapter} adapter's key)")
     agent = ADAPTERS[adapter](model=model, lean_threads=cfg["lean"].get("lean_num_threads", 8),
                               **({"api_key": api_key} if api_key else {}))
-    check_capabilities(agent, cfg["agent"].get("tool_profile", "lsp"))
+    unenforced = check_capabilities(agent, cfg["agent"].get("tool_profile", "lsp"),
+                                    None if a.no_agent else agent_budget(cfg["budget"], adapter),
+                                    priced=model in cfg.get("prices", {}), allow_unenforced=a.allow_unenforced_caps)
     overrides = {k: v for k, v in (("per_run_usd", a.per_run_usd), ("per_run_minutes", a.per_run_minutes))
                  if v is not None}
     run = Run(a.case, config, agent, clone, a.work, a.runs, attempt_anyway=a.attempt_anyway,
               gate_human_fix=a.gate_human_fix, keep=a.keep, label=a.label, replay_path=a.replay_record,
-              use_agent=not a.no_agent, budget_overrides=overrides)
+              use_agent=not a.no_agent, budget_overrides=overrides, unenforced_caps=unenforced)
+    if unenforced:
+        run.p.step(f"warning: {agent.name} cannot enforce {' or '.join(unenforced)}; the report will say so")
     if (tool := provenance.tool_code()).get("dirty"):
         run.p.step(f"note: uncommitted changes in the tool ({', '.join(tool['dirty_files'][:3])}…); "
                    "the report will say so")
@@ -282,7 +298,7 @@ def main(argv: list[str] | None = None) -> int:
         by_outcome += f" (inherited sorry {len(inherited)})"
     if incomplete := (rep.get("gate") or {}).get("kernel_replay_incomplete"):
         by_outcome += f" (kernel replay incomplete {len(incomplete)})"
-    run.p.final(f"{rep['verdict'].upper()} · {by_outcome} · {report_mod.usd(t['cost_usd'])} · {fmt_s(t['wall_seconds'])} → "
+    run.p.final(f"{rep['verdict'].upper()} · {by_outcome} · {report_mod.usd(t['cost_usd'], t.get('cost_status'))} · {fmt_s(t['wall_seconds'])} → "
                 f"{m.relative_to(ROOT) if m.is_relative_to(ROOT) else m}")
     if "error" in rep:
         print(f"  {rep['error']['outcome']}: {rep['error']['detail'][:500]}", file=sys.stderr)

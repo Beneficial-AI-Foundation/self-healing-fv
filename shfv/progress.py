@@ -35,7 +35,8 @@ class Progress:
         self._print(f"  {self._stamp()}      → {text}")
 
     def live(self, text: str) -> None:
-        line = f"  {self._stamp()}      … {text}"
+        # One line: an agent's command can span several (a heredoc, a multi-line `lake env lean`).
+        line = f"  {self._stamp()}      … {' '.join(text.split())}"
         if self.tty:
             print("\r\033[K" + line[:150], end="", file=self.s, flush=True)
             self._live = True

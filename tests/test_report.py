@@ -66,3 +66,61 @@ def test_report_says_what_the_tripwire_found():
     assert line.startswith("⚠️ Tripwire: 1 look(s)") and "../../fixed/A.lean" in line
     assert "@someone" not in line and "https://" not in line
     assert "Tripwire: not run" in render(minimal_report())
+
+def test_a_sweep_repair_says_no_model_ran():
+    rep = {"theorem": "T", "file": "A.lean", "decl": "T", "outcome": "repaired", "repaired_by": "sweep",
+           "attempts": []}
+    md = render(minimal_report(verdict="accepted", broken={"proofs": ["T"], "statements": []}, repairs=[rep],
+                               gate={"verdict": "accepted", "checks": {}}))
+    assert "| sweep, no model |" in md and "0 turns" not in md
+
+
+def test_audit_explains_a_statement_change_that_prints_identically():
+    from shfv.pipeline import hidden_difference
+    before = "(p (a (c Std.Default []) (c Chunk [])) (a (c Std.Result [0]) (b0)))"
+    after = "(p (a (c Std.Default [0]) (c Chunk [])) (a (c Std.Result [0]) (b0)))"
+    why = hidden_difference(before, after)
+    assert "universe levels" in why and "`Std.Default.{}` → `Std.Default.{0}`" in why
+    assert "`Std.Old` removed" in hidden_difference("(c Std.Old [])", "(c Std.New [])")
+    stmt = {"decl": "Ns.decode", "module": "M", "before": "Default Chunk → Result", "after": "Default Chunk → Result",
+            "hidden_difference": why}
+    audit = {"outcome": "changed", "summary": {"statements_changed": 1, "definitions_changed": 0, "removed": 0},
+             "axioms_changed": [], "statements_changed": [stmt]}
+    md = render(minimal_report(audit=audit))
+    assert "Prints the same before and after; the fingerprint differs in universe levels" in md
+    assert "before:" not in md.split("Ns.decode")[1].split("</details>")[0]
+    del stmt["hidden_difference"]  # an old record, re-rendered without the snapshots
+    assert "details the printer hides" in render(minimal_report(audit=audit))
+
+
+def test_a_multi_line_agent_command_stays_on_the_live_line():
+    import io
+    from shfv.progress import Progress
+
+    class Tty(io.StringIO):
+        def isatty(self):
+            return True
+    s = Tty()
+    Progress(s).live("turn 3: cat <<'EOF' > X.lean\ntheorem t : True := by\n  trivial\nEOF")
+    assert "\n" not in s.getvalue() and "'EOF' > X.lean theorem t" in s.getvalue()
+
+
+def test_a_bounded_cost_says_so_in_every_table():
+    att = {"adapter": "codex", "model": "m", "stop": "done", "turns": 3, "cost_usd": 0.14, "cost_status": "upper-bound",
+           "seconds": 58}
+    rep = {"theorem": "T", "file": "A.lean", "decl": "T", "outcome": "repaired", "attempts": [att]}
+    md = render(minimal_report(verdict="accepted", broken={"proofs": ["T"], "statements": []}, repairs=[rep],
+                               gate={"verdict": "accepted", "checks": {}}))
+    assert "agent: 3 turns · at most $0.14" in md
+    from shfv.report import usd
+    assert usd(0.5, "partial") == "at least $0.50" and usd(0.5, "computed") == "$0.50" and usd(None) == "cost unknown"
+
+
+def test_render_keeps_the_recorded_comparison_when_the_replay_trees_are_elsewhere(tmp_path):
+    import json
+    from shfv import cli
+    human = {"theorem": "T", "file": "A.lean", "human_diff": "-a\n+b", "bot_diff": "-a\n+b", "similarity_to_human": 1.0}
+    (tmp_path / "run").mkdir()
+    (tmp_path / "run" / "report.json").write_text(json.dumps(minimal_report(human_fix=[human])))
+    md = cli.render(tmp_path / "run" / "report.json", tmp_path / "no-such-work")  # used to raise FileNotFoundError
+    assert md.exists() and json.loads((tmp_path / "run" / "report.json").read_text())["human_fix"][0] == human

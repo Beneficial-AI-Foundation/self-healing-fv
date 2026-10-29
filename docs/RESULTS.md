@@ -38,7 +38,7 @@ Tool `fe5aaff`, gate `2adac41`, the 7 cases where an agent runs: dalek PRs 278 a
 The costs differed:
 - Agent time was about the same: 62m45s for Codex and 63m31s for Claude.
 - Codex wrote 89k output tokens and Claude 213k.
-- Claude cost $18.27. Codex has no price entry, so its cost is unknown.
+- Claude cost $18.27. Codex had no price entry at the time. Priced afterwards from its recorded tokens (OpenAI list prices, read 2026-10-28), Codex cost at most $10.56. That is the long-prompt rate for every token, an upper bound; it would be $5.50 if every request's prompt was under 272K tokens. Codex reports usage per turn, so the real figure is somewhere in between.
 
 **This is not a ranking.** These cases don't separate the agents, since both repaired everything. Each agent ran once, and the dalek cases were used during development.
 
@@ -48,7 +48,7 @@ The human fix comes from the repo's history. Sources: [human-fix-comparison.md](
 
 - **Statements.** At tool `20f70af`, the bot never repaired a theorem whose statement the human changed (0 of 17 dalek repairs).
 - **Identical edits are the obvious minimal ones.** At tool `20f70af`, 3 of 10 comparable agent edits on dalek were identical to the human's. At tool `fe5aaff` (dalek and SPQR), 4 of 38 were identical for each agent. Every identical edit was 1–2 lines long, so none is evidence of recall.
-- **Median similarity to the human edit:** 0.50 at tool `20f70af`. At tool `fe5aaff` it was 0.28 for Codex and 0.34 for Claude.
+- **Median similarity to the human edit:** 0.50 at tool `20f70af`. At tool `fe5aaff` it was 0.28 for Codex and 0.34 for Claude. Since 2026-10-28, a line that an edit only re-indented counts as unchanged. Recomputed on the same records, that gives 0.50, 0.33 and 0.40; identical edits and memorization flags are unchanged (notes in both experiment docs).
 - **The two passes cover different sets,** so their numbers aren't directly comparable: 10 dalek edits at `20f70af`, 38 dalek and SPQR edits at `fe5aaff`.
 - **Run-to-run variance is visible.** On dalek, Claude's edits matched the human's in 3 places at `20f70af` (`square2_spec` in PR 278; `add_spec` and `sub_spec` in PR 734) and in 2 at `fe5aaff` (`square2_spec`, `sub_spec`).
 
