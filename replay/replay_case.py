@@ -474,17 +474,22 @@ def replay(record: dict, repo: Path, work: Path, skip_base: bool) -> dict:
         only in the change (e.g. a helper the same PR added; SPQR #635), transitively."""
         applied = overlay_change(git, miner, base, change, broken, classes=("external",))
         todo, support = list(applied), []
+        # A module may sit under a lean_lib's srcDir (libsignal-verify: Libsignal.* in rust/).
+        libs = lean_libs(git.show(change, lean_path(cfg, "lakefile.toml")), git.show(change, lean_path(cfg, "lakefile.lean")))
+        src_dirs = sorted({src.strip("./") for _, src in libs} | {""})
         while todo:
             text = (broken / todo.pop()).read_text(errors="replace")
             for mod in re.findall(r"^(?:public |private |meta )*import\s+(?:all\s+)?(\S+)", text, re.M):
-                rel = lean_path(cfg, mod.replace(".", "/") + ".lean")
-                if (broken / rel).exists():
+                rels = [lean_path(cfg, (d + "/" if d else "") + mod.replace(".", "/") + ".lean") for d in src_dirs]
+                if any((broken / rel).exists() for rel in rels):
                     continue
-                content = git.show(change, rel)
-                if content is not None:
-                    (broken / rel).parent.mkdir(parents=True, exist_ok=True)
-                    (broken / rel).write_text(content)
-                    support.append(rel); todo.append(rel)
+                for rel in rels:
+                    content = git.show(change, rel)
+                    if content is not None:
+                        (broken / rel).parent.mkdir(parents=True, exist_ok=True)
+                        (broken / rel).write_text(content)
+                        support.append(rel); todo.append(rel)
+                        break
         result["external_support_overlaid"] = support
         return applied + support
     result.update(analyze_broken(broken, proj(broken), cfg, miner, logdir, overlay_external))
