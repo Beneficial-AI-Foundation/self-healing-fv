@@ -1,6 +1,7 @@
 # Replay one historical case on a GitHub-hosted runner and upload the run record (SCI-1717).
-# The prototype's deployment step (DESIGN.md §2.3, §9): manual dispatch only. It never runs on
-# pull requests, posts nothing, and holds no GitHub write token. How to dispatch: docs/ACTIONS.md.
+# The prototype's deployment step (DESIGN.md §2.3, §9): manual dispatch, or called by live.yml for
+# one live change (base and head of a target repo, §3.6). It never runs on pull requests, posts
+# nothing, and holds no GitHub write token. How to dispatch: docs/ACTIONS.md.
 name: replay
 
 on:
@@ -30,13 +31,30 @@ on:
         description: "Runner label"
         required: true
         default: ubuntu-latest
+  # Live input, from live.yml: one change of a target repo, picked there (shfv live-select).
+  workflow_call:
+    inputs:
+      target: {type: string, required: true, description: "Target config name (targets/<target>.toml)"}
+      base: {type: string, required: true, description: "Base commit SHA (the run uses its merge-base with head)"}
+      head: {type: string, required: true, description: "Head commit SHA"}
+      fetch_ref: {type: string, required: true, description: "What to fetch for the head, e.g. refs/pull/<n>/head"}
+      pr: {type: string, default: "", description: "Pull request number, if any"}
+      title: {type: string, default: "", description: "Pull request title, or what the change is"}
+      artifact: {type: string, required: true, description: "Name of the run-record artifact"}
+      agent: {type: boolean, default: true}
+      model: {type: string, default: ""}
+      per_run_usd: {type: string, default: "3"}
+      per_run_minutes: {type: string, default: "300"}
+      runner: {type: string, default: self-healing-fv}
+    secrets:
+      ANTHROPIC_API_KEY: {required: false}
 
 # Read-only token for the checkout of this repo; nothing else (§3.1, §9.3).
 permissions:
   contents: read
 
 concurrency:
-  group: replay-${{ inputs.case }}
+  group: replay-${{ inputs.case || format('live-{0}-{1}', inputs.target, inputs.head) }}
   cancel-in-progress: false
 
 jobs:
@@ -46,6 +64,14 @@ jobs:
     timeout-minutes: 345
     env:
       CASE: ${{ inputs.case }}
+      # Live input (workflow_call); empty on a dispatched replay. Passed as variables, never pasted
+      # into scripts: the title is free text from the target repo.
+      TARGET: ${{ inputs.target }}
+      BASE_SHA: ${{ inputs.base }}
+      HEAD_SHA: ${{ inputs.head }}
+      FETCH_REF: ${{ inputs.fetch_ref }}
+      PR: ${{ inputs.pr }}
+      TITLE: ${{ inputs.title }}
       AGENT: ${{ inputs.agent }}
       MODEL: ${{ inputs.model }}
       PER_RUN_USD: ${{ inputs.per_run_usd }}
@@ -55,7 +81,16 @@ jobs:
     steps:
       - name: Check inputs
         run: |
-          [[ "$CASE" =~ ^[a-z0-9-]+/[0-9a-f]{8}$ ]] || { echo "::error::bad case id: $CASE"; exit 1; }
+          if [ -n "$TARGET" ]; then
+            [[ "$TARGET" =~ ^[a-z0-9-]+$ && "$BASE_SHA" =~ ^[0-9a-f]{40}$ && "$HEAD_SHA" =~ ^[0-9a-f]{40}$ \
+               && "$PR" =~ ^[0-9]*$ && "$FETCH_REF" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]*$ ]] || {
+              echo "::error::bad live input"; exit 1; }
+            case_dir="$TARGET-live-${HEAD_SHA:0:8}"
+          else
+            [[ "$CASE" =~ ^[a-z0-9-]+/[0-9a-f]{8}$ ]] || { echo "::error::bad case id: $CASE"; exit 1; }
+            case_dir="${CASE/\//-}"
+          fi
+          echo "CASE_DIR=$case_dir" >> "$GITHUB_ENV"
           [[ "$MODEL" =~ ^[a-z0-9.-]*$ ]] || { echo "::error::bad model: $MODEL"; exit 1; }
           [[ "$PER_RUN_USD" =~ ^[0-9]+(\.[0-9]+)?$ && "$PER_RUN_MINUTES" =~ ^[0-9]+$ ]] || {
             echo "::error::caps must be numbers"; exit 1; }
@@ -118,19 +153,29 @@ jobs:
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
         with:
           path: ~/.cache/self-healing-fv
-          key: lean4checker-${{ runner.os }}-${{ inputs.case }}-${{ hashFiles('gates/kernel.py') }}
+          key: lean4checker-${{ runner.os }}-${{ inputs.case || inputs.target }}-${{ hashFiles('gates/kernel.py') }}
           restore-keys: lean4checker-${{ runner.os }}-
 
       # Full history: the replay takes the base, change and fix commits from it. The default Lean
       # toolchain (for `shfv doctor`) is the change commit's, which the replay needs anyway.
+      # Live: the head is fetched by `fetch_ref` (refs/pull/<n>/head also serves PRs from forks), and
+      # the base is its merge-base with `base`, as `shfv repair --base --head` computes it.
       - name: Clone the target repo
         id: clone
         run: |
+          name="${TARGET:-${CASE%%/*}}"
           read -r repo root < <(python3 -c 'import sys, tomllib; c = tomllib.load(open(sys.argv[1], "rb"))
-          print(c["github"], c["lean"].get("repo_lean_root", "") or ".")' "targets/${CASE%%/*}.toml")
+          print(c["github"], c["lean"].get("repo_lean_root", "") or ".")' "targets/$name.toml")
           clone="$HOME/baif/${repo##*/}"
           git clone --quiet "https://github.com/$repo" "$clone"
           git -C "$clone" log -1 --format='%h %cs %s'
+          if [ -n "$TARGET" ]; then
+            git -C "$clone" fetch --quiet origin "$FETCH_REF"
+            git -C "$clone" cat-file -e "$HEAD_SHA^{commit}" || { echo "::error::$FETCH_REF did not bring $HEAD_SHA"; exit 1; }
+            base=$(git -C "$clone" merge-base "$BASE_SHA" "$HEAD_SHA"); change="$HEAD_SHA"
+            { echo "## Live input"; echo; echo "\`$repo\` ${PR:+PR $PR }head \`${HEAD_SHA:0:8}\`, merge-base \`${base:0:8}\`"; } \
+              | tee -a "$GITHUB_STEP_SUMMARY"
+          else
           read -r base change < <(python3 - "data/mined/${CASE%%/*}.jsonl" "${CASE#*/}" <<'EOF'
           import json, sys
           for line in open(sys.argv[1]):
@@ -139,11 +184,12 @@ jobs:
                   print(r["base_commit"], r["change_commit"]); break
           EOF
           )
+          fi
           elan default "$(git -C "$clone" show "$change:$root/lean-toolchain" 2>/dev/null || echo leanprover/lean4:stable)"
           # The replay store's cache key: the case's toolchains and Lake manifests (base and change).
           pins=$(for c in "$base" "$change"; do for f in lean-toolchain lake-manifest.json; do
             git -C "$clone" show "$c:$root/$f" 2>/dev/null; done; done | sha256sum | cut -c1-16)
-          { echo "repo=${CASE%%/*}"; echo "pins=$pins"; echo "base=$base"; echo "change=$change"; echo "root=$root"
+          { echo "repo=$name"; echo "pins=$pins"; echo "base=$base"; echo "change=$change"; echo "root=$root"
             echo "clone=$clone"; } >> "$GITHUB_OUTPUT"
 
       # The replay store (replay/replay_case.py `Store`): built Lake packages (Mathlib, Aeneas, ...) by
@@ -188,7 +234,14 @@ jobs:
           # The key reaches this step only when the agent is on; shfv hands it to the agent alone.
           ANTHROPIC_API_KEY: ${{ inputs.agent && secrets.ANTHROPIC_API_KEY || '' }}
         run: |
-          args=(--case "$CASE" --per-run-usd "$PER_RUN_USD" --per-run-minutes "$PER_RUN_MINUTES" --label actions)
+          if [ -n "$TARGET" ]; then
+            args=(--target "$TARGET" --base "$BASE_SHA" --head "$HEAD_SHA")
+            [ -z "$PR" ] || args+=(--pr "$PR")
+            [ -z "$TITLE" ] || args+=(--title "$TITLE")
+          else
+            args=(--case "$CASE")
+          fi
+          args+=(--per-run-usd "$PER_RUN_USD" --per-run-minutes "$PER_RUN_MINUTES" --label actions)
           if [ "$AGENT" = "true" ]; then
             [ -n "$ANTHROPIC_API_KEY" ] || { echo "::error::agent is on but the ANTHROPIC_API_KEY secret is not set"; exit 1; }
             args+=(--auth api-key)
@@ -205,7 +258,7 @@ jobs:
         if: always()
         run: |
           kill "$(cat "$STATS/sampler.pid" 2>/dev/null)" 2>/dev/null || true
-          run_dir=$(readlink -f "runs/${CASE/\//-}/latest" 2>/dev/null || true)
+          run_dir=$(readlink -f "runs/$CASE_DIR/latest" 2>/dev/null || true)
           echo "RUN_DIR=$run_dir" >> "$GITHUB_ENV"
           python3 .github/scripts/runner_stats.py summarize --samples "$STATS/samples.csv" --log "$STATS/shfv.log" \
             --start "$(cat "$STATS/start" 2>/dev/null || date +%s)" ${run_dir:+--report "$run_dir/report.json"} \
@@ -220,7 +273,7 @@ jobs:
             { echo; echo "## Report"; echo; cat "$run_dir/report.md"; } >> "$GITHUB_STEP_SUMMARY"
           fi
           mkdir -p "$STATS/replay-logs"
-          cp -R "$SHFV_WORK/${CASE/\//-}/logs/." "$STATS/replay-logs/" 2>/dev/null || true
+          cp -R "$SHFV_WORK/$CASE_DIR/logs/." "$STATS/replay-logs/" 2>/dev/null || true
 
       # Keep only what this case uses (its packages and its base and change builds), so entries
       # restored by prefix from other cases do not pile up in the next save (10 GB per repo). Mathlib
@@ -259,17 +312,19 @@ jobs:
           key: ${{ steps.store.outputs.cache-primary-key }}
 
       # The run record (§3.3 S7): report.json, report.md, and the agent's prompts and transcripts.
+      # Live, its name (live-<target>-<head8>) is how live.yml knows a head was already run.
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         if: always() && env.RUN_DIR != ''
         with:
-          name: run-record-${{ github.run_id }}-${{ github.run_attempt }}
+          name: ${{ inputs.artifact || format('run-record-{0}-{1}', github.run_id, github.run_attempt) }}
           path: ${{ env.RUN_DIR }}
           if-no-files-found: warn
+          overwrite: true
 
       # What the runner went through: pipeline output, resource samples, replay build logs.
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         if: always()
         with:
-          name: runner-stats-${{ github.run_id }}-${{ github.run_attempt }}
+          name: runner-stats-${{ inputs.artifact || 'replay' }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ env.STATS }}
           if-no-files-found: warn

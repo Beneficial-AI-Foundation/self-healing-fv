@@ -2,7 +2,7 @@
 
 The prototype's deployment step (DESIGN.md §2.3, §9; Linear SCI-1717): one historical case, replayed on a GitHub-hosted runner by [`.github/workflows/replay.yml`](../.github/workflows/replay.yml), with the run record uploaded as an artifact. It is the same `shfv repair` as on a laptop ([CLI.md](CLI.md)), so a run here measures what the runner can do: Lean and Mathlib setup, disk, memory, and the time of the clean rebuild (G3) and kernel replay (G5).
 
-The workflow runs only when someone dispatches it by hand. It never runs on pull requests, posts nothing, and holds no GitHub write token.
+The workflow runs only when someone dispatches it by hand, or when [`live.yml`](../.github/workflows/live.yml) calls it for a live change (section "Live runs" below). It never runs on pull requests, posts nothing, and holds no GitHub write token.
 
 ## Dispatch
 
@@ -35,6 +35,50 @@ security find-generic-password -s anthropic-api-key -w | gh secret set ANTHROPIC
 ```
 
 Give the key its own spend limit with the provider (§9.3): that is the only limit that holds across runs.
+
+## Live runs (silent)
+
+[`.github/workflows/live.yml`](../.github/workflows/live.yml) is the step before shadow mode (DESIGN.md §3.6, §9): it runs the pipeline on the configured targets' open PRs instead of mined cases, and keeps the results here. It posts nothing to any target repo and needs no permission there: the targets are public, and this repo's own token reads them. Its permissions are `contents: read` and `actions: read` (the latter to list this repo's artifacts).
+
+**When it runs:** daily at 03:17 UTC (`schedule`), and on manual dispatch.
+
+**What it picks** (`shfv live-select`, `shfv/live.py`), for each target config with `[live] enabled = true` (dalek and SPQR):
+
+| Rule | Why |
+|---|---|
+| The PR's `author_association` is `OWNER`, `MEMBER` or `COLLABORATOR` | Building Lean runs the PR's code on a runner that holds a model key (DESIGN.md §9.2) |
+| Not a draft | |
+| The `[live] lean_check` check (`Build Lean Project`) failed or timed out on the head SHA, in every finished run of it, none still running | Something to repair. Pending: the next run looks again. |
+| The `[live] extraction_check` check (`Check Aeneas Extraction`) passed on the same head SHA | The bot uses the extracted code as committed, which is right only if it matches the Rust (S1). Otherwise the PR is skipped and the summary says why. |
+| No unexpired artifact `live-<target>-<head8>` in this repo | One run per head SHA, also after a failed run. A new push gives a new head. |
+| At most `max_runs` (2) per workflow run, oldest PR first | The rest wait for the next run |
+
+The `select` job's summary lists every open PR it looked at and the reason it was or was not run.
+
+**How each picked PR runs:** `live.yml` calls `replay.yml` with the target, the PR's base and head SHAs, and `refs/pull/<n>/head` to fetch (which also serves PRs from forks). One at a time (`max-parallel: 1`), and one `live` workflow at a time. Everything else is the replay job above: the same runner setup, bubblewrap, key handling, resource sampler and replay store cache (keyed on the head). Scheduled runs use the agent with a $3 per-run cap and 300 minutes; the runner is the target's `[live] runner` (`self-healing-fv`, the 8-core runner).
+
+**What it uploads:**
+- **`live-<target>-<head8>`**: the run record (`report.json`, `report.md`, each attempt's prompt and transcript). `report.md` is what shadow mode would post. The name is also the "already run" marker.
+- **`runner-stats-live-<target>-<head8>-…`**: as for a replay.
+- The job summary: the live input (repo, PR, head, merge-base), resources and `report.md`.
+
+**Dispatch:**
+
+```
+gh workflow run live.yml -R Beneficial-AI-Foundation/self-healing-fv                       # pick PRs now
+gh workflow run live.yml -R Beneficial-AI-Foundation/self-healing-fv \
+  -f target=dalek-lean-verify -f ref=my-branch                                            # one ref, PR or not
+gh workflow run live.yml -R Beneficial-AI-Foundation/self-healing-fv -f agent=false        # sweep only, no key
+```
+
+| Input | Default | Meaning |
+|---|---|---|
+| `target` | all with `[live]` enabled | Only this target; needed with `ref` |
+| `ref` | – | A branch, tag or SHA of the target to run on, instead of picking PRs. It need not be a PR, and the author, draft, Lean-check and already-run rules do not apply. The base is the default branch, or the PR's base if the ref is an open PR's head. |
+| `skip_checks` | off | With `ref`: run even if the extraction check did not pass on it |
+| `agent` | on | Off: the no-model sweep only |
+| `per_run_usd`, `per_run_minutes` | `3`, `300` | Per-run caps, as for a replay |
+| `max_runs` | `2` | PRs to run at most |
 
 ## What a run produces
 

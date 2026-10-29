@@ -52,6 +52,15 @@ per_theorem_usd = false
 # The no-model sweep (§3.3 S4) before any agent: leftover tactics, timeouts, unsolved goals.
 sweep = true
 
+[live]
+# The silent live workflow (.github/workflows/live.yml, shfv/live.py): open PRs whose Lean check
+# failed on the head, if the extraction check passed on the same head (S1). Check names as the
+# repo's CI reports them. A dalek run needs the 8-core larger runner (docs/ACTIONS.md, run 1).
+enabled = true
+lean_check = "Build Lean Project"
+extraction_check = "Check Aeneas Extraction"
+runner = "self-healing-fv"
+
 # USD per million tokens, used to compute cost from token counts for every adapter.
 # Anthropic first-party list prices from https://platform.claude.com/docs/en/about-claude/pricing
 # (read 2026-10-26). They reproduce Claude Code's own reported cost exactly on the 2026-10-23 pilot
