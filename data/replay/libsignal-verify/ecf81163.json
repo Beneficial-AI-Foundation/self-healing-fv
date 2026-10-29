@@ -1,0 +1,184 @@
+{
+ "case_id": "libsignal-verify/ecf81163",
+ "change_pr_url": "https://github.com/Beneficial-AI-Foundation/libsignal-verify/pull/17",
+ "replayed_at": "2026-10-29T09:35:28+00:00",
+ "machine": {
+  "cpus": 18
+ },
+ "timing": {
+  "export_s": 4.4,
+  "base_fixed_wall_s": 45,
+  "broken_setup_s": 22.7,
+  "broken_rounds_s": 75,
+  "total_s": 148
+ },
+ "fixed": {
+  "ok": true,
+  "stage": "build",
+  "timings": {
+   "seed_s": 0.0,
+   "cache_lock_wait_s": 15.0,
+   "cache_get_s": 15,
+   "build_s": 15,
+   "store_s": 0.0
+  },
+  "reuse": {
+   "packages_reused": [],
+   "packages_fetched": [],
+   "project_build_seeded_from": null
+  },
+  "orphaned_pins": [],
+  "jobs": 1745,
+  "hung": [],
+  "errors": [],
+  "tail": ""
+ },
+ "base": {
+  "ok": true,
+  "stage": "build",
+  "timings": {
+   "seed_s": 0.0,
+   "cache_lock_wait_s": 0.0,
+   "cache_get_s": 15,
+   "build_s": 15,
+   "store_s": 0.0
+  },
+  "reuse": {
+   "packages_reused": [],
+   "packages_fetched": [],
+   "project_build_seeded_from": null
+  },
+  "orphaned_pins": [],
+  "jobs": 1714,
+  "hung": [],
+  "errors": [],
+  "tail": ""
+ },
+ "overlay": [
+  ".github/workflows/aeneas.yml",
+  "lake-manifest.json",
+  "lakefile.toml",
+  "lean-toolchain",
+  "rust/Libsignal/Translated/Core/Funs.lean",
+  "rust/Libsignal/Translated/Core/Types.lean",
+  "rust/Libsignal/Translated/Crypto/Funs.lean",
+  "rust/Libsignal/Translated/Crypto/Types.lean",
+  "rust/Libsignal/Translated/Protocol/Funs.lean",
+  "rust/Libsignal/Translated/Protocol/Types.lean",
+  "rust/Libsignal/Translated/RatchetState/Funs.lean",
+  "rust/Libsignal/Translated/RatchetState/Types.lean",
+  "rust/aeneas-config.cbc.yml",
+  "rust/aeneas-config.core.yml",
+  "rust/aeneas-config.crypto.yml",
+  "rust/aeneas-config.protocol.yml",
+  "rust/aeneas-config.ratchet-state.yml",
+  "rust/aeneas-config.yml",
+  "scripts/README.md",
+  "scripts/aeneas-extract.ts",
+  "scripts/aeneas-install.ts",
+  "scripts/lib/archive.ts",
+  "scripts/lib/config.ts",
+  "scripts/lib/installation.ts",
+  "scripts/lib/lean-toolchain.ts",
+  "scripts/lib/paths.ts",
+  "scripts/lib/shell.ts",
+  "scripts/lib/tweaks.ts",
+  "scripts/src-diff.ts",
+  "src-modifications.diff"
+ ],
+ "lean_lib_roots_overlaid": [
+  "Protocols.lean"
+ ],
+ "external_support_overlaid": [],
+ "external_models_overlaid": [
+  "rust/Libsignal/Translated/Core/CurveProvider.lean",
+  "rust/Libsignal/Translated/Core/FunsExternal.lean",
+  "rust/Libsignal/Translated/Crypto/FunsExternal.lean",
+  "rust/Libsignal/Translated/Crypto/TypesExternal.lean",
+  "rust/Libsignal/Translated/Protocol/FunsExternal.lean",
+  "rust/Libsignal/Translated/Protocol/TypesExternal.lean",
+  "rust/Libsignal/Translated/RatchetState/FunsExternal.lean",
+  "rust/Libsignal/Translated/RatchetState/TypesExternal.lean",
+  "rust/Libsignal/Translated/Shared/Alloc.lean",
+  "rust/Libsignal/Translated/Shared/Core.lean"
+ ],
+ "extraction_errors": [],
+ "broken_rounds": [
+  {
+   "round": 1,
+   "ok": false,
+   "errors_n": 4,
+   "build_s": 15,
+   "jobs": 1738
+  },
+  {
+   "round": 2,
+   "ok": false,
+   "errors_n": 1,
+   "build_s": 30,
+   "jobs": 1739
+  },
+  {
+   "round": 3,
+   "ok": false,
+   "errors_n": 1,
+   "build_s": 15,
+   "jobs": 1739
+  },
+  {
+   "round": 4,
+   "ok": true,
+   "errors_n": 0,
+   "build_s": 15,
+   "jobs": 1739
+  }
+ ],
+ "broken_green_after_sorry": true,
+ "broken_proofs": [
+  "rust/Libsignal/Spec/Core/Address/ServiceIdBinary.lean::service_id_binary_spec",
+  "rust/Libsignal/Spec/Core/Address/ServiceIdFixedWidthBinary.lean::service_id_fixed_width_binary_spec"
+ ],
+ "broken_proofs_detail": [
+  {
+   "file": "rust/Libsignal/Spec/Core/Address/ServiceIdFixedWidthBinary.lean",
+   "line": 88,
+   "decl": "service_id_fixed_width_binary_spec",
+   "where": "body",
+   "kind": "unsolved-goals",
+   "msg": "unsolved goals\nself : ServiceId\nsik : ServiceIdKind\n_✝⁶ : [> let sik ← self.kind <]\nsik_post : ∀ (aci : SpecificServiceId 0#u8), self = Aci aci → sik = ServiceIdKind.Aci\nsik_post1 : ∀ (pni : SpecificServiceId 1#u8), self = Pni pni → sik = ServiceIdKind.Pni\ni : U8\n_✝⁵ : [> let i ← U8.Insts.CoreConvertFromServiceIdKind.from sik <]\ni_post : sik = ServiceIdKind.Aci → i = 0#u8\ni_post1 : sik = ServiceIdKind.Pni → i = 1#u8\nresult1 : Std.Array U8 17#usize\n_✝⁴ : [> let result1 ← (Array.repeat 17#usize 0#u8).update 0#usize i <]\nresult1_post : result1 = (Array.repeat 17#usize 0#u8).set 0#usize i\ns : Slic",
+   "round": 2,
+   "decl_kind": "theorem"
+  },
+  {
+   "file": "rust/Libsignal/Spec/Core/Address/ServiceIdBinary.lean",
+   "line": 68,
+   "decl": "service_id_binary_spec",
+   "where": "body",
+   "kind": "unsolved-goals",
+   "msg": "unsolved goals\nself : ServiceId\naci : SpecificServiceId 0#u8\nh✝ : self = Aci aci\ns : Slice U8\n_✝ : [> let s ← lift aci.uuid.bytes.to_slice <]\nresult : alloc.vec.Vec U8\n_ : [> let result ← alloc.slice.Slice.to_vec core.clone.CloneU8 s <]\ns_post✝ : result.slice = aci.uuid.bytes.to_slice\ns_post : s = aci.uuid.bytes.to_slice\n⊢ ↑result = ↑aci.uuid.bytes\n\nself : ServiceId\na✝ : SpecificServiceId 1#u8\nh✝ : self = Pni a✝\na : Std.Array U8 17#usize\n_✝¹ : [> let a ← (Pni a✝).service_id_fixed_width_binary <]\ns : Slice U8\n_✝ : [> let s ← lift a.to_slice <]\nresult : alloc.vec.Vec U8\n_ : [> let result ← alloc",
+   "round": 3,
+   "decl_kind": "theorem"
+  }
+ ],
+ "statement_errors": [],
+ "cascades": [],
+ "header_errors": [],
+ "statement_broken": [],
+ "definition_broken": [],
+ "needs_statement_change": false,
+ "file_errors": [],
+ "blocked_modules": [],
+ "timeouts": [],
+ "blocked_files": [],
+ "verdict": "break confirmed",
+ "comparison": {
+  "predicted_n": 2,
+  "actual_n": 2,
+  "true_positive": [
+   "rust/Libsignal/Spec/Core/Address/ServiceIdBinary.lean::service_id_binary_spec",
+   "rust/Libsignal/Spec/Core/Address/ServiceIdFixedWidthBinary.lean::service_id_fixed_width_binary_spec"
+  ],
+  "false_positive": [],
+  "false_negative": []
+ }
+}

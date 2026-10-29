@@ -99,6 +99,24 @@ def overlay_change(git: Git, miner: Miner, base: str, change: str, dest: Path,
     return applied
 
 
+def overlay_new_lib_roots(git: Git, cfg: dict, change: str, dest: Path) -> list[str]:
+    """The broken state takes the change's lakefile, so it builds the change's lean_libs. A library
+    the change added has a root module the base lacks (libsignal-verify PR 17 adds `Protocols`, a
+    header-only `Protocols.lean`); copy such roots from the change. Only missing roots are copied:
+    an existing root is a proof-side file, kept from the base."""
+    libs = lean_libs(git.show(change, lean_path(cfg, "lakefile.toml")), git.show(change, lean_path(cfg, "lakefile.lean")))
+    applied = []
+    for name, src in libs:
+        d = src.strip("./")
+        rel = lean_path(cfg, (d + "/" if d else "") + name.replace(".", "/") + ".lean")
+        content = None if (dest / rel).exists() else git.show(change, rel)
+        if content is not None:
+            (dest / rel).parent.mkdir(parents=True, exist_ok=True)
+            (dest / rel).write_text(content)
+            applied.append(rel)
+    return applied
+
+
 # Copy-on-write where the filesystem has it: APFS `cp -c`; GNU `cp --reflink=auto` (XFS, Btrfs),
 # a plain copy elsewhere (ext4 on GitHub's runners). GNU `cp -c` means something else.
 CP_COW = ["cp", "-c", "-R"] if sys.platform == "darwin" else ["cp", "-a", "--reflink=auto"]
@@ -466,6 +484,7 @@ def replay(record: dict, repo: Path, work: Path, skip_base: bool) -> dict:
         shutil.rmtree(broken)
     export(git, base, broken)
     result["overlay"] = overlay_change(git, miner, base, change, broken)
+    result["lean_lib_roots_overlaid"] = overlay_new_lib_roots(git, cfg, change, broken)
     clone_lake_dir(proj(root / "fixed") / ".lake", proj(broken) / ".lake")
     freshen(broken)
     timing["broken_setup_s"] = round(time.time() - t0, 1)
