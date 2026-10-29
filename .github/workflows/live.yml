@@ -6,8 +6,7 @@
 name: live
 
 on:
-  schedule:
-    - cron: "17 3 * * *"  # daily, 03:17 UTC
+  # Dispatch only: the daily cron ("17 3 * * *") is parked until there is a multi-repo need.
   workflow_dispatch:
     inputs:
       target:
@@ -60,7 +59,7 @@ jobs:
       TARGET: ${{ inputs.target }}
       REF: ${{ inputs.ref }}
       SKIP_CHECKS: ${{ inputs.skip_checks }}
-      MAX_RUNS: ${{ inputs.max_runs || '2' }}
+      MAX_RUNS: ${{ inputs.max_runs }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
@@ -96,9 +95,8 @@ jobs:
       title: ${{ matrix.title }}
       artifact: ${{ matrix.artifact }}
       runner: ${{ matrix.runner }}
-      # Scheduled runs have no inputs: the agent is on, with the default caps.
-      agent: ${{ github.event_name == 'schedule' || inputs.agent }}
-      per_run_usd: ${{ inputs.per_run_usd || '3' }}
-      per_run_minutes: ${{ inputs.per_run_minutes || '300' }}
+      agent: ${{ inputs.agent }}
+      per_run_usd: ${{ inputs.per_run_usd }}
+      per_run_minutes: ${{ inputs.per_run_minutes }}
     secrets:
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}

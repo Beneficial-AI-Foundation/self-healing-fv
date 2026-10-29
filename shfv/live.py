@@ -148,8 +148,9 @@ def run_entry(target: str, cfg: dict, head: str, base: str, fetch_ref: str, pr: 
 
 def checks_skip(api, cfg: dict, head: str, lean_required: bool) -> str | None:
     """Why a head is skipped on its checks, or None to run it. The Lean check must have failed
-    (scheduled runs only), and the extraction check must have passed on the same head: the bot
-    uses the extracted code as committed, which is right only if it matches the Rust (S1)."""
+    (when picking PRs, not for a given ref), and the extraction check must have passed on the same
+    head: the bot uses the extracted code as committed, which is right only if it matches the Rust
+    (S1)."""
     live, repo = cfg["live"], cfg["github"]
     if lean_required:
         lean = check_state(api, repo, head, live["lean_check"])
@@ -167,8 +168,9 @@ def checks_skip(api, cfg: dict, head: str, lean_required: bool) -> str | None:
 
 
 def select(api, self_repo: str, targets: dict[str, dict], max_runs: int = 2) -> tuple[list[dict], list[dict]]:
-    """Scheduled selection: (runs, decisions). `decisions` has one row per open PR looked at, with
-    the reason it was or was not picked; at most `max_runs` are picked, oldest PR first."""
+    """PR selection (dispatch without a ref): (runs, decisions). `decisions` has one row per open
+    PR looked at, with the reason it was or was not picked; at most `max_runs` are picked, oldest PR
+    first."""
     runs, decisions = [], []
     for name, cfg in targets.items():
         repo = cfg["github"]
@@ -237,7 +239,7 @@ def main_select(target: str | None, ref: str | None, skip_checks: bool, max_runs
             raise SystemExit("--ref needs --target")
         with open(ROOT / "targets" / f"{target}.toml", "rb") as fh:
             cfg = tomllib.load(fh)
-        if "live" not in cfg:  # a dispatch may try a target the schedule leaves out, not one without checks
+        if "live" not in cfg:  # a ref may be tried on a target PR selection leaves out, not one without checks
             raise SystemExit(f"targets/{target}.toml has no [live] section")
         runs, decisions = select_ref(api, target, cfg, ref, skip_checks)
     else:

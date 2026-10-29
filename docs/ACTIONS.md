@@ -40,7 +40,7 @@ Give the key its own spend limit with the provider (§9.3): that is the only lim
 
 [`.github/workflows/live.yml`](../.github/workflows/live.yml) is the step before shadow mode (DESIGN.md §3.6, §9): it runs the pipeline on the configured targets' open PRs instead of mined cases, and keeps the results here. It posts nothing to any target repo and needs no permission there: the targets are public, and this repo's own token reads them. Its permissions are `contents: read` and `actions: read` (the latter to list this repo's artifacts).
 
-**When it runs:** daily at 03:17 UTC (`schedule`), and on manual dispatch.
+**When it runs:** on manual dispatch only. The daily `schedule` trigger is parked until there is a multi-repo need; a dispatch without `ref` does what a scheduled run would.
 
 **What it picks** (`shfv live-select`, `shfv/live.py`), for each target config with `[live] enabled = true` (dalek and SPQR):
 
@@ -51,11 +51,11 @@ Give the key its own spend limit with the provider (§9.3): that is the only lim
 | The `[live] lean_check` check (`Build Lean Project`) failed or timed out on the head SHA, in every finished run of it, none still running | Something to repair. Pending: the next run looks again. |
 | The `[live] extraction_check` check (`Check Aeneas Extraction`) passed on the same head SHA | The bot uses the extracted code as committed, which is right only if it matches the Rust (S1). Otherwise the PR is skipped and the summary says why. |
 | No unexpired artifact `live-<target>-<head8>` in this repo | One run per head SHA, also after a failed run. A new push gives a new head. |
-| At most `max_runs` (2) per workflow run, oldest PR first | The rest wait for the next run |
+| At most `max_runs` (2) per workflow run, oldest PR first | The rest wait for the next dispatch |
 
 The `select` job's summary lists every open PR it looked at and the reason it was or was not run.
 
-**How each picked PR runs:** `live.yml` calls `replay.yml` with the target, the PR's base and head SHAs, and `refs/pull/<n>/head` to fetch (which also serves PRs from forks). One at a time (`max-parallel: 1`), and one `live` workflow at a time. Everything else is the replay job above: the same runner setup, bubblewrap, key handling, resource sampler and replay store cache (keyed on the head). Scheduled runs use the agent with a $3 per-run cap and 300 minutes; the runner is the target's `[live] runner` (`self-healing-fv`, the 8-core runner).
+**How each picked PR runs:** `live.yml` calls `replay.yml` with the target, the PR's base and head SHAs, and `refs/pull/<n>/head` to fetch (which also serves PRs from forks). One at a time (`max-parallel: 1`), and one `live` workflow at a time. Everything else is the replay job above: the same runner setup, bubblewrap, key handling, resource sampler and replay store cache (keyed on the head). By default the agent is on, with a $3 per-run cap and 300 minutes; the runner is the target's `[live] runner` (`self-healing-fv`, the 8-core runner).
 
 **What it uploads:**
 - **`live-<target>-<head8>`**: the run record (`report.json`, `report.md`, each attempt's prompt and transcript). `report.md` is what shadow mode would post. The name is also the "already run" marker.

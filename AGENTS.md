@@ -31,7 +31,7 @@ The prototype replays historical cases locally and writes a report; it opens no 
 | `replay/` | `replay_case.py` builds a case's broken state and records which theorems fail; `evaluate.py` scores replays; `export_results.py` writes `data/`; `generate_aeneas_upgrade.py` makes SymCrypt's generated cases. |
 | `targets/` | One TOML config per target repo: build targets, protected files, agent, model, budgets, prices. |
 | `tests/` | Unit tests for the pipeline; `tests/gate/` has the gate tests, including the planted-violation tests, on a toy Lean project in `tests/gate/fixture/`. |
-| `.github/` | `workflows/replay.yml`, the manually dispatched replay on a hosted runner (also called for one live change); `workflows/live.yml`, the silent live runs on open PRs (schedule and dispatch); `scripts/runner_stats.py` samples memory and disk during them |
+| `.github/` | `workflows/replay.yml`, the manually dispatched replay on a hosted runner (also called for one live change); `workflows/live.yml`, the silent live runs on open PRs (manual dispatch; the cron is parked); `scripts/runner_stats.py` samples memory and disk during them |
 | `data/` | The committed dataset: `mined/<repo>.jsonl` case records, `replay/<repo>/<sha8>.json` replay ground truth. |
 
 Not in git: `runs/` (run records), `data/raw/`, clones of target repos, `.lake/`. Replay workspaces live outside this repo, in `~/baif/shfv-work/` (or `$SHFV_WORK`), so an agent working in one does not find this repo by walking up (`docs/DESIGN.md` §8.5); older ones may still be in `work/`.
