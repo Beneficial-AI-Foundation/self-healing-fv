@@ -148,6 +148,25 @@ def location_warnings(work: Path, runs: Path, clones: list[Path]) -> list[str]:
     return out
 
 
+def layout_check(clone: Path, cfg: dict) -> bool:
+    """Which of the clone's tracked Lean files the target config audits or protects (shfv/layout.py).
+    False only when the gate would refuse the tree; unprotected-looking files are warnings."""
+    from gates import proc
+    from . import layout
+    root = cfg["lean"].get("repo_lean_root", "").strip("/")
+    r = proc.run(["git", "ls-files", "-z", "--", f"{root}/*.lean" if root else "*.lean"], clone, timeout=120)
+    if r.returncode != 0:
+        print(f"✗ layout: git ls-files failed in {clone}: {r.stderr.strip()[:200]}")
+        return False
+    tracked = [f.removeprefix(root + "/" if root else "") for f in r.stdout.split("\0") if f]
+    res = layout.check(clone / root, cfg, tracked)
+    lines = layout.summary(res)
+    print(f"{'✗' if res['problems'] else '✓'} layout: {lines[0]}")
+    for line in lines[1:]:
+        print(line)
+    return not res["problems"]
+
+
 def doctor(config: Path, repo: Path | None = None, work: Path = WORK, runs: Path = ROOT / "runs",
            adapter: str | None = None) -> int:
     """Check what a run needs before spending anything (review finding 16), for the target's agent
@@ -181,6 +200,8 @@ def doctor(config: Path, repo: Path | None = None, work: Path = WORK, runs: Path
     print(f"{'✓' if work.is_dir() else '•'} replay workspaces: {work}" + ("" if work.is_dir() else " (created on first run)"))
     for w in location_warnings(work, runs, [clone]):
         print(f"⚠ {w}")
+    if clone.is_dir():
+        ok &= layout_check(clone, cfg)
     print(f"• {agent.harness} login is not checked (it would spend tokens): {agent.login_hint} if unsure, or use "
           f"--auth api-key with {agent.api_key_env}.")
     return 0 if ok and clone.is_dir() else 1

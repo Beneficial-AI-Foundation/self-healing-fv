@@ -20,7 +20,7 @@ From the repo root:
 
 ```
 uv sync
-uv run shfv doctor       # checks elan, lake, uv, the agent's CLI, the Lean LSP MCP server, the target clone
+uv run shfv doctor       # checks elan, lake, uv, the agent's CLI, the Lean LSP MCP server, the target clone and its layout
 uv run pytest            # about 2 minutes; builds a small Lean project, checks the gate and the pipeline
 ```
 
@@ -285,7 +285,12 @@ The audit is also a gate command: `gate audit --config T.toml --base B.json --he
 
 ## 7. Configuration and budgets
 
-A target repo is described by `targets/<repo>.toml`: `dalek-lean-verify`, `spqr` and `symcrypt` so far. `shfv doctor --config targets/<repo>.toml --repo PATH` checks the setup for one of them.
+A target repo is described by `targets/<repo>.toml`: `dalek-lean-verify`, `spqr`, `symcrypt` and `libsignal-verify` so far. `shfv doctor --config targets/<repo>.toml --repo PATH` checks the setup for one of them.
+
+`doctor` also checks the config's **layout** against the clone. Every tracked `.lean` file in the Lake project gets one class: audited (under `source_roots`, or a root module's file), trusted model, extracted, build config, unclassified, or ignored (outside the libraries the root modules import: scripts, tests, other `lean_lib`s). Modules are looked up where the gate looks them up (`lake env`, then `[lean] src_dirs`), and Lake is asked only if the dependencies are already fetched. A ✗ means the gate would refuse the tree: a root module has no file, or one top-level name sits in two source directories. A ⚠ is a heuristic warning, never a failure:
+- an unclassified file that a root module imports, or that sits in a library's `srcDir` or namespace;
+- an audited file named `*External.lean`, or `Funs.lean`/`Types.lean` (probably a trusted model or extracted code missing from `[protected]`);
+- an audited file that declares an `axiom`. The axiom itself is frozen by G0 and G1 either way; the warning matters only if the whole file is a trusted model.
 
 - `[lean]`: the build targets, the root modules (every project module they import is audited), and `lean_num_threads`, which defaults to 8 so the machine stays usable.
 - `[protected]`: files the bot may never touch.

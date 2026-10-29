@@ -60,3 +60,17 @@ The vendored StmtCanon compiled and ran unchanged on both toolchains, as did the
 | One directory per top-level module name | gate | Required. A top-level name split across two `srcDir`s is refused (`gate-unavailable`). |
 | Nested packages: Lake dependencies vendored inside the repo | gate, pipeline | The lookup keeps only project directories outside `.lake/`. A vendored package elsewhere in the repo would appear as a project directory. Not seen yet. |
 | The Lean module system (`module`, `public`/`meta import`, `@[expose] public section`) | G0 parser, inventory | Imports are parsed. `@[expose] public section` is read as an attribute line before the next declaration, the same in both trees, so G0 is unaffected, and the inventory found every SPQR theorem. `public`/`private` modifiers on declarations are not parsed specially (not seen yet). |
+
+## Layout check (`shfv doctor`)
+
+A wrong `source_roots` fails safe: the gate refuses a diff outside it, and a root module with no file is `gate-unavailable`. A trusted model missing from `[protected] trusted_models` does not fail: it is just editable. `shfv doctor` now classifies every tracked `.lean` file of the target clone against the config, finding modules as the gate does (`shfv/layout.py`; CLI.md §7). Results on the three local clones, 2026-10-29:
+
+| Target (clone commit) | Files | Audited | Trusted models | Extracted | Build config | Unclassified | Ignored | Warnings |
+|---|---|---|---|---|---|---|---|---|
+| dalek-lean-verify (`5f15b01c`) | 244 | 227 | 2 | 2 | 0 | 0 | 13 (`Tests/`, `Utils/`) | none |
+| SPQR (`d1b778e8`) | 385 | 370 | 2 | 2 | 3 (`HeaderLinter/`, `SrcTranslated.lean`) | 0 | 8 (`Tests/`, `Utils/`, `scripts/Audit.lean`) | 2 |
+| libsignal-verify (`468fcd6a`) | 69 | 39 | 21 (`Translated/`, incl. `Shared/`, `CurveProvider`) | 8 | 1 (`scripts/Ledger.lean`) | 0 | 0 | none |
+
+Source directories from Lake: `.` for dalek and SPQR, `rust/` and `.` for libsignal-verify. Every file the root modules import is in the config, and no file is unclassified.
+
+**SPQR's 2 warnings are not gaps.** `Spqr/Specs/Kdf/HkdfToSlice.lean` and `Spqr/Specs/Lib/StatePb.lean` declare spec axioms for external functions (`hkdf_to_slice_spec`, `encode_state_pb_spec`, `decode_state_pb_total`). The gate fingerprints axioms as frozen declarations (`kind: axiom` in the base snapshot), and G0 allows no edit outside proof bodies, so the agent cannot change them. `StatePb.lean` also holds a theorem the agent may need to repair, so protecting the whole file would be wrong. No target config was changed.
