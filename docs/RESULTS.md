@@ -56,7 +56,8 @@ The human fix comes from the repo's history. Sources: [human-fix-comparison.md](
 
 Source: [ACTIONS.md "Pilot results"](ACTIONS.md#pilot-results).
 - **Run 1** (tool `9c892b3`, dalek PR 782, no agent) failed on the standard private-repo runner. Building the base and fixed states took 1h45m, one file ran past the replay's 15-minute per-file limit, and the disk would have run out next.
-- **Run 2,** on a larger runner, is pending.
+- **On the 8-core larger runner, every run since is accepted.** Dalek PR 782 with the sweep only, 56 min. Dalek PR 278 with Claude Code, 33–41 min and $0.98–1.03 per run, 6 of 6 proofs repaired in each of three runs.
+- **Replay store cache** (tool `522c912`): an exact hit cut preparing PR 278 from 859 s to 568 s. The second runner was about 1.5 times slower, so this understates the saving.
 
 ## 6. What we found while testing
 

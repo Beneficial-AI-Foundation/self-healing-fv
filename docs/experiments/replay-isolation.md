@@ -114,4 +114,4 @@ The design of E, for when it is built:
 
 ## Veritooling build cache
 
-Separate from isolation; see [ACTIONS.md](../ACTIONS.md), "Replay store cache", for the steps and the measured effect. In short, on a laptop: an exact hit cuts preparing dalek PR 278 from 861 s to 171 s and SPQR PR 359 from 291 s to 115 s; a nearby case's builds help only when its pins match; Mathlib is left out of the cache. Not yet measured on Actions.
+Separate from isolation; see [ACTIONS.md](../ACTIONS.md), "Replay store cache", for the steps and the measured effect. In short, on a laptop: an exact hit cuts preparing dalek PR 278 from 861 s to 171 s and SPQR PR 359 from 291 s to 115 s; a nearby case's builds help only when its pins match; Mathlib is left out of the cache. On Actions (8-core runner), an exact hit cut preparing dalek PR 278 from 859 s to 568 s; that runner was also 1.5 times slower than the first, so this pair understates the saving.
