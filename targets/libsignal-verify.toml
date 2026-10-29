@@ -14,7 +14,8 @@ github = "Beneficial-AI-Foundation/libsignal-verify"
 # Lake's defaultTargets name all three; the repo's CI (lean-action) builds them all.
 build_targets = ["Libsignal", "Protocols", "ProtocolsTest"]
 root_modules = ["Libsignal", "Protocols", "ProtocolsTest"]
-src_dirs = { Libsignal = "rust" }
+# Libsignal's modules are under rust/ (its srcDir); the gate and the pipeline find them through
+# Lake (LEAN_SRC_PATH). `src_dirs = { Libsignal = "rust" }` would pin that instead.
 source_roots = ["rust/Libsignal/", "Protocols/", "ProtocolsTest/"]
 lean_num_threads = 8
 

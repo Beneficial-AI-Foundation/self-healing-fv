@@ -1,24 +1,29 @@
 """The gate on a Lake library with `srcDir` (libsignal-verify keeps `Libsignal.*` under `rust/`).
 
-The toy project is moved under `src/` and declared with `srcDir = "src"`; the target config maps
-it with `[lean] src_dirs`. The same planted candidates as in test_planted.py must get the same
-verdicts, and a config that omits the mapping must fail closed instead of auditing nothing.
+The toy project is moved under `src/` and declared with `srcDir = "src"`. The gate finds the
+modules where Lean does (`LEAN_SRC_PATH` from `lake env`), or where the target config's
+`[lean] src_dirs` says. Either way the planted candidates of test_planted.py must get the same
+verdicts, and whenever the modules cannot be placed the gate fails closed instead of auditing
+nothing.
 """
 from __future__ import annotations
 
 import shutil
+import tomllib
 
 import pytest
 
-from gates.snapshot import module_file, module_of
+from gates import snapshot
+from gates.snapshot import module_dirs, module_file, module_of, project_modules
 
 from .conftest import TOY_CONFIG
 from .test_planted import FIXTURE, STUB, VALID, assert_rejected, gate, run_candidate, statement_changed
 
 SRC = "src"
 SPECS = f"{SRC}/Toy/Specs.lean"
-CONFIG = (TOY_CONFIG.replace('source_roots = ["Toy/"]', f'source_roots = ["{SRC}/Toy/"]\nsrc_dirs = {{ Toy = "{SRC}" }}')
+LOOKUP = (TOY_CONFIG.replace('source_roots = ["Toy/"]', f'source_roots = ["{SRC}/Toy/"]')
           .replace('"Toy/Funs', f'"{SRC}/Toy/Funs'))
+OVERRIDE = LOOKUP.replace(f'source_roots = ["{SRC}/Toy/"]', f'source_roots = ["{SRC}/Toy/"]\nsrc_dirs = {{ Toy = "{SRC}" }}')
 
 
 def src_dir_tree(dest):
@@ -32,11 +37,11 @@ def src_dir_tree(dest):
     lakefile.write_text(text.replace('[[lean_lib]]\nname = "Toy"', f'[[lean_lib]]\nname = "Toy"\nsrcDir = "{SRC}"'))
 
 
-@pytest.fixture(scope="module")
-def env(tmp_path_factory):
-    root = tmp_path_factory.mktemp("gate-src-dirs")
+@pytest.fixture(scope="module", params=["lookup", "override"])
+def env(request, tmp_path_factory):
+    root = tmp_path_factory.mktemp(f"gate-src-dirs-{request.param}")
     cfg = root / "toy.toml"
-    cfg.write_text(CONFIG)
+    cfg.write_text(LOOKUP if request.param == "lookup" else OVERRIDE)
     base = root / "base"
     src_dir_tree(base)
     broken = root / "broken"
@@ -84,9 +89,35 @@ def test_sorry_is_rejected(env):
     assert_rejected(v, "G0", "G2")
 
 
-def test_missing_mapping_fails_closed(env):
-    # Without src_dirs the root module has no file at the project root: an error, not an empty audit.
-    cfg = env["root"] / "no-mapping.toml"
-    cfg.write_text(CONFIG.replace(f'src_dirs = {{ Toy = "{SRC}" }}\n', ""))
+def test_snapshot_records_where_the_modules_are(env):
+    import json
+    assert json.loads((env["root"] / "B.json").read_text())["src_dirs"] == {"Toy": SRC}
+
+
+def test_wrong_override_fails_closed(env):
+    # The config's src_dirs is authoritative: a wrong one is an error, not a silent fallback to Lake.
+    cfg = env["root"] / "wrong.toml"
+    cfg.write_text(OVERRIDE.replace(f'src_dirs = {{ Toy = "{SRC}" }}', 'src_dirs = { Toy = "elsewhere" }'))
     r = gate("snapshot", "--config", str(cfg), "--tree", str(env["base"]), "--out", str(env["root"] / "none.json"))
     assert r.returncode == 2 and "root module Toy" in r.stderr, r.stderr
+
+
+def test_without_lake_or_override_fails_closed(env, monkeypatch):
+    # If `lake env` cannot say where the modules are, they are looked up at the project root only;
+    # the srcDir library then has no root file, which is an error, never an empty audit.
+    monkeypatch.setattr(snapshot, "search_dirs", lambda tree: None)
+    with pytest.raises(FileNotFoundError, match="root module Toy"):
+        project_modules(env["base"], tomllib.loads(LOOKUP))
+
+
+def test_one_namespace_in_two_directories_fails_closed(env, tmp_path, monkeypatch):
+    # Toy.Extra only at the project root while the rest of Toy.* is under src/: Lean would find
+    # it, but one directory per top-level name is what the snapshot records, so refuse.
+    tree = tmp_path / "split"
+    shutil.copytree(env["base"], tree, ignore=shutil.ignore_patterns(".lake"))
+    (tree / "Toy").mkdir()
+    (tree / "Toy/Extra.lean").write_text("theorem extra : True := trivial\n")
+    (tree / SRC / "Toy.lean").write_text((tree / SRC / "Toy.lean").read_text() + "import Toy.Extra\n")
+    monkeypatch.setattr(snapshot, "search_dirs", lambda t: [SRC, ""])
+    with pytest.raises(ValueError, match="two source directories"):
+        module_dirs(tree, tomllib.loads(LOOKUP))

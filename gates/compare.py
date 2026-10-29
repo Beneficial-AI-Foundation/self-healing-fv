@@ -84,6 +84,10 @@ def preconditions(cfg: dict, base: dict, broken: dict, cand: dict) -> list[str]:
     if broken.get("toolchain") != cand.get("toolchain"):
         out.append(f"toolchain differs between broken ({broken.get('toolchain')}) and candidate "
                    f"({cand.get('toolchain')}) snapshots")
+    # Module paths are compared across snapshots, so all three must resolve modules alike (§4.5).
+    if not base.get("src_dirs", {}) == broken.get("src_dirs", {}) == cand.get("src_dirs", {}):
+        out.append("the snapshots place the project's modules in different source directories: "
+                   f"base {base.get('src_dirs')}, broken {broken.get('src_dirs')}, candidate {cand.get('src_dirs')}")
     b = base.get("build", {})
     if not b.get("ok"):
         out.append("base snapshot: the base did not build" + (" (timed out)" if b.get("timeout") else ""))
