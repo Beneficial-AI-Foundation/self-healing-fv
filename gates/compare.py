@@ -8,7 +8,9 @@
                     closure; a repaired theorem has no sorry of its own and reaches no sorry
                     source its base version did not reach (sorries inherited from lemmas already
                     unproved at the base are flagged in `inherited_sorry`); no new sorry
-                    anywhere; every added declaration is used by a repaired theorem
+                    anywhere; every added declaration is used by a repaired theorem. A repaired
+                    theorem that rests on native code (Lean.ofReduceBool) its base version also
+                    rested on is flagged in `native_code` (report only; never changes the verdict)
   G3 clean build    the candidate snapshot is the stubbed broken state plus exactly this diff,
                     built from a fresh copy without project build output, green, fully covered
   G5 kernel replay  every module the diff changed was replayed through the Lean kernel
@@ -29,7 +31,9 @@ Verdicts:
                                  theorem rests on lemmas that were already unproved at the base;
                                  non-empty `kernel_replay_incomplete`: accepted, flagged; the
                                  replay of a module stopped at an unchanged declaration that was
-                                 already proved by native code at the base)
+                                 already proved by native code at the base;
+                                 non-empty `native_code`: accepted, flagged; some repaired theorem
+                                 rests on native code, as its base version did)
   passed-without-kernel-replay  every check that ran passed, but G5 did not run: not accepted
   rejected                       a check failed, the case is ineligible, or a theorem is unrepaired
   gate-unavailable               the gate could not decide (see `unavailable`); a check that
@@ -202,8 +206,13 @@ def compare(cfg: dict, base: dict, broken: dict, cand: dict, diff: str) -> dict:
         users = [t for t in repaired if a in cand["records"].get(t, {}).get("uses", [])]
         if not users:
             v2.append({"check": "G2", "decl": a, "msg": "added declaration is not used by any repaired theorem"})
+    # Report only (owner decision 2026-10-29): on Lean 4.35 the replay completes on native code, so
+    # `kernel_replay_incomplete` no longer marks these repairs. Native code new to a theorem is a
+    # G2 violation above; this flag only names what G2 allowed because the base already had it.
+    native = sorted(t for t in repaired if NATIVE in cand["records"].get(t, {}).get("axioms", [])
+                    and NATIVE in inventory_.get(t, {}).get("axioms", []))
     checks["G2"] = {"id": "G2", "ok": not v2, "violations": v2,
-                    "info": {"added": added, "inherited_sorry": inherited}}
+                    "info": {"added": added, "inherited_sorry": inherited, "native_code": native}}
 
     # --- G3 clean build of exactly (stubbed broken state + diff).
     v3 = []
@@ -294,5 +303,6 @@ def compare(cfg: dict, base: dict, broken: dict, cand: dict, diff: str) -> dict:
             "unavailable": unavailable, "eligible": eligible, "theorems": theorems,
             "inherited_sorry": inherited if verdict == "accepted" else {},
             "kernel_replay_incomplete": incomplete if verdict == "accepted" else [],
+            "native_code": native if verdict == "accepted" else [],
             "heartbeats": g0["info"]["heartbeats"], "checks": checks,
             "acceptance": "complete-case (prototype, §4.3); G5 required"}

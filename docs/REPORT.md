@@ -77,7 +77,7 @@ Exit 2 is also argparse's code for bad arguments. Exit 2 never means a pass.
 
 | `verdict` | Meaning | What a caller can do |
 |---|---|---|
-| `accepted` | Every broken proof was repaired and the gate accepted the whole candidate, kernel replay included | Use `delivery_diff`. Check the flags in `gate.inherited_sorry` and `gate.kernel_replay_incomplete`; count flagged acceptances separately. |
+| `accepted` | Every broken proof was repaired and the gate accepted the whole candidate, kernel replay included | Use `delivery_diff`. Check the flags in `gate.inherited_sorry`, `gate.kernel_replay_incomplete` and `gate.native_code`; count flagged acceptances separately. |
 | `escalated` | At least one theorem was not repaired | Read `escalations` and each `repairs[].outcome` and `reason`. Hand them to a person. |
 | `passed-without-kernel-replay` | Every gate check that ran passed, but G5 did not run | Treat as not accepted |
 | `failed` | The run itself failed (setup, build environment, or the gate could not decide for every theorem). Says nothing about the proofs. | Read `error`, fix the environment, re-run |
@@ -121,6 +121,7 @@ Each attempt object has `adapter`, `model`, `resolved_model`, `stop` (`done`, `g
 | `checks` | Per check id (`G0`, `G1`, `G2`, `G3`, `G5`): `ok` (true, false, or null if it did not run), `violations` (each with `check`, `msg`, often `decl`), `info`. G5 also has `status` (`ran` or `not run`) and `required: true`. |
 | `inherited_sorry` | Flag: `{theorem: [unproved base lemmas it reaches]}`. Non-empty only on `accepted`. |
 | `kernel_replay_incomplete` | Flag: `[{module, stopped_at, native}]`, modules where the kernel replay stopped at a native-code proof that was already there at the base. Non-empty only on `accepted`. |
+| `native_code` | Flag: `[theorem]`, repaired theorems that rest on native code (`Lean.ofReduceBool`), as their base versions did. Report only. Non-empty only on `accepted`. |
 | `heartbeats` | `maxHeartbeats` raises in the diff |
 | `diff` | The candidate diff the gate checked, relative to the stubbed broken state (not the change's head; for that, use `delivery_diff`) |
 | `gate_version` | The gate that decided |

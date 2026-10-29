@@ -1065,7 +1065,7 @@ def summarize_gate(g: dict) -> dict:
                        "info": {k: x for k, x in c.get("info", {}).items() if k not in ("broken_set",)}}
     return {"verdict": v.get("verdict"), "failed_checks": v.get("failed_checks", []), "eligible": v.get("eligible"),
             "unavailable": v.get("unavailable", []), "inherited_sorry": v.get("inherited_sorry", {}),
-            "kernel_replay_incomplete": v.get("kernel_replay_incomplete", []),
+            "kernel_replay_incomplete": v.get("kernel_replay_incomplete", []), "native_code": v.get("native_code", []),
             "built": v.get("built"), "theorems": v.get("theorems", []), "heartbeats": v.get("heartbeats", []),
             "checks": checks, "diff": g["diff"], "gate_version": v.get("gate_version"),
             "candidate_build_seconds": g.get("candidate_build_seconds")}

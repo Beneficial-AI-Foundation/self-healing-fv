@@ -298,6 +298,8 @@ def main(argv: list[str] | None = None) -> int:
         by_outcome += f" (inherited sorry {len(inherited)})"
     if incomplete := (rep.get("gate") or {}).get("kernel_replay_incomplete"):
         by_outcome += f" (kernel replay incomplete {len(incomplete)})"
+    if native := (rep.get("gate") or {}).get("native_code"):
+        by_outcome += f" (native code {len(native)})"
     run.p.final(f"{rep['verdict'].upper()} · {by_outcome} · {report_mod.usd(t['cost_usd'], t.get('cost_status'))} · {fmt_s(t['wall_seconds'])} → "
                 f"{m.relative_to(ROOT) if m.is_relative_to(ROOT) else m}")
     if "error" in rep:

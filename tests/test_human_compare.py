@@ -34,7 +34,8 @@ ACCEPTED = run(
                    bot_proof_lines=6),
                fix("Ns.c_spec", human_diff="-u\n+v\n")],
     gate={"verdict": "accepted", "inherited_sorry": {"Ns.a_spec": ["Ns.base_lemma"]},
-          "kernel_replay_incomplete": [{"module": "Pkg.B", "stopped_at": "x", "native": "y"}]})
+          "kernel_replay_incomplete": [{"module": "Pkg.B", "stopped_at": "x", "native": "y"}],
+          "native_code": ["Ns.c_spec"]})
 
 ESCALATED = run(
     case="dalek/00000002", run_id="r2", verdict="escalated",
@@ -67,6 +68,7 @@ def test_flags_map_to_theorems_and_modules():
     t = {r["theorem"]: r for r in table(ACCEPTED)}
     assert t["Ns.a_spec"]["inherited_sorry"] and not t["Ns.b_spec"]["inherited_sorry"]
     assert t["Ns.b_spec"]["kernel_replay_incomplete"] and not t["Ns.a_spec"]["kernel_replay_incomplete"]
+    assert t["Ns.c_spec"]["native_code"] and not t["Ns.a_spec"]["native_code"]
     assert t["Ns.a_spec"]["helpers_reported"] == 2
 
 
@@ -80,7 +82,7 @@ def test_counts_keep_their_denominators():
     reps = [ACCEPTED, ESCALATED, GENERATED]
     s = hc.summarize(reps, table(*reps))
     assert (s["proof_breaks"], s["statement_breaks"]) == (5, 2)  # the generated case is left out
-    assert (s["repaired"], s["by_agent"], s["by_sweep"], s["strict"]) == (3, 2, 1, 1)
+    assert (s["repaired"], s["by_agent"], s["by_sweep"], s["strict"], s["native_code"]) == (3, 2, 1, 0, 1)
     assert (s["compared"], s["identical"], s["possible_memorization"], s["human_proof_unchanged"]) == (1, 1, 1, 1)
     assert (s["typechecked_but_changed"], s["broke_but_kept"], s["stmt_theorems"]) == (1, 1, 1)
     assert s["cases_without_fix"] == ["symcrypt/gen-00000003"]

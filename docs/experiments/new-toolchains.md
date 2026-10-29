@@ -27,7 +27,7 @@ Stubbed theorems: libsignal `derive_spec` (`rust/Libsignal/Spec/Protocol/Pqxdh/D
 | Audit | ✅ `no-change` on itself; a weakened statement → `changed` | ✅ `no-change`; a new `sorry` → `changed` (12 dependents); a head that does not build → `incomplete` |
 | G3 clean build | ✅ 39 s | ✅ 137 s |
 | G5 kernel replay | ✅ bundled `leanchecker`, 5 s | ✅ bundled `leanchecker`, 5 s |
-| No-op repair | ✅ accepted; the Protocols one flagged 🏷️ inherited sorry (4 lemmas) | ✅ accepted, both (see native code below) |
+| No-op repair | ✅ accepted; the Protocols one flagged 🏷️ inherited sorry (4 lemmas) | ✅ accepted, both; the `native_decide` one flagged 🏷️ native code (added afterwards, see below) |
 | Changed statement | ✅ rejected (G0, G1) | ✅ rejected (G0, G1, G3: the weaker `≤` also broke dependents) |
 | `sorry` in the proof | ✅ rejected (G0, G2) | ✅ rejected (G0, G2) |
 | Axiom added to `*External.lean` | ✅ rejected (G0; never built) | ✅ rejected (G0; never built) |
@@ -43,7 +43,7 @@ The vendored StmtCanon compiled and ran unchanged on both toolchains, as did the
 
 ## Findings for the owner
 
-- **Native code on new Lean is accepted without a flag.** On Lean 4.35, `leanchecker` replays a module with `native_decide` completely. Each native proof is now its own auxiliary axiom, so the replay no longer needs compiled code. A repair whose base already used native code is accepted by G2 (`Lean.ofReduceBool` only where the base had it) and gets **no 🏷️ flag**. The `kernel_replay_incomplete` flag (DESIGN.md §4.3) only arises on older Lean. Should a repair that relies on native code carry its own flag on new Lean? That is an owner decision; nothing was changed.
+- **Native code on new Lean was accepted without a flag.** On Lean 4.35, `leanchecker` replays a module with `native_decide` completely. Each native proof is now its own auxiliary axiom, so the replay no longer needs compiled code. A repair whose base already used native code is accepted by G2 (`Lean.ofReduceBool` only where the base had it), and the `kernel_replay_incomplete` flag (DESIGN.md §4.3) only arises on older Lean, so such a repair got **no 🏷️ flag**. **Decided 2026-10-29:** a report-only `native_code` flag now names every repaired theorem that rests on native code as its base version did, whether or not the replay completes (`gates/compare.py`, `tests/gate/test_native_flag.py`). Re-running `compare` on the cached SPQR snapshots: the `nttP_deltaP_eq_formulaP_0` no-op is accepted with `native_code: ["Fips203.nttP_deltaP_eq_formulaP_0"]`; the plain SPQR and libsignal no-ops are accepted with no flag.
 - **`@[step]` twins.** Recent Aeneas generates `T.mvcgen_spec` for each `@[step]` theorem `T`. It is fingerprinted as a separate frozen declaration, so one weakened statement is reported twice (libsignal `derive_spec`). It changes exactly when `T` changes, so this is noise and not a safety gap. Treating it as an auxiliary would need a planted test.
 - **Fresh `git clone`s fail inside the Claude Code sandbox** (HTTP 400 on repos with many refs) when Lake fetches dependencies. Fetching each package at its pinned commit works. This affects local sessions only, not GitHub Actions.
 

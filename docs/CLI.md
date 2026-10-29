@@ -152,7 +152,7 @@ Per theorem, the outcome is one of:
 The target repos already carry some trust that predates any change: lemmas still proved by `sorry`, and proofs by native code (`native_decide`, `bv_decide`). The gate accepts a repair near them only if it adds nothing to that trust, and then marks the acceptance with a flag. Each flag shows up in three places:
 - a 🏷️ paragraph under the report's verdict;
 - the CLI's last line, e.g. `ACCEPTED · repaired 6 (inherited sorry 5)`;
-- `report.json`, under `gate.inherited_sorry` and `gate.kernel_replay_incomplete`.
+- `report.json`, under `gate.inherited_sorry`, `gate.kernel_replay_incomplete` and `gate.native_code`.
 
 Count results both ways: all accepted, and accepted with no flag. DESIGN.md §4.3 (*Flagged acceptances*) has the precise rules.
 
@@ -160,6 +160,7 @@ Count results both ways: all accepted, and accepted with no flag. DESIGN.md §4.
 |---|---|---|---|
 | **Inherited sorry** | A repaired theorem still depends on lemmas that were unproved (`sorry`) at the base commit, the same ones its base version used. The report names them. | The repair adds no `sorry` and no dependence on any further unproved lemma; a dependence on a still-broken theorem is rejected. | Nothing new to review: these gaps existed before the change. They remain open proof obligations of the repo. |
 | **Kernel replay incomplete** | The independent kernel re-check (G5) stopped early in a module, at a declaration proved by native code. The re-check cannot run compiled code, so it cannot get past such a proof; the base commit fails the same way. The report names the module and the declaration. | That declaration is unchanged and was already proved this way at the base. The whole module was kernel-checked once during the clean rebuild (G3). Statements (G1), axioms (G2) and the text check (G0, which bans `debug.*` options and metaprogramming) are unaffected. | If the repaired theorem is in that module, read its diff: it had no independent second kernel check. A complete re-check is planned for V1 (DESIGN.md §11, question 21). |
+| **Native code** | A repaired theorem rests on a proof by native code (`native_decide`, `bv_decide`), which trusts Lean's compiler and runtime as well as the kernel. The report names the theorems. Set whether or not the kernel re-check completes (on Lean 4.35 it does). | Its base version rested on native code too; native code new to a theorem is rejected (G2). The flag never changes the verdict. | Nothing new to review unless the repo wants to drop native code; the trust existed before the change. |
 
 If the native-code stop is in a repaired or added declaration, or in one that did not use native code at the base, the repair is not accepted: the verdict is `gate-unavailable`, because the repair itself would go unchecked.
 
