@@ -561,13 +561,13 @@ def test_live_change_is_repaired_like_a_replay(toy_live, monkeypatch):
     assert ":= by sorry" not in d and "-  have _h := double_spec x" in d, d
     assert all(e.get("bot_diff") for e in rep["repairs"])
     assert f"[#12 \"Re-extract\"](https://github.com/example/toy/pull/12) at `{toy_live['head'][:8]}`" in md
-    assert "Changes made by the PR itself" in md
+    assert "Changes made by the PR itself" in md and "failing proofs stubbed" in md
 
 
 def test_live_head_that_builds_has_nothing_to_repair(toy_live, monkeypatch):
     rep, md, agent = run_live(toy_live, monkeypatch, toy_live["ok"], GOOD, "ok")
     assert rep["verdict"] == "no-break" and not rep["repairs"] and not agent.calls
-    assert "Nothing to repair" in md
+    assert "Nothing to repair" in md and "failing proofs stubbed" not in md  # nothing was stubbed
     # The `sorry` the change wrote is reported from its source text.
     assert rep["audit"]["outcome"] == "changed" and rep["audit"]["sorry_written"] == ["Toy/Specs.lean::later"]
     assert "`sorry` written by the PR" in md

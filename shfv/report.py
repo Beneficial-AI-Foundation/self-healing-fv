@@ -186,7 +186,7 @@ def audit_section(r: dict, focus: str | None = None) -> list[str]:
         return out + ["⚪ Not applicable: this is a generated case with no human change to compare against.", ""]
     # Live: the head was audited with its failing proofs stubbed, so `sorry` was compared in the sources.
     stubbed = (" `sorry` is compared in the sources: the head does not build, so it was read with its failing "
-               "proofs stubbed.") if a.get("head_stubbed") else ""
+               "proofs stubbed.") if a.get("head_stubbed") and (r.get("broken") or {}).get("proofs") else ""
     if a["outcome"] == "no-change":
         return out + ["✅ No frozen statement, definition or trust assumption changed (complete comparison)." + stubbed, ""]
     if a["outcome"] == "incomplete" and not a.get("summary"):
