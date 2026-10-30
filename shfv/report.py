@@ -31,6 +31,8 @@ OUTCOME_TEXT = {
     "gate-unavailable": "the gate could not decide, so nothing about this theorem was accepted or rejected",
     "passed-checks": "every gate check that ran passed, but the kernel replay (G5) has not run, so it is not accepted",
     "extraction-setup": "the extracted code does not build at the head, so no proof can be repaired against it",
+    "added-by-pr": "added by this PR, its proof fails, and the bot does not repair it: it repairs only theorems that "
+                   "have a version before the PR",
 }
 
 
@@ -187,12 +189,24 @@ HEAD_REFERENCE = ("**The gate checked only the bot's edits, against this PR as w
                   "made are listed below; the gate did not judge them. A reviewer should.")
 
 
+def is_head(r: dict) -> bool:
+    """Whether the gate's reference is the PR head (live, §4.9); report.json records it at the top
+    level, older runs inside `gate` only."""
+    return (r.get("reference") or (r.get("gate") or {}).get("reference")) == "head"
+
+
 def reference_note(r: dict) -> list[str]:
     """Live (the gate's reference is the PR head, DESIGN.md §4.9): what the gate did and did not
     judge, up front, so an accepted repair is not read as a verdict on the PR's own changes."""
-    if (r.get("gate") or {}).get("reference") != "head":
+    g = r.get("gate") or {}
+    if (r.get("reference") or g.get("reference")) != "head":
         return []
-    if (r.get("audit") or {}).get("outcome") == "no-change":
+    outcome = (r.get("audit") or {}).get("outcome")
+    if not g:  # no candidate reached the gate (an ineligible case, nothing to repair)
+        return [] if outcome != "changed" else [
+            "**No repair was gated.** The changes the PR itself made are listed below; nothing here judged them. "
+            "A reviewer should."]
+    if outcome == "no-change":
         return ["**The gate checked only the bot's edits, against this PR as written.** The PR itself changed no "
                 "frozen statement, definition or trust assumption (complete audit below)."]
     return [HEAD_REFERENCE]
@@ -286,7 +300,7 @@ def audit_section(r: dict, focus: str | None = None) -> list[str]:
     # Live: the head was audited with its failing proofs stubbed, so `sorry` was compared in the sources.
     stubbed = (" `sorry` is compared in the sources: the head does not build, so it was read with its failing "
                "proofs stubbed.") if a.get("head_stubbed") and (r.get("broken") or {}).get("proofs") else ""
-    if a["outcome"] == "no-change":
+    if a["outcome"] == "no-change" and not (a.get("axioms_added") or a.get("roots_added")):
         return out + ["✅ No frozen statement, definition or trust assumption changed (complete comparison)." + stubbed, ""]
     if a["outcome"] == "incomplete" and not a.get("summary"):
         return out + [f"⚪ The audit could not run: {a.get('error', 'unknown reason')}", ""]
@@ -299,7 +313,7 @@ def audit_section(r: dict, focus: str | None = None) -> list[str]:
     out.append(f"⚠️ **The {'PR' if live else 'change'} itself** changed {s['statements_changed']} theorem statement(s) and "
                f"{s['definitions_changed']} definition(s), and removed or renamed {s['removed']} declaration(s). "
                "The bot does not judge these" + (", and the gate did not either: it checked only the bot's edits"
-                                                  if (r.get("gate") or {}).get("reference") == "head" else "")
+                                                  if is_head(r) else "")
                + "; a spec owner should check that none weakens a promise." + stubbed)
     out.append("")
     trust = []
@@ -317,6 +331,9 @@ def audit_section(r: dict, focus: str | None = None) -> list[str]:
             f"`{short_name(d)}` (+{', '.join(f'`{y}`' for y in ys)})" for d, ys in new_ax[:15]))
     if a.get("trusted_models_changed"):
         trust.append("- **Trusted models changed:** " + ", ".join(f"`{p}`" for p in a["trusted_models_changed"]))
+    if a.get("axioms_added"):
+        trust.append(f"- **Axioms added** ({len(a['axioms_added'])}, wherever declared, used or not): "
+                     + ", ".join(f"`{x}`" for x in a["axioms_added"][:20]) + (" …" if len(a["axioms_added"]) > 20 else ""))
     if a.get("roots_added"):
         trust.append("- **Libraries added:** " + ", ".join(f"`{m}`" for m in a["roots_added"]))
     if trust:
@@ -380,7 +397,7 @@ def render(r: dict) -> str:
                    f"{'it' if n_proofs == 1 else 'them'}, and the gate checked the repair mechanically and accepted it: "
                    + ("the bot changed no theorem statement, definition or trusted model of the PR, added no axioms or "
                       "`sorry`, and the project rebuilds from scratch."
-                      if (r.get("gate") or {}).get("reference") == "head" else
+                      if is_head(r) else
                       "no theorem statement or definition changed, no new axioms or `sorry`, and the project rebuilds "
                       "from scratch."))
         inherited = (r.get("gate") or {}).get("inherited_sorry") or {}

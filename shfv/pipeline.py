@@ -577,15 +577,21 @@ class Run:
         res = {"diff": d.read_text(), "scope": scope}
         if not scope["ok"] and not past_scope:
             res["verdict"] = {"verdict": "rejected", "failed_checks": ["G0"], "checks": {"G0": scope},
-                              "theorems": [], "built": False, "eligible": None}
+                              "theorems": [], "built": False, "eligible": None, "reference": self.reference}
             return res
         C = self.scratch / f"{label}.C.json"
         gate("snapshot", "--config", str(self.config), "--tree", str(self.broken_root), "--apply", str(d),
              "--workdir", str(self.scratch / f"{label}-gate-tree"), "--clean", "--out", str(C),
              "--log", str(self.scratch / f"{label}.build.log"))
         V = self.scratch / f"{label}.V.json"
-        # Live, the gate holds the bot to the PR as written, not to the base (§4.9, decided 2026-10-30).
-        gate("compare", *common, "--candidate", str(C), "--out", str(V), "--reference", self.reference,
+        # Live, the gate holds the bot to the PR as written, not to the base (§4.9, decided 2026-10-30),
+        # and needs every proof S2 stubbed: in the text a stub looks like the head's own `sorry`.
+        live = []
+        if self.reference == "head":
+            stubs = self.scratch / "stubs.json"
+            stubs.write_text(json.dumps(self.replay.get("broken_proofs", [])))
+            live = ["--stubs", str(stubs)]
+        gate("compare", *common, "--candidate", str(C), "--out", str(V), "--reference", self.reference, *live,
              check=False)  # 2 = gate-unavailable
         if not V.exists():
             raise GateUnavailable("gate compare produced no verdict")
@@ -642,7 +648,10 @@ class Run:
                                   "auth": getattr(self.agent, "auth", None), "tool_profile": self.profile,
                                   "turns_unit": getattr(self.agent, "turns_unit", None),
                                   "unenforced_caps": self.unenforced_caps},
-                        "gate_version": gate_version, "repairs": [], "escalations": []}
+                        "gate_version": gate_version,
+                        # What the gate holds the bot to (§4.9), also when no gate verdict is recorded
+                        # (a G0 rejection, an ineligible case).
+                        "reference": self.reference, "repairs": [], "escalations": []}
         try:
             t0 = time.time()
             self.prepare()
@@ -718,6 +727,18 @@ class Run:
             # The replay may have stubbed a theorem before finding that its statement fails (round 2):
             # that theorem is statement-broken, never a proof-repair target.
             sb = {(x["file"], x["key"]) for x in stmt_broken}
+            # Live: a proof S2 stubbed that is not in the broken set (a theorem the PR added, with no base
+            # version) is not repaired, and its stub would stay in any candidate: the gate makes the case
+            # ineligible (§4.9, rule 6), so the report escalates it and nothing is spent.
+            in_set = {(b["file"], b["key"].split("#", 1)[0]) for b in broken} | sb
+            detail = {f"{d['file']}::{d['decl']}": d for d in self.replay.get("broken_proofs_detail", [])}
+            added_stubs = [s for s in self.replay.get("broken_proofs", [])
+                           if self.live and tuple(s.split("::", 1)) not in in_set]
+            for s in added_stubs:
+                f, key = s.split("::", 1)
+                d = detail.get(s, {})
+                report["escalations"].append({"theorem": key, "file": f, "line": d.get("line"), "outcome": "added-by-pr",
+                                              "errors": [d["msg"]] if d.get("msg") else []})
             broken = [b for b in broken if (b["file"], b["key"]) not in sb]
             report["broken"] = {"proofs": [b["name"] for b in broken], "statements": [s["name"] for s in stmt_broken],
                                 "frozen_inventory": len(frozen), "observed_in_broken": observed,
@@ -743,6 +764,15 @@ class Run:
                         report["repairs"].append({"theorem": b["name"], "file": b["file"], "decl": b["key"],
                                                   "attempts": [], "outcome": "blocked-on",
                                                   "reason": "case is ineligible: a statement must change first"})
+            elif added_stubs and not self.attempt_anyway:
+                why = (f"{len(added_stubs)} theorem(s) this PR added have failing proofs, and the bot repairs only "
+                       f"theorems that have a version before the PR (e.g. {added_stubs[0].split('::', 1)[1]})")
+                self.p.step(f"ineligible: {why}; no repair attempted")
+                for b in ordered:
+                    report["repairs"].append({"theorem": b["name"], "file": b["file"], "decl": b["key"],
+                                              "attempts": [], "outcome": "blocked-on",
+                                              "reason": f"case is ineligible: {why}"})
+                targets = []
             elif (report["broken"]["unobserved_modules"] or missing_frozen) and not self.attempt_anyway:
                 # Ineligible (§3.3 S2): modules of the broken state cannot be checked (file-level errors,
                 # e.g. a removed import) or frozen declarations are missing from it, so under complete-case
@@ -848,7 +878,10 @@ class Run:
         s = a["summary"]
         detail = (f"{s['statements_changed']} statement(s), {s['definitions_changed']} definition(s) changed, "
                   f"{s['removed']} removed; {s['new_sorry']} newly depend on sorry; "
-                  f"{s['trusted_models_changed']} trusted model(s) changed") if a["outcome"] == "changed" else \
+                  f"{s['trusted_models_changed']} trusted model(s) changed"
+                  + (f"; {s['axioms_added']} axiom(s) added" if s.get("axioms_added") else "")
+                  + (f"; {s['roots_added']} librar(ies) added" if s.get("roots_added") else "")) \
+            if a["outcome"] == "changed" else \
             "; ".join(a.get("coverage_problems", [])[:2])
         self.p.step(f"audit of the change itself: {a['outcome']}" + (f" · {detail}" if detail else ""))
         return a
@@ -1222,8 +1255,8 @@ def discount_stub_sorry(audit: dict, written: list[str]) -> None:
     audit["axioms_changed"], audit["sorry_from_stubs"], audit["sorry_written"] = kept, n, written
     s = audit.get("summary", {})
     s.update(axioms_changed=len(kept), new_sorry=0, sorry_written=len(written))
-    findings = any(audit.get(k) for k in ("statements_changed", "definitions_changed", "removed",
-                                           "axioms_changed", "trusted_models_changed", "sorry_written"))
+    findings = any(audit.get(k) for k in ("statements_changed", "definitions_changed", "removed", "axioms_changed",
+                                           "trusted_models_changed", "sorry_written", "axioms_added", "roots_added"))
     if findings:
         audit["outcome"] = "changed"
     elif audit.get("outcome") == "changed":

@@ -70,6 +70,7 @@ Exit 2 is also argparse's code for bad arguments. Exit 2 never means a pass.
 | `config` | object | `path`, `sha256` (first 12 hex) and `budget` of the target config; `budget` is the one this run's adapter got (`[budget.<adapter>]` applied, caps turned off left out) and includes any per-run override, and `budget_overrides` lists them (`--per-run-usd`, `--per-run-minutes`) |
 | `agent` | object | `adapter`, `model`, `enabled` (false with `--no-agent`: the sweep only), `auth` (`login` or `api-key`), `tool_profile` (`minimal` or `lsp`), `turns_unit` (what a turn counts for this adapter: `API calls` for Claude Code, `agent messages` for Codex), `unenforced_caps` (caps the adapter could not enforce, allowed by `--allow-unenforced-caps`; empty otherwise) |
 | `gate_version` | str | Hash of the gate's sources |
+| `reference` | str | What the gate holds the bot to (DESIGN.md §4.9): `head` for a live run, `base` for a replay. Recorded here also when no gate verdict is (a G0 rejection, an ineligible case). Absent before 2026-10-30 (all `base`). |
 | `toolchain` | str | The target's Lean toolchain in the broken state |
 | `error` | object | Only when the run failed: `outcome` (`gate-unavailable` or `infrastructure-failure`) and `detail` |
 | `tripwire` | object | Whether any attempt looked outside its workspace (section 10). Absent in runs made before 2026-10-28. |
@@ -108,7 +109,7 @@ Each entry of `repairs` has `theorem` (fully qualified), `file`, `decl` (name as
 | `infrastructure-failure` | The agent or the environment failed before saying anything about the theorem |
 | `gate-unavailable` | The gate could not decide. Nothing is accepted, and nothing is held against the repair. |
 
-Each entry of `escalations` has `theorem`, `file`, `line`, `outcome` (`statement-must-change`; live also `extraction-setup`, when the extracted code itself does not build at the head: then `theorem` is the file's name and only `errors` follows), `errors` (Lean's messages), `statement` (as it stands), `definition` (when a definition body no longer type-checks, else null), `extraction_change` (a list of `{name, before, after}` signatures of extracted functions named in the errors) and `rename_only` (always null for now).
+Each entry of `escalations` has `theorem`, `file`, `line`, `outcome` (`statement-must-change`; live also `extraction-setup`, when the extracted code itself does not build at the head: then `theorem` is the file's name and only `errors` follows, and `added-by-pr`, a theorem the PR added whose proof fails: it has no version before the PR, so the bot does not repair it, and the case is ineligible because its stub would stay in any candidate), `errors` (Lean's messages), `statement` (as it stands), `definition` (when a definition body no longer type-checks, else null), `extraction_change` (a list of `{name, before, after}` signatures of extracted functions named in the errors) and `rename_only` (always null for now).
 
 Each attempt object has `adapter`, `model`, `resolved_model`, `stop` (`done`, `gave-up`, `max-turns`, `budget`, `timeout` or `error`), `tokens`, `tokens_complete`, `cost_usd`, `cost_status`, `reported_cost_usd`, `turns`, `seconds`, `final_message`, `diagnosis`, `transcript`, `error`. `turns` is in the adapter's own unit (`agent.turns_unit`), so it is not comparable across adapters.
 
@@ -122,7 +123,7 @@ Each attempt object has `adapter`, `model`, `resolved_model`, `stop` (`done`, `g
 | `reference` | What the bot was held to (DESIGN.md §4.9): `head` for a live run (the PR as written; the gate judged only the bot's edits, and the PR's own changes are in `audit`, not judged), `base` for a replay. Absent in runs before 2026-10-30, which were all `base`. |
 | `failed_checks` | Ids of checks that failed, e.g. `["G1", "G2"]` |
 | `unavailable` | Reasons the gate could not decide (non-empty with `gate-unavailable`) |
-| `eligible` | Whether every frozen declaration was observed in the stubbed broken state. `null` if G0 failed before any build. |
+| `eligible` | Whether every frozen declaration was observed in the stubbed broken state. `null` if G0 failed before any build. With `reference: head`, also false when a proof the pipeline stubbed is outside the broken set (`checks.G1.info.stubbed_outside_broken_set`). |
 | `built` | Whether the candidate was built (false when G0 failed first) |
 | `theorems` | Per broken theorem: `name`, `file`, `failed_checks`, `repaired` |
 | `checks` | Per check id (`G0`, `G1`, `G2`, `G3`, `G5`): `ok` (true, false, or null if it did not run), `violations` (each with `check`, `msg`, often `decl`), `info`. G5 also has `status` (`ran` or `not run`) and `required: true`. |
@@ -149,7 +150,8 @@ The output of `gate audit` on the base and the change's head:
 | `removed` | Frozen declarations gone from the head. One the change's extracted code now defines (a trusted model replaced by extracted Rust) also has `now_extracted`, the file (added by the pipeline by name, display only). When the change's audit accounts for every G1/G2 failure of the gate, or for every missing frozen declaration of an ineligible case, the report says so and lists these trust changes. |
 | `axioms_changed` | Each `{decl, added, removed}` |
 | `trusted_models_changed` | Paths of trusted-model files whose text changed |
-| `roots_added` | Root modules (libraries) the head has and the base does not: the base snapshot left them out (live only) |
+| `roots_added` | Root modules (libraries) the head has and the base does not: the base snapshot left them out (live only). A finding. |
+| `axioms_added` | Axioms the head declares and the base does not, wherever declared (not only in trusted models) and whether or not anything uses them. A finding. |
 | `coverage_problems`, `not_compared` | Why the audit is incomplete |
 | `summary` | Counts, including `new_sorry` |
 | `error` | Set by the pipeline instead of the fields above when the audit could not run (`outcome` is then `incomplete` or `not-applicable`) |

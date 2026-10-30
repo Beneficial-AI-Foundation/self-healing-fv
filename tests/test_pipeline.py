@@ -534,12 +534,25 @@ def toy_live(tmp_path_factory):
     git(repo, "checkout", "-qb", "axiom", head)
     with open(repo / "Toy/FunsExternal.lean", "a") as f:
         f.write("\naxiom sum_pair (x : Nat) : List.sum [x, x] = x + x\n")
-    (repo / "Toy/Specs.lean").write_text("import Toy.FunsExternal\n" + (repo / "Toy/Specs.lean").read_text())
-    git(repo, "commit", "-qam", "re-extract, with a new model axiom")
+    (repo / "Toy/Specs.lean").write_text("import Toy.FunsExternal\n" + (repo / "Toy/Specs.lean").read_text()
+                                         + "\ntheorem pair_two : List.sum [2, 2] = 2 + 2 := sum_pair 2\n")
+    git(repo, "commit", "-qam", "re-extract, with a new model axiom the PR uses")
     axiom = git(repo, "rev-parse", "HEAD")
+    # branch `cheat`: the re-extraction plus an axiom outside the trusted models that nothing uses.
+    git(repo, "checkout", "-qb", "cheat", head)
+    with open(repo / "Toy/Specs.lean", "a") as f:
+        f.write("\naxiom pr_cheat : False\n")
+    git(repo, "commit", "-qam", "re-extract, and an unused axiom")
+    cheat = git(repo, "rev-parse", "HEAD")
+    # branch `added`: the re-extraction plus a theorem the PR adds whose proof fails.
+    git(repo, "checkout", "-qb", "added", head)
+    with open(repo / "Toy/Specs.lean", "a") as f:
+        f.write("\ntheorem pr_new (x : Nat) : double x = x + x := by\n  unfold double\n  omega\n")
+    git(repo, "commit", "-qam", "re-extract, and a new theorem")
+    added = git(repo, "rev-parse", "HEAD")
     git(repo, "checkout", "-q", "main")
     return {"root": root, "repo": repo, "base": base, "head": head, "ok": ok, "bad": bad, "model": model,
-            "axiom": axiom}
+            "axiom": axiom, "cheat": cheat, "added": added}
 
 
 def run_live(toy_live, monkeypatch, head, script, label):
@@ -622,6 +635,32 @@ def test_a_repair_resting_on_an_axiom_the_pr_added_is_flagged(toy_live, monkeypa
         api = FakeGraphQL(existing)
         comment.post(api, "example/toy", 12, sec, header)
         assert "`sum_pair` (added by this PR)" in api.comments[-1]["body"], header
+
+
+def test_an_axiom_the_pr_adds_outside_the_models_is_a_finding_and_unusable(toy_live, monkeypatch):
+    """Review findings 1 and 2: `axiom pr_cheat : False` in a spec file, used by nothing. The audit
+    reports it (the report must not say the PR changed no trust assumption), and a repair resting
+    on it is rejected."""
+    rep, md, _ = run_live(toy_live, monkeypatch, toy_live["cheat"], GOOD, "cheat")
+    assert rep["verdict"] == "accepted" and rep["reference"] == "head"
+    assert rep["audit"]["outcome"] == "changed" and rep["audit"]["axioms_added"] == ["pr_cheat"]
+    top = md.split("| | |")[0]
+    assert "The changes the PR itself made are listed below" in top and "The PR itself changed no" not in top
+    assert "**Axioms added** (1, wherever declared, used or not): `pr_cheat`" in md
+    script = {"double_spec": ("done", ":= pr_cheat.elim", None), "double_even": GOOD["double_even"]}
+    rep, md, _ = run_live(toy_live, monkeypatch, toy_live["cheat"], script, "cheat-used")
+    assert rep["verdict"] != "accepted" and "G2" in rep["gate"]["failed_checks"]
+
+
+def test_a_theorem_the_pr_added_whose_proof_fails_is_escalated(toy_live, monkeypatch):
+    """Review finding 3: it is stubbed but has no version before the PR, so it is not repaired, and
+    a result that still carries its stub is never accepted."""
+    rep, md, agent = run_live(toy_live, monkeypatch, toy_live["added"], GOOD, "added")
+    assert rep["verdict"] == "escalated" and not agent.calls and "gate" not in rep
+    [e] = [e for e in rep["escalations"] if e["outcome"] == "added-by-pr"]
+    assert e["theorem"] == "pr_new" and e["file"] == "Toy/Specs.lean" and e["errors"]
+    assert all(r["outcome"] == "blocked-on" and "this PR added" in r["reason"] for r in rep["repairs"])
+    assert "added by this PR, its proof fails" in md and rep["reference"] == "head"
 
 
 def test_live_head_that_builds_has_nothing_to_repair(toy_live, monkeypatch):

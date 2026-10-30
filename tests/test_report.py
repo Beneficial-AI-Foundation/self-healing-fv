@@ -201,6 +201,14 @@ def test_live_report_says_what_the_gate_judged():
             "`Old.ax` (already in the project, not used here before)") in top
     assert "**Libraries added:** `Protocols`" in md and "the gate did not either" in md
     assert "(against the PR as written)" in md
+    # Review finding 5: a G0 rejection's verdict and an ineligible run (no gate entry) keep the mode,
+    # from report.json's top-level `reference`.
+    g0 = minimal_report(**{**live, "verdict": "escalated", "reference": "head",
+                           "gate": {"verdict": "rejected", "failed_checks": ["G0"], "checks": {"G0": {"ok": False}}}})
+    assert "The gate checked only the bot's edits, against this PR as written." in render(g0)
+    inel = minimal_report(**{**live, "verdict": "escalated", "reference": "head"})
+    inel.pop("gate")
+    assert "No repair was gated.** The changes the PR itself made are listed below" in render(inel)
     live["gate"]["reference"] = "base"  # replay: none of it
     md = render(minimal_report(**live))
     assert "against this PR as written" not in md and "the gate did not either" not in md
