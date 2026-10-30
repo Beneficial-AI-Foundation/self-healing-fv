@@ -20,7 +20,7 @@ BANNED = [
     (r"\bimplemented_by\b", "@[implemented_by]"), (r"\bcsimp\b", "@[csimp]"),
     (r"^\s*import\b|\bimport\s+[A-Z]", "import"), (r"\bdebug\.", "debug.* option"),
     (r"\bmaxHeartbeats\s+0\b", "maxHeartbeats 0"), (r"\bunsafe\b", "unsafe"),
-    (r"\baddDecl\b|\bskipKernelTC\b|\btrustCompiler\b|\bofReduceBool\b", "kernel bypass"),
+    (r"\baddDecl\b|\bskipKernelTC\b|\btrustCompiler\b|\bofReduce\w*", "kernel bypass"),
     (r"\brun_cmd\b|\brun_tac\b|\brun_elab\b|#eval\b", "metaprogram (run_cmd/run_tac/#eval)"),
 ]
 HEARTBEATS_RE = re.compile(r"\bmaxHeartbeats\s+(\d+)")

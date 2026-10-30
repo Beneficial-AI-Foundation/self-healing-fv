@@ -179,8 +179,10 @@ def normalize_axioms(axioms: list[str]) -> list[str]:
     Lean; newer Lean (SymCrypt, v4.31) instead adds one auxiliary axiom per use, named
     `T._native.native_decide.ax_1_2` or `T._native.bv_decide.ax_1_32`. Both mean "trusted because
     compiled code returned true". Map the per-use axioms to `Lean.ofReduceBool`, so the trust
-    checks compare that category rather than names that change whenever a proof is edited."""
-    return sorted({NATIVE if "._native." in a else a for a in axioms})
+    checks compare that category rather than names that change whenever a proof is edited. Its
+    siblings (`Lean.ofReduceNat`, any `Lean.ofReduce*`) trust compiled code the same way and map to
+    it too, so every native-code rule covers them."""
+    return sorted({NATIVE if "._native." in a or a.startswith("Lean.ofReduce") else a for a in axioms})
 
 
 def stmtcanon(tree: Path, cfg: dict, modules: list[str]) -> tuple[dict[str, dict], dict]:

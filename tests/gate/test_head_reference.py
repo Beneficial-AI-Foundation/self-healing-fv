@@ -2,12 +2,14 @@
 Lake project.
 
 The change (the "PR") does what libsignal-verify PR 17 and SPQR's Aeneas bump did, in small: it
-rewrites the extracted `double` (breaking `double_spec`), refreshes the trusted model (removes the
-axiom `ext_seed`, adds `ext_seed_v2` and `sum_pair`), changes the statement of `triple_spec`, adds
-an unproved `todo_lemma`, and adds a library, `Extra`, that the base does not have. With the head
-as the reference, a repair that only fixes `double_spec` is accepted and the change's own edits go
-to the audit. Every way for the *bot* to change a statement, a trusted model, an axiom or `sorry`
-is still rejected. With the base as the reference (replay), the same inputs are not accepted.
+rewrites the extracted `double` (breaking `double_spec`, whose base proof reaches the base's
+unproved `base_gap`), refreshes the trusted model (removes the axiom `ext_seed`, adds `ext_seed_v2`
+and `sum_pair`, which its new `pair_two` uses), changes the statement of `triple_spec`, removes
+`le_add`, and adds an unproved `todo_lemma`, an unused `axiom pr_cheat : False`, a definition
+`pr_def` and a library, `Extra`, that the base does not have. With the head as the reference, a
+repair that only fixes `double_spec` is accepted and the change's own edits go to the audit.
+Every way for the *bot* to change a statement, a trusted model, an axiom or `sorry` is still
+rejected. With the base as the reference (replay), the same inputs are not accepted.
 """
 from __future__ import annotations
 
@@ -28,7 +30,15 @@ CONFIG = ('name = "toy-head"\n[lean]\nbuild_targets = ["Toy", "Extra"]\nroot_mod
 MODEL = "axiom ext_seed_v2 : Nat\n\naxiom sum_pair (x : Nat) : List.sum [x, x] = x + x\n"
 TRIPLE_BASE = "theorem triple_spec (x : Nat) : triple x = 3 * x := by\n  unfold triple\n  omega\n"
 TRIPLE_PR = "theorem triple_spec (x : Nat) : triple x = x * 3 := by\n  unfold triple\n  omega\n"
-TODO = "\ntheorem todo_lemma (x : Nat) : List.sum [x, x] = x + x := by sorry\n"
+TODO = ("\ntheorem todo_lemma (x : Nat) : List.sum [x, x] = x + x := by sorry\n"
+        "\naxiom pr_cheat : False\n"
+        "\ndef pr_def (x : Nat) : Nat := x + 1\n"
+        "\ntheorem pair_two : List.sum [2, 2] = 2 + 2 := sum_pair 2\n")
+BASE_GAP = "theorem base_gap (x : Nat) : List.sum [x, x] = x + x := by sorry\n\n"
+SPEC_FIXTURE = "theorem double_spec (x : Nat) : double x = 2 * x := by\n  unfold double\n  omega\n"
+SPEC_BASE = "theorem double_spec (x : Nat) : double x = 2 * x := by\n  have _h := base_gap x\n  unfold double\n  omega\n"
+LE_ADD = "theorem le_add (x y : Nat) : x ≤ x + y := by\n  omega\n"
+STUBS = ["Toy/Specs.lean::double_spec"]
 
 
 @pytest.fixture(scope="module")
@@ -38,6 +48,7 @@ def env(tmp_path_factory):
     cfg.write_text(CONFIG)
     base = root / "base"
     shutil.copytree(FIXTURE, base, ignore=shutil.ignore_patterns(".lake"))
+    (base / SPECS).write_text((base / SPECS).read_text().replace(SPEC_FIXTURE, BASE_GAP + SPEC_BASE))
     broken = root / "broken"  # the PR's head with its failing proof stubbed
     shutil.copytree(base, broken)
     (broken / "lakefile.toml").write_text('name = "Toy"\ndefaultTargets = ["Toy", "Extra"]\n\n'
@@ -49,18 +60,19 @@ def env(tmp_path_factory):
     funs = broken / "Toy/Funs.lean"
     funs.write_text(funs.read_text().replace("def double (x : Nat) : Nat := x + x", NEW_DOUBLE))
     specs = broken / SPECS
-    specs.write_text("import Toy.FunsExternal\n" + specs.read_text().replace(
-        "theorem double_spec (x : Nat) : double x = 2 * x := by\n  unfold double\n  omega\n", TODO + "\n" + STUB)
-        .replace(TRIPLE_BASE, TRIPLE_PR))
+    text = specs.read_text()
+    assert SPEC_BASE in text and LE_ADD in text
+    specs.write_text("import Toy.FunsExternal\n" + text.replace(SPEC_BASE, TODO + "\n" + STUB)
+                     .replace(TRIPLE_BASE, TRIPLE_PR).replace(LE_ADD, ""))
     assert TRIPLE_PR in specs.read_text() and STUB in specs.read_text()
     r = gate("snapshot", "--config", str(cfg), "--tree", str(base), "--out", str(root / "B.json"), "--allow-absent-roots")
     assert r.returncode == 0, r.stderr
     r = gate("snapshot", "--config", str(cfg), "--tree", str(broken), "--out", str(root / "K.json"))
     assert r.returncode == 0, r.stderr
-    return {"root": root, "cfg": cfg, "broken": broken}
+    return {"root": root, "cfg": cfg, "broken": broken, "K": root / "K.json"}
 
 
-def run(env, name: str, specs, reference: str = "head", extra: dict | None = None):
+def run(env, name: str, specs, reference: str = "head", extra: dict | None = None, stubs=STUBS):
     """Plant a candidate (specs: new Specs.lean text from the stubbed one) and gate it."""
     root, cfg = env["root"], env["cfg"]
     cand = root / f"cand-{name}"
@@ -72,7 +84,7 @@ def run(env, name: str, specs, reference: str = "head", extra: dict | None = Non
     d = root / f"{name}.patch"
     assert gate("diff", "--config", str(cfg), "--before", str(env["broken"]), "--after", str(cand),
                 "--out", str(d)).returncode == 0
-    common = ["--config", str(cfg), "--base", str(root / "B.json"), "--broken", str(root / "K.json"), "--diff", str(d)]
+    common = ["--config", str(cfg), "--base", str(root / "B.json"), "--broken", str(env["K"]), "--diff", str(d)]
     gate("scope", *common, "--out", str(root / f"{name}.scope.json"))
     scope = json.loads((root / f"{name}.scope.json").read_text())
     c = root / f"{name}.C.json"
@@ -81,8 +93,10 @@ def run(env, name: str, specs, reference: str = "head", extra: dict | None = Non
                     "--workdir", str(root / f"work-{name}"), "--clean", "--out", str(c))
         if snap.returncode != 0:
             return snap.returncode, None, scope
+    s = root / f"{name}.stubs.json"
+    s.write_text(json.dumps(stubs))
     v = gate("compare", *common, "--candidate", str(c), "--reference", reference,
-             "--out", str(root / f"{name}.{reference}.V.json"))
+             *(["--stubs", str(s)] if stubs is not None else []), "--out", str(root / f"{name}.{reference}.V.json"))
     assert v.returncode in (0, 1, 2), v.stderr
     return v.returncode, json.loads((root / f"{name}.{reference}.V.json").read_text()), scope
 
@@ -123,9 +137,65 @@ def test_the_audit_lists_the_changes_own_edits(env):
     a = json.loads((root / "A.json").read_text())
     assert a["outcome"] == "changed" and a["roots_added"] == ["Extra"]
     assert [x["decl"] for x in a["statements_changed"]] == ["triple_spec"]
-    assert "ext_seed" in [x["decl"] for x in a["removed"]]
+    assert {"ext_seed", "le_add"} <= {x["decl"] for x in a["removed"]}
     assert a["trusted_models_changed"] == ["Toy/FunsExternal.lean"]
-    assert {"sum_pair", "ext_seed_v2", "todo_lemma", "extra_fact"} <= set(a["added"])
+    assert {"sum_pair", "ext_seed_v2", "todo_lemma", "extra_fact", "pr_def", "pair_two"} <= set(a["added"])
+    # Axioms the change adds count as findings wherever they are declared, used or not.
+    assert set(a["axioms_added"]) == {"sum_pair", "ext_seed_v2", "pr_cheat"}
+
+
+def test_inherited_sorry_is_accepted_and_flagged(env):
+    """The base version of double_spec reached base_gap, which is still unproved in the head."""
+    proof = "theorem double_spec (x : Nat) : double x = 2 * x := by\n  unfold double\n  rw [base_gap]\n  omega\n"
+    rc, v, _ = run(env, "inherited", fix(proof))
+    assert v["verdict"] == "accepted", (v["failed_checks"], v["checks"]["G2"]["violations"])
+    assert v["inherited_sorry"] == {"double_spec": ["base_gap"]}
+
+
+# ------------------------------------------------------------------ review findings (2026-10-30)
+
+def test_bot_rests_on_an_axiom_the_change_declares_but_nothing_uses(env):
+    """Finding 1: an axiom's closure names itself, so declaring `pr_cheat : False` is not using it.
+    The bot may not rest a repair on it, though the head has it; base mode rejects it too."""
+    proof = "theorem double_spec (x : Nat) : double x = 2 * x := pr_cheat.elim\n"
+    for ref in ("head", "base"):
+        rc, v, _ = run(env, "pr-cheat", fix(proof), reference=ref)
+        assert v["verdict"] in ("rejected", "gate-unavailable") and v["verdict"] != "accepted", ref
+    rc, v, _ = run(env, "pr-cheat", fix(proof))
+    assert_rejected(v, "G2")
+    assert any(x["decl"] == "double_spec" and "pr_cheat" in x["msg"] for x in v["checks"]["G2"]["violations"])
+
+
+def test_bot_brings_back_a_declaration_the_change_removed(env):
+    """le_add is in the base, not in the head: re-adding it is an addition, and an unused one."""
+    rc, v, _ = run(env, "readd", lambda t: fix(VALID)(t) + "\n" + LE_ADD)
+    assert_rejected(v, "G2")
+    assert any(x["decl"] == "le_add" and "not used" in x["msg"] for x in v["checks"]["G2"]["violations"])
+
+
+@pytest.mark.parametrize("new", ["def pr_def (x : Nat) : Nat := x + 2\n", ""])
+def test_bot_alters_or_deletes_a_definition_the_change_added(env, new):
+    rc, v, _ = run(env, "prdef-" + ("alter" if new else "delete"),
+                   lambda t: fix(VALID)(t).replace("def pr_def (x : Nat) : Nat := x + 1\n", new))
+    assert_rejected(v, "G0", "G1")
+    assert any(x["decl"] == "pr_def" for x in v["checks"]["G1"]["violations"])
+
+
+def test_a_theorem_the_change_added_whose_proof_fails_blocks_acceptance(env):
+    """Finding 3: the pipeline stubs a failing theorem the PR added, which is outside the broken
+    set (no base version). Its stub must not pass for the head's own `sorry`."""
+    root, cfg = env["root"], env["cfg"]
+    k2 = root / "broken-pr-new"
+    shutil.rmtree(k2, ignore_errors=True)
+    shutil.copytree(env["broken"], k2, ignore=shutil.ignore_patterns(".lake"))
+    (k2 / SPECS).write_text((k2 / SPECS).read_text() + "\ntheorem pr_new : 1 + 1 = 2 := by sorry\n")
+    assert gate("snapshot", "--config", str(cfg), "--tree", str(k2), "--out", str(root / "K2.json")).returncode == 0
+    env2 = {**env, "broken": k2, "K": root / "K2.json"}
+    rc, v, _ = run(env2, "pr-new", fix(VALID), stubs=STUBS + ["Toy/Specs.lean::pr_new"])
+    assert v["verdict"] == "rejected" and not v["eligible"]
+    assert [o["key"] for o in v["checks"]["G1"]["info"]["stubbed_outside_broken_set"]] == ["pr_new"]
+    rc, v, _ = run(env2, "pr-new", fix(VALID), stubs=None)  # without the pipeline's stub list: no decision
+    assert v["verdict"] == "gate-unavailable" and any("--stubs" in u for u in v["unavailable"])
 
 
 # ------------------------------------------------------------------ the bot is still held to everything

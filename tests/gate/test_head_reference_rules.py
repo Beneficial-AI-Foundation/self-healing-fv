@@ -1,0 +1,95 @@
+"""Head-reference rules on synthetic snapshots (DESIGN.md §4.9), where a Lean-backed case would be
+slow or hard to build: native code, the kernel replay's native-owner path, the head's own
+preconditions, libraries under a srcDir, and the stub list. Base mode is pinned by
+test_fail_closed.py and test_native_flag.py; the Lean-backed head cases are in
+test_head_reference.py."""
+from __future__ import annotations
+
+from gates import compare
+from gates.snapshot import normalize_axioms
+
+from .test_fail_closed import BASE3, CFG, NATIVE_STOP, case, rec
+
+NATIVE = BASE3 + ["Lean.ofReduceBool"]
+STUBS = ["M.lean::T"]
+
+
+def head(base, broken, cand, diff, stubs=STUBS):
+    return compare.compare(CFG, base, broken, cand, diff, reference="head", stubs=stubs)
+
+
+def test_the_plain_repair_is_accepted_against_the_head():
+    v = head(*case())
+    assert v["verdict"] == "accepted" and v["reference"] == "head", (v["failed_checks"], v["unavailable"])
+
+
+def test_native_code_is_allowed_where_the_base_version_had_it():
+    base, broken, cand, diff = case(cand_axioms=NATIVE)
+    base["records"]["T"] = rec(NATIVE)
+    v = head(base, broken, cand, diff)
+    assert v["verdict"] == "accepted" and v["native_code"] == ["T"], v["checks"]["G2"]["violations"]
+
+
+def test_native_code_new_to_the_theorem_is_rejected_even_if_the_head_uses_it_elsewhere():
+    base, broken, cand, diff = case(cand_axioms=NATIVE)
+    for s in (broken, cand):
+        s["records"]["N"] = rec(NATIVE)  # the head proves something else by native_decide
+    v = head(base, broken, cand, diff)
+    assert v["verdict"] == "rejected" and any("Lean.ofReduceBool" in x["msg"] for x in v["checks"]["G2"]["violations"])
+
+
+def test_every_lean_of_reduce_axiom_is_native_code():
+    assert normalize_axioms(["Lean.ofReduceNat", "propext"]) == ["Lean.ofReduceBool", "propext"]
+    base, broken, cand, diff = case(cand_axioms=normalize_axioms(BASE3 + ["Lean.ofReduceNat"]))
+    v = head(base, broken, cand, diff)
+    assert v["verdict"] == "rejected" and "G2" in v["failed_checks"]
+
+
+def test_kernel_replay_stopped_by_native_code_the_head_already_had():
+    """The G5 native-owner path, against the head: N is unchanged and proved by native code there."""
+    base, broken, cand, diff = case()
+    for s in (base, broken, cand):
+        s["records"]["N"] = rec(NATIVE)
+    cand["kernel_replay"]["modules"]["M"] = {"ok": False, "output": NATIVE_STOP.format("N")}
+    v = head(base, broken, cand, diff)
+    assert v["verdict"] == "accepted" and [x["stopped_at"] for x in v["kernel_replay_incomplete"]] == ["N"]
+    cand["kernel_replay"]["modules"]["M"] = {"ok": False, "output": NATIVE_STOP.format("T")}  # the repair itself
+    assert head(base, broken, cand, diff)["verdict"] == "gate-unavailable"
+
+
+def test_a_head_that_could_not_be_fingerprinted_cannot_be_the_reference():
+    base, broken, cand, diff = case()
+    broken["stmtcanon"] = {"ok": False}
+    v = head(base, broken, cand, diff)
+    assert v["verdict"] == "gate-unavailable" and any("fingerprinting failed" in u for u in v["unavailable"])
+
+
+def test_a_head_theorem_without_a_record_cannot_be_the_reference():
+    base, broken, cand, diff = case()
+    broken["sources"]["M.lean"] += "\ntheorem U : True := trivial\n"  # written, never fingerprinted
+    v = head(base, broken, cand, diff)
+    assert v["verdict"] == "gate-unavailable" and any("have no record" in u and "M: U" in u for u in v["unavailable"])
+
+
+def test_a_library_the_change_adds_under_a_srcdir_is_not_a_layout_mismatch():
+    """Finding 4: the base leaves out the new library, so it has no directory for it."""
+    base, broken, cand, diff = case()
+    broken["src_dirs"] = cand["src_dirs"] = {"Protocols": "src"}
+    assert head(base, broken, cand, diff)["verdict"] == "accepted"
+    base["src_dirs"] = {"Protocols": "elsewhere"}  # a library the base has must sit where the head has it
+    assert head(base, broken, cand, diff)["verdict"] == "gate-unavailable"
+    base["src_dirs"] = {}
+    cand["src_dirs"] = {}  # broken and candidate must agree on all of them
+    assert head(base, broken, cand, diff)["verdict"] == "gate-unavailable"
+    v = compare.compare(CFG, base, broken, cand, diff)  # base mode keeps the three-way equality
+    assert v["verdict"] == "gate-unavailable"
+
+
+def test_a_stub_outside_the_broken_set_makes_the_case_ineligible():
+    base, broken, cand, diff = case()
+    broken["sources"]["M.lean"] += "\ntheorem U : True := by sorry\n"  # added by the change, stubbed
+    broken["records"]["U"] = rec(BASE3 + ["sorryAx"], ["U"])
+    v = head(base, broken, cand, diff, stubs=STUBS + ["M.lean::U"])
+    assert not v["eligible"] and v["verdict"] != "accepted"
+    assert [o["key"] for o in v["checks"]["G1"]["info"]["stubbed_outside_broken_set"]] == ["U"]
+    assert head(base, broken, cand, diff, stubs=None)["verdict"] == "gate-unavailable"

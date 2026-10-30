@@ -55,7 +55,7 @@ import hashlib
 import re
 
 from . import inventory, patch, scope, version
-from .snapshot import config_hash, module_file
+from .snapshot import config_hash, module_file, module_of
 
 BASE3 = {"propext", "Classical.choice", "Quot.sound"}
 SORRY = "sorryAx"
@@ -109,7 +109,14 @@ def preconditions(cfg: dict, base: dict, broken: dict, cand: dict, reference: st
         out.append(f"toolchain differs between broken ({broken.get('toolchain')}) and candidate "
                    f"({cand.get('toolchain')}) snapshots")
     # Module paths are compared across snapshots, so all three must resolve modules alike (§4.5).
-    if not base.get("src_dirs", {}) == broken.get("src_dirs", {}) == cand.get("src_dirs", {}):
+    # Head reference: a base that left out a library the change adds has no directory for it, so
+    # the base must agree on the libraries it has, and broken and candidate on all of them.
+    b_dirs, k_dirs, c_dirs = (s.get("src_dirs", {}) for s in (base, broken, cand))
+    if reference == "head":
+        if k_dirs != c_dirs or any(k_dirs.get(lib) != d for lib, d in b_dirs.items()):
+            out.append("the snapshots place the project's modules in different source directories: "
+                       f"base {b_dirs}, broken {k_dirs}, candidate {c_dirs}")
+    elif not b_dirs == k_dirs == c_dirs:
         out.append("the snapshots place the project's modules in different source directories: "
                    f"base {base.get('src_dirs')}, broken {broken.get('src_dirs')}, candidate {cand.get('src_dirs')}")
     b = base.get("build", {})
@@ -140,12 +147,18 @@ def preconditions(cfg: dict, base: dict, broken: dict, cand: dict, reference: st
     return out
 
 
-def compare(cfg: dict, base: dict, broken: dict, cand: dict, diff: str, reference: str = "base") -> dict:
+def compare(cfg: dict, base: dict, broken: dict, cand: dict, diff: str, reference: str = "base",
+            stubs: list[str] | None = None) -> dict:
     """`reference` (§4.9) is what the bot is held to. "base" (replay): the frozen set and the
     trust baseline are the base's, so the change's own statement and trust changes count against
     the candidate too. "head" (live, decided 2026-10-30): they are the change's as written, i.e.
     the stubbed broken state's, and the gate judges only the bot's edits; the change's own
-    changes are the audit's (gates/audit.py), reported but not judged. Every check runs in both."""
+    changes are the audit's (gates/audit.py), reported but not judged. Every check runs in both.
+
+    `stubs` (head reference, required there): every proof the pipeline stubbed (S2), as
+    `file::declaration`. The head's own `sorry` and a stub look alike in the text, so the gate
+    cannot tell them apart; a stub outside the broken set (e.g. a theorem the change added, whose
+    proof fails) makes the case ineligible, since the candidate would still carry it."""
     if reference not in ("base", "head"):
         raise ValueError(f"unknown reference {reference!r}")
     head = reference == "head"
@@ -158,6 +171,13 @@ def compare(cfg: dict, base: dict, broken: dict, cand: dict, diff: str, referenc
     for b in bset:
         if not b["name"] or b["name"] not in (broken if head else base)["records"]:
             unavailable.append(f"broken theorem {b['key']} ({b['file']}) has no {'head' if head else 'base'} record")
+    outside: list[dict] = []  # stubs the candidate cannot repair (head reference)
+    if head and stubs is None:
+        unavailable.append("the head reference needs the pipeline's list of stubbed proofs (--stubs)")
+    for s in stubs or [] if head else []:
+        file, _, key = s.partition("::")
+        if not any(b["file"] == file and scope.short(b["key"]) == key for b in bset):
+            outside.append({"file": file, "key": key, "name": scope.full_name(broken, file, key)})
 
     # --- eligibility (§3.3 S2): every frozen declaration observed in the stubbed broken state.
     # A declaration a tactic added while a base proof elaborated (no source range, e.g. bv_decide's
@@ -172,6 +192,8 @@ def compare(cfg: dict, base: dict, broken: dict, cand: dict, diff: str, referenc
         unobserved = [{"decl": n, "module": r.get("module"), "status": "error"}
                       for n, r in broken["records"].items() if "error" in r]
         unobserved += [{"decl": m, "module": m, "status": s} for m, s in broken["modules"].items() if s != "observed"]
+        unobserved += [{"decl": o["name"] or o["key"], "module": module_of(o["file"], broken.get("src_dirs")),
+                        "status": "stubbed outside the broken set"} for o in outside]
     else:
         generated = sorted(n for n, r in base["records"].items()
                            if r.get("written") is False and n not in broken["records"])
@@ -206,18 +228,22 @@ def compare(cfg: dict, base: dict, broken: dict, cand: dict, diff: str, referenc
             v1.append(e)
     checks["G1"] = {"id": "G1", "ok": not v1 and eligible, "violations": v1,
                     "info": {"inventory": len(inventory_), "unobserved": unobserved[:200],
-                             "unobserved_n": len(unobserved), "generated_not_frozen": generated[:200]}}
+                             "unobserved_n": len(unobserved), "generated_not_frozen": generated[:200],
+                             "stubbed_outside_broken_set": outside[:200]}}
 
     # --- G2 trust base.
     # The reference closure of each frozen declaration: (axioms, sorry sources). Base reference:
     # its base record. Head reference: its record in the stubbed broken state, without the stubs'
-    # `sorry`; a stub hides the closure of the head's own proof, so a declaration whose closure
-    # runs through a stub may also rest on any axiom the head uses (never `sorry` or native code),
-    # on native code only if its base version did, and on `sorry` only through lemmas its base
-    # version reached that are still unproved in the head (§4.9).
-    stubs = repaired if head else set()
+    # `sorry`. A stub hides the closure of the head's own proof, so a declaration whose closure runs
+    # through a stub may rest on what its base version rested on (native code included), plus the
+    # axioms new at the head that some other head declaration uses (never `sorry` or native code;
+    # an axiom's closure names itself, so declaring one is not using it), and on `sorry` only
+    # through lemmas its base version reached that are still unproved in the head (§4.9).
+    stubs = (repaired | {o["name"] for o in outside if o["name"]}) if head else set()
     head_sorry = {s for r in broken["records"].values() for s in r.get("sorry_sources", [])} - stubs
-    head_axioms = {x for r in inventory_.values() for x in r.get("axioms", [])} - {SORRY, NATIVE}
+    base_axioms = {x for r in base["records"].values() for x in r.get("axioms", [])}
+    head_axioms = {x for n, r in inventory_.items() for x in r.get("axioms", []) if x != n} \
+        - base_axioms - {SORRY, NATIVE}
 
     def ref_closure(name: str) -> tuple[set[str], set[str]]:
         r = inventory_.get(name) or {}
@@ -227,7 +253,7 @@ def compare(cfg: dict, base: dict, broken: dict, cand: dict, diff: str, referenc
         axioms, sources = set(r.get("axioms", [])) - {SORRY}, srcs - stubs
         if srcs & stubs:
             b = base["records"].get(name) or {}
-            axioms |= head_axioms | (set(b.get("axioms", [])) & {NATIVE})
+            axioms |= (set(b.get("axioms", [])) - {SORRY}) | head_axioms
             sources |= set(b.get("sorry_sources", [])) & head_sorry
         return axioms | ({SORRY} if sources else set()), sources
 
