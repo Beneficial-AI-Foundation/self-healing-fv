@@ -214,6 +214,45 @@ def test_a_theorem_the_change_added_whose_proof_fails_blocks_acceptance(env):
     assert v["verdict"] == "gate-unavailable" and any("--head-tree" in u for u in v["unavailable"])
 
 
+@pytest.mark.parametrize("stubs", [None, []])
+def test_a_head_tree_that_is_the_stubbed_tree_cannot_be_judged(env, stubs):
+    """Final review: `--head-tree` pointing at the stubbed tree itself (say, overwritten after the
+    agent ran) shows no stubs, so a PR-added failing theorem's stub would pass for the head's own
+    sorry. Every broken theorem must be among the stubs the gate finds."""
+    rc, v, _ = run({**env, "head": env["broken"]}, "valid", fix(VALID), stubs=stubs)
+    assert v["verdict"] == "gate-unavailable" and any("does not show" in u for u in v["unavailable"])
+
+
+def test_an_empty_head_tree_cannot_be_judged(env):
+    empty = env["root"] / "head-empty"
+    empty.mkdir(exist_ok=True)
+    rc, v, _ = run({**env, "head": empty}, "valid", fix(VALID))
+    assert v["verdict"] == "gate-unavailable" and any("not in the head" in u for u in v["unavailable"])
+
+
+def test_an_input_changed_after_it_was_recorded_cannot_be_judged(env):
+    """The pipeline records the inputs' hashes before any agent runs (gate input-hashes); compare
+    refuses if one changed (a cheap tamper check, DESIGN.md §9.3)."""
+    root, cfg = env["root"], env["cfg"]
+    k = root / "K-copy.json"
+    k.write_text(env["K"].read_text())
+    r = gate("input-hashes", "--config", str(cfg), "--base", str(root / "B.json"), "--broken", str(k),
+             "--head-tree", str(env["head"]))
+    assert r.returncode == 0, r.stderr
+    (root / "hashes.json").write_text(r.stdout)
+    d, c = root / "valid.patch", root / "valid.C.json"
+    run(env, "valid", fix(VALID))  # makes the patch and the candidate snapshot
+    common = ["--config", str(cfg), "--base", str(root / "B.json"), "--broken", str(k), "--diff", str(d),
+              "--candidate", str(c), "--reference", "head", "--head-tree", str(env["head"]),
+              "--expect-hashes", str(root / "hashes.json")]
+    gate("compare", *common, "--out", str(root / "hashes-ok.V.json"))
+    assert json.loads((root / "hashes-ok.V.json").read_text())["verdict"] == "accepted"
+    k.write_text(k.read_text().replace('"pp"', '"pp" ', 1))  # the same JSON, a different file
+    gate("compare", *common, "--out", str(root / "hashes-bad.V.json"))
+    v = json.loads((root / "hashes-bad.V.json").read_text())
+    assert v["verdict"] == "gate-unavailable" and any("input changed" in u and "broken" in u for u in v["unavailable"])
+
+
 def test_a_stubbed_state_that_is_not_the_head_plus_stubs_cannot_be_judged(env):
     """If the stubbed state differs from the head anywhere but in stubbed proofs, the gate's own
     stub list cannot be trusted, so it does not decide."""

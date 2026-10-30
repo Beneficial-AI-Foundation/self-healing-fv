@@ -137,6 +137,27 @@ def test_a_new_axiom_counts_only_if_a_trusted_model_declares_it():
                                               for x in v["checks"]["G2"]["violations"])
 
 
+def test_a_new_file_under_a_trusted_model_directory_is_trusted():
+    """By design (final review, item 3): a trusted-model entry ending in `/` matches by prefix, so a
+    model file the PR adds under it is trusted, as in libsignal-verify's model refresh. Its axioms
+    are usable behind a stub, flagged per theorem, and listed by the audit; the PR's reviewer is the
+    check on what a PR adds there (DESIGN.md §4.9)."""
+    from gates import audit
+    from gates.snapshot import config_hash
+    cfg = {**CFG, "protected": {**CFG["protected"], "trusted_models": ["Toy/Models/"]}}
+    base, broken, cand, diff = pr_axiom_case("Toy.Models.New")  # Toy/Models/New.lean, new in the PR
+    for s in (base, broken, cand):
+        s["config_sha256"] = config_hash(cfg)
+    for s in (broken, cand):
+        s["sources"]["Toy/Models/New.lean"] = "axiom PA : True\n"
+    v = compare.compare(cfg, base, broken, cand, diff, reference="head", stubs=STUBS,
+                        head_sources={**base["sources"], "Toy/Models/New.lean": "axiom PA : True\n"})
+    assert v["verdict"] == "accepted", (v["unavailable"], v["checks"]["G2"]["violations"])
+    assert v["checks"]["G2"]["info"]["axioms_beyond_base_version"] == {"T": ["PA"]}
+    a = audit.audit(cfg, base, broken)
+    assert a["axioms_added"] == ["PA"] and a["trusted_models_changed"] == ["Toy/Models/New.lean"]
+
+
 def test_the_head_sources_are_required_and_must_match_the_stubbed_state():
     base, broken, cand, diff = case()
     v = compare.compare(CFG, base, broken, cand, diff, reference="head", stubs=STUBS)

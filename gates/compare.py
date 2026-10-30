@@ -148,7 +148,8 @@ def preconditions(cfg: dict, base: dict, broken: dict, cand: dict, reference: st
 
 
 def compare(cfg: dict, base: dict, broken: dict, cand: dict, diff: str, reference: str = "base",
-            stubs: list[str] | None = None, head_sources: dict[str, str] | None = None) -> dict:
+            stubs: list[str] | None = None, head_sources: dict[str, str] | None = None,
+            tampered: list[str] | None = None) -> dict:
     """`reference` (§4.9) is what the bot is held to. "base" (replay): the frozen set and the
     trust baseline are the base's, so the change's own statement and trust changes count against
     the candidate too. "head" (live, decided 2026-10-30): they are the change's as written, i.e.
@@ -161,12 +162,18 @@ def compare(cfg: dict, base: dict, broken: dict, cand: dict, diff: str, referenc
     sources, and it cannot decide. A stub outside the broken set (e.g. a theorem the change added,
     whose proof fails) makes the case ineligible, since the candidate would still carry it.
     `stubs` (optional): the pipeline's own list (`file::declaration`), only a cross-check: if it
-    disagrees with what the gate found, the gate cannot decide."""
+    disagrees with what the gate found, the gate cannot decide.
+
+    `tampered`: inputs whose hashes differ from those the pipeline recorded before any agent ran
+    (cli.py `--expect-hashes`); any makes the gate unable to decide. A cheap check only: the
+    pipeline is not trusted, and full protection of the gate's inputs needs the agent sandbox
+    (DESIGN.md §9.3)."""
     if reference not in ("base", "head"):
         raise ValueError(f"unknown reference {reference!r}")
     head = reference == "head"
     checks: dict[str, dict] = {}
     unavailable = preconditions(cfg, base, broken, cand, reference)
+    unavailable += [f"an input changed after the pipeline recorded it, before any agent ran: {t}" for t in tampered or []]
     g0 = scope.check(cfg, base, broken, diff)
     checks["G0"] = g0
     bset = g0["info"]["broken_set"]
@@ -184,6 +191,12 @@ def compare(cfg: dict, base: dict, broken: dict, cand: dict, diff: str, referenc
             unavailable += [f"the stubbed broken state is not the head plus stubs: {p}" for p in problems[:5]]
         in_set = {(b["file"], b["key"]) for b in bset}
         outside = [s for s in found if (s["file"], s["key"]) not in in_set]
+        # Every broken theorem is a stub by construction, so the head must show it unstubbed: a "head"
+        # that is the stubbed tree itself (or was tampered into it) shows no stubs at all.
+        unfound = sorted(f"{f}::{k}" for f, k in in_set - {(s["file"], s["key"]) for s in found})
+        if head_sources is not None and unfound:
+            unavailable.append(f"the head does not show {len(unfound)} broken theorem(s) as stubbed in the broken "
+                               f"state (e.g. {unfound[0]}): it is not the head of this stubbed state")
         if stubs is not None and head_sources is not None:
             mine = {f"{s['file']}::{scope.short(s['key'])}" for s in found}
             if set(stubs) != mine:

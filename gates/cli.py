@@ -4,6 +4,8 @@
   gate scope    --config T.toml --base B.json --broken K.json --diff D.patch [--out V.json]
   gate compare  --config T.toml --base B.json --broken K.json --candidate C.json --diff D.patch --out V.json
                 [--reference base|head --head-tree DIR [--stubs S.json]]   (head: live, the change as written is the reference, §4.9)
+                [--expect-hashes H.json]   (from `gate input-hashes`, recorded before any agent ran)
+  gate input-hashes --config T.toml --base B.json --broken K.json [--head-tree DIR]
   gate diff     --config T.toml --before DIR --after DIR --out D.patch
   gate audit    --config T.toml --base B.json --head H.json [--out A.json]   (exit 0 no-change, 1 changed, 2 incomplete)
   gate version
@@ -41,6 +43,22 @@ def tree_texts(root: Path) -> dict[str, str]:
             out[str(rel)] = p.read_text()
         except UnicodeDecodeError:
             out[str(rel)] = f"<binary sha256 {hashlib.sha256(p.read_bytes()).hexdigest()}>"
+    return out
+
+
+def input_hashes(cfg: dict, base: Path, broken: Path, head_tree: Path | None) -> dict[str, str]:
+    """sha256 of the snapshot files and of the head tree's Lean sources: recorded by the pipeline
+    before any agent runs, checked by `compare --expect-hashes` (a cheap tamper check, §9.3)."""
+    out = {"base": hashlib.sha256(base.read_bytes()).hexdigest(),
+           "broken": hashlib.sha256(broken.read_bytes()).hexdigest()}
+    if head_tree is not None:
+        root = head_tree.resolve() / snapshot.workspace_project(cfg)
+        h = hashlib.sha256()
+        for p in sorted(root.rglob("*.lean")):
+            rel = p.relative_to(root)
+            if p.is_file() and not any(part in SKIP_DIRS for part in rel.parts):
+                h.update(str(rel).encode() + b"\0" + p.read_bytes() + b"\0")
+        out["head_tree"] = h.hexdigest()
     return out
 
 
@@ -88,6 +106,13 @@ def main(argv: list[str] | None = None) -> int:
                            "the stubs itself")
             c.add_argument("--stubs", type=Path, help="with --reference head, optional: the pipeline's JSON list of "
                            "the proofs it stubbed (file::declaration), cross-checked against the gate's own")
+            c.add_argument("--expect-hashes", type=Path, help="JSON from `gate input-hashes`, recorded before any agent "
+                           "ran: the gate cannot decide if an input no longer matches")
+    ih = sub.add_parser("input-hashes", help="hashes of compare's inputs, to record before any agent runs")
+    ih.add_argument("--config", type=Path, required=True)
+    ih.add_argument("--base", type=Path, required=True)
+    ih.add_argument("--broken", type=Path, required=True)
+    ih.add_argument("--head-tree", type=Path)
     sub.add_parser("version")
     th = sub.add_parser("tree-hash")
     th.add_argument("--config", type=Path, required=True)
@@ -108,6 +133,9 @@ def main(argv: list[str] | None = None) -> int:
         print(version())
         return 0
     cfg = load_config(a.config)
+    if a.cmd == "input-hashes":
+        print(json.dumps(input_hashes(cfg, a.base, a.broken, a.head_tree)))
+        return 0
     if a.cmd == "tree-hash":
         tree = a.tree.resolve() / snapshot.workspace_project(cfg)
         hcfg = snapshot.present_roots(tree, cfg)[0] if a.allow_absent_roots else cfg
@@ -151,8 +179,14 @@ def main(argv: list[str] | None = None) -> int:
         if a.head_tree:  # the same audited files the stubbed state has, as the head has them
             hp = a.head_tree.resolve() / snapshot.workspace_project(cfg)
             head_sources = {p: (hp / p).read_text() for p in broken.get("sources", {}) if (hp / p).is_file()}
+        tampered = None
+        if a.expect_hashes:
+            want = json.loads(a.expect_hashes.read_text())
+            have = input_hashes(cfg, a.base, a.broken, a.head_tree if "head_tree" in want else None)
+            tampered = sorted(k for k in want.keys() | have.keys() if want.get(k) != have.get(k))
         res = compare.compare(cfg, base, broken, read_json(a.candidate), diff, reference=a.reference,
-                              stubs=json.loads(a.stubs.read_text()) if a.stubs else None, head_sources=head_sources)
+                              stubs=json.loads(a.stubs.read_text()) if a.stubs else None, head_sources=head_sources,
+                              tampered=tampered)
         write_json(res, a.out)
         return {"accepted": 0, "gate-unavailable": 2}.get(res["verdict"], 1)
     except Exception as e:  # the gate never "passes" on its own failure
