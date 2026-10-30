@@ -4,7 +4,7 @@ Guidance for coding agents working in this repo (Claude Code, Codex CLI, Factory
 
 ## What this project does
 
-A CI bot for verified Rust (Rust → Charon/Aeneas → Lean). After a Rust, Aeneas, or Lean/Mathlib change breaks proofs, the bot first tries fixed edits without a model (the sweep), then an AI agent repairs the remaining proofs. A repair is accepted only if the model-free gate passes: no theorem statement changed, no new `axiom` or `sorry`, a clean rebuild, and a kernel re-check. Otherwise the bot escalates to a human with evidence. It never decides on its own whether a changed spec is acceptable.
+A CI bot for verified Rust (Rust → Charon/Aeneas → Lean). After a Rust, Aeneas, or Lean/Mathlib change breaks proofs, the bot first tries fixed edits without a model (the sweep), then an AI agent repairs the remaining proofs. A repair is accepted only if the model-free gate passes: no theorem statement changed, no new `axiom` or `sorry`, a clean rebuild, and a kernel re-check. Otherwise the bot escalates to a human with evidence. It never decides on its own whether a changed spec is acceptable. On a live PR the gate holds the bot's edits to the PR as written; the PR's own spec and trust changes are listed by the audit and not judged (`docs/DESIGN.md` §4.9).
 
 The prototype replays historical cases locally and writes a report; it opens no PRs. It can also run on a live change (base and head commits, e.g. an open PR), and `.github/workflows/live.yml` does so silently on the targets' failing PRs, posting nothing. `.github/workflows/pr-repair.yml` is the reusable workflow a target repo can call on its own PRs; it writes a Repair section into the PR's comment (not deployed yet).
 
@@ -56,6 +56,7 @@ The agent, the pipeline and the report do not need to be trusted, because only t
 - **When unsure, fail closed.** Missing or incomplete input means `gate-unavailable`, never a pass.
 - **The gate stays model-free and independent of `shfv/`.** `gates/` never imports `shfv/` or any model SDK. The pipeline reaches the gate only through its CLI (`python -m gates.cli`), and imports from `gates/` only the diff format and the subprocess helper.
 - The target config may say what to build and what to protect, but never loosen what the gate accepts.
+- **Know the reference** (`docs/DESIGN.md` §4.9, decided 2026-10-30). Live runs gate with `--reference head`: the bot is held to the PR as written, and the PR's own statement and trust changes go to the audit, reported and not judged. Replays keep `--reference base`. A gate change must keep both modes' planted tests green (`tests/gate/test_planted.py` is base, `tests/gate/test_head_reference.py` is head), and must not let a snapshot that leaves out root modules become the reference.
 
 ## Data
 

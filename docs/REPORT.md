@@ -119,6 +119,7 @@ Each attempt object has `adapter`, `model`, `resolved_model`, `stop` (`done`, `g
 | Field | Meaning |
 |---|---|
 | `verdict` | `accepted`, `rejected`, `passed-without-kernel-replay` or `gate-unavailable` |
+| `reference` | What the bot was held to (DESIGN.md §4.9): `head` for a live run (the PR as written; the gate judged only the bot's edits, and the PR's own changes are in `audit`, not judged), `base` for a replay. Absent in runs before 2026-10-30, which were all `base`. |
 | `failed_checks` | Ids of checks that failed, e.g. `["G1", "G2"]` |
 | `unavailable` | Reasons the gate could not decide (non-empty with `gate-unavailable`) |
 | `eligible` | Whether every frozen declaration was observed in the stubbed broken state. `null` if G0 failed before any build. |
@@ -128,6 +129,7 @@ Each attempt object has `adapter`, `model`, `resolved_model`, `stop` (`done`, `g
 | `inherited_sorry` | Flag: `{theorem: [unproved base lemmas it reaches]}`. Non-empty only on `accepted`. |
 | `kernel_replay_incomplete` | Flag: `[{module, stopped_at, native}]`, modules where the kernel replay stopped at a native-code proof that was already there at the base. Non-empty only on `accepted`. |
 | `native_code` | Flag: `[theorem]`, repaired theorems that rest on native code (`Lean.ofReduceBool`), as their base versions did. Report only. Non-empty only on `accepted`. |
+| `checks.G2.info.axioms_beyond_base_version` | `reference: head` only: `{theorem: [axioms]}`, repaired theorems that rest on axioms their base version did not use and the PR head does (e.g. a model the PR rewrote). Allowed by G2, named in the report. Report only. |
 | `heartbeats` | `maxHeartbeats` raises in the diff |
 | `diff` | The candidate diff the gate checked, relative to the stubbed broken state (not the change's head; for that, use `delivery_diff`) |
 | `gate_version` | The gate that decided |
@@ -147,13 +149,14 @@ The output of `gate audit` on the base and the change's head:
 | `removed` | Frozen declarations gone from the head. One the change's extracted code now defines (a trusted model replaced by extracted Rust) also has `now_extracted`, the file (added by the pipeline by name, display only). When the change's audit accounts for every G1/G2 failure of the gate, or for every missing frozen declaration of an ineligible case, the report says so and lists these trust changes. |
 | `axioms_changed` | Each `{decl, added, removed}` |
 | `trusted_models_changed` | Paths of trusted-model files whose text changed |
+| `roots_added` | Root modules (libraries) the head has and the base does not: the base snapshot left them out (live only) |
 | `coverage_problems`, `not_compared` | Why the audit is incomplete |
 | `summary` | Counts, including `new_sorry` |
 | `error` | Set by the pipeline instead of the fields above when the audit could not run (`outcome` is then `incomplete` or `not-applicable`) |
 | `head_stubbed` | Live: true. The head does not build, so it was audited in its stubbed state, with failing proofs as `sorry` |
 | `sorry_from_stubs`, `sorry_written` | Live: the stubs change axiom closures both ways, so the pipeline drops `sorryAx` and removed axioms from `axioms_changed` (`sorry_from_stubs` counts the entries that had `sorryAx`), lists instead the declarations whose source text gained a `sorry` (`sorry_written`, `file::decl`), and recomputes `outcome` by the gate's rule. Display only: the audit decides nothing. |
 
-`incomplete` never means "no change". The bot does not judge audit findings: route `changed` to a spec owner.
+`incomplete` never means "no change". The bot does not judge audit findings: route `changed` to a spec owner. In a live run (`gate.reference: head`) the gate did not judge them either: an `accepted` verdict there covers the bot's edits only, and the audit is the only account of the PR's own changes.
 
 ## 8. The `human_fix` section (replay only)
 

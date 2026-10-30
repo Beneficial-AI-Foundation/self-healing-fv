@@ -6,7 +6,7 @@ When Rust code, the Aeneas extractor, or the Lean toolchain changes, Lean proofs
 
 1. rebuilds the broken state (the existing proofs on the new extracted code);
 2. tries cheap fixed edits first (the *sweep*, no model), then has an AI agent repair the remaining broken proofs, within cost and time budgets;
-3. accepts a repair only if a model-free gate passes: no theorem statement changed, no new axioms or `sorry`, a clean rebuild, and a kernel re-check;
+3. accepts a repair only if a model-free gate passes: no theorem statement changed, no new axioms or `sorry`, a clean rebuild, and a kernel re-check. On a live PR "changed" means changed by the bot, against the PR as written; the PR's own spec and trust changes are listed for a reviewer, not judged (docs/DESIGN.md §4.9);
 4. otherwise escalates to a human with the evidence, for example when a statement would have to change.
 
 LLMs propose, scripts enforce: the bot never edits a statement and never decides whether a spec change is acceptable.
