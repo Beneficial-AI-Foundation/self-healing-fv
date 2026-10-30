@@ -592,6 +592,10 @@ class Run:
             stubs = self.scratch / "stubs.json"
             stubs.write_text(json.dumps(self.stubbed()))
             live = ["--head-tree", str(self.case_dir / "head"), "--stubs", str(stubs)]
+        if getattr(self, "input_hashes", None):
+            hashes = self.scratch / f"{label}.input-hashes.json"
+            hashes.write_text(self.input_hashes)
+            live += ["--expect-hashes", str(hashes)]
         gate("compare", *common, "--candidate", str(C), "--out", str(V), "--reference", self.reference, *live,
              check=False)  # 2 = gate-unavailable
         if not V.exists():
@@ -692,6 +696,10 @@ class Run:
             B = self.snapshot("B", self.base_root, allow_absent_roots=bool(self.live))
             K = self.snapshot("K", self.broken_root)
             self.snapshot_paths = (B, K)
+            # The gate's inputs as they are before any agent runs, kept in memory (not in a file the agent
+            # could reach) and checked by `compare --expect-hashes`: a cheap tamper check (§9.3).
+            self.input_hashes = gate("input-hashes", "--config", str(self.config), "--base", str(B), "--broken", str(K),
+                                     *(["--head-tree", str(self.case_dir / "head")] if self.live else [])).stdout
             self.timing["snapshots_s"] = time.time() - t0
             t0 = time.time()
             # Live, the head is the change itself; it does not build, so the audit reads its stubbed
@@ -1022,8 +1030,9 @@ def repo_to_project(replay: dict, lean_root: str) -> dict:
     pre = lean_root.rstrip("/") + "/"
     fix = lambda p: p[len(pre):] if isinstance(p, str) and p.startswith(pre) else p
     out = dict(replay)
-    for k in ("broken_proofs", "statement_broken", "definition_broken"):
-        out[k] = [fix(x) for x in replay.get(k, [])]
+    for k in ("broken_proofs", "statement_broken", "definition_broken", "stubbed"):
+        if k in replay:  # an analysis from before `stubbed` existed keeps its fallback (Run.stubbed)
+            out[k] = [fix(x) for x in replay[k]]
     for k in ("broken_proofs_detail", "statement_errors"):
         out[k] = [{**d, "file": fix(d.get("file"))} for d in replay.get(k, [])]
     return out

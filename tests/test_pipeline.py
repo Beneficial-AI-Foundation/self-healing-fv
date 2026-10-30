@@ -681,6 +681,17 @@ def test_live_head_whose_extracted_code_does_not_build_escalates(toy_live, monke
     assert "the extracted code does not build" in md and "`Funs.lean`]" in md
 
 
+def test_repo_paths_become_project_paths_in_every_stub_list():
+    """A target whose Lake project sits inside the repo (SymCrypt: SymCRust/lean/): the analysis
+    names files from the repo root, the gate and the pipeline from the project's."""
+    rec = {"broken_proofs": ["SymCRust/lean/A.lean::t"], "stubbed": ["SymCRust/lean/A.lean::t", "SymCRust/lean/B.lean::u"],
+           "broken_proofs_detail": [{"file": "SymCRust/lean/A.lean"}]}
+    out = pipeline.repo_to_project(rec, "SymCRust/lean")
+    assert out["stubbed"] == ["A.lean::t", "B.lean::u"] and out["broken_proofs"] == ["A.lean::t"]
+    assert out["broken_proofs_detail"] == [{"file": "A.lean"}]
+    assert "stubbed" not in pipeline.repo_to_project({"broken_proofs": []}, "SymCRust/lean")  # older analyses
+
+
 def test_written_sorry_and_stub_discount(tmp_path):
     (tmp_path / "b" / "T").mkdir(parents=True)
     (tmp_path / "h" / "T").mkdir(parents=True)
