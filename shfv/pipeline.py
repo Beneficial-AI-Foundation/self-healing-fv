@@ -191,6 +191,8 @@ class Run:
         # Live input (§3.6, shfv/live.py): a case record from base and head, no human fix; the head's
         # analysis takes the place of the replay record once prepare() has built it.
         self.live = live is not None
+        # What the gate holds the bot to (§4.9): live, the PR as written; replay, the base, as before.
+        self.reference = "head" if self.live else "base"
         self.record, self.replay = (live, {}) if self.live else load_case(case_id, replay_path)
         self.generated = bool(self.record.get("generated"))
         # The Lake project inside a workspace tree, and inside the repo (records use repo paths).
@@ -283,11 +285,14 @@ class Run:
         # The head's own sources: the failing proofs as the PR wrote them (no stubs).
         self.orig = self.case_dir / "head" / self.wp
 
-    def snapshot(self, name: str, tree: Path) -> Path:
+    def snapshot(self, name: str, tree: Path, allow_absent_roots: bool = False) -> Path:
         """A gate snapshot of `tree`, reused only if it was made by this gate version, for this
-        target config, from exactly these inputs (toolchain, Lake files, every Lean source)."""
+        target config, from exactly these inputs (toolchain, Lake files, every Lean source).
+        `allow_absent_roots`: the live base, which is not the gate's reference there (§4.9) and may
+        lack a library the change adds."""
         out = self.case_dir / "snapshots" / f"{name}.json"
-        want = json.loads(gate("tree-hash", "--config", str(self.config), "--tree", str(tree)).stdout)
+        flag = ["--allow-absent-roots"] if allow_absent_roots else []
+        want = json.loads(gate("tree-hash", "--config", str(self.config), "--tree", str(tree), *flag).stdout)
         if out.exists():
             try:
                 head = json.loads(out.read_text())
@@ -297,7 +302,7 @@ class Run:
                 pass
         out.parent.mkdir(parents=True, exist_ok=True)
         gate("snapshot", "--config", str(self.config), "--tree", str(tree), "--out", str(out),
-             "--log", str(out.with_suffix(".build.log")))
+             "--log", str(out.with_suffix(".build.log")), *flag)
         return out
 
     # ------------------------------------------------------------------ S4
@@ -579,7 +584,9 @@ class Run:
              "--workdir", str(self.scratch / f"{label}-gate-tree"), "--clean", "--out", str(C),
              "--log", str(self.scratch / f"{label}.build.log"))
         V = self.scratch / f"{label}.V.json"
-        gate("compare", *common, "--candidate", str(C), "--out", str(V), check=False)  # 2 = gate-unavailable
+        # Live, the gate holds the bot to the PR as written, not to the base (§4.9, decided 2026-10-30).
+        gate("compare", *common, "--candidate", str(C), "--out", str(V), "--reference", self.reference,
+             check=False)  # 2 = gate-unavailable
         if not V.exists():
             raise GateUnavailable("gate compare produced no verdict")
         res["verdict"] = json.loads(V.read_text())
@@ -667,7 +674,7 @@ class Run:
                 self.p.step("escalate: the extracted code does not build at the head → extraction-setup")
                 raise _Done
             t0 = time.time()
-            B = self.snapshot("B", self.base_root)
+            B = self.snapshot("B", self.base_root, allow_absent_roots=bool(self.live))
             K = self.snapshot("K", self.broken_root)
             self.snapshot_paths = (B, K)
             self.timing["snapshots_s"] = time.time() - t0
@@ -687,8 +694,13 @@ class Run:
             broken = json.loads((self.scratch / "broken-set.json").read_text())["info"]["broken_set"]
             # Mirrors the gate's eligibility rule (gates/compare.py), which decides: tactic-added
             # declarations a stub removed are not frozen; any other missing one makes the case ineligible.
-            frozen = {n: r for n, r in Bj["records"].items() if "error" not in r
-                      and not (r.get("written") is False and n not in Kj["records"])}
+            # Live, the frozen set is the head's (§4.9): what the PR removed is not frozen, and only
+            # a declaration that does not elaborate in the stubbed head makes the case ineligible.
+            if self.live:
+                frozen = dict(Kj["records"])
+            else:
+                frozen = {n: r for n, r in Bj["records"].items() if "error" not in r
+                          and not (r.get("written") is False and n not in Kj["records"])}
             observed = sum(1 for n in frozen if n in Kj["records"] and "error" not in Kj["records"][n])
             missing_frozen = sorted(n for n in frozen if n not in Kj["records"] or "error" in Kj["records"][n])
             stmt_broken = []
@@ -737,8 +749,9 @@ class Run:
                 # acceptance nothing could be accepted. Spend nothing on repairs; the report says why.
                 bad = report["broken"]["unobserved_modules"]
                 why = (f"{len(bad)} module(s) of the broken state cannot be checked (e.g. {bad[0]})" if bad else
-                       f"{len(missing_frozen)} frozen declaration(s) are missing from the broken state "
-                       f"(e.g. {missing_frozen[0]})")
+                       f"{len(missing_frozen)} frozen declaration(s) "
+                       + ("do not elaborate at the head" if self.live else "are missing from the broken state")
+                       + f" (e.g. {missing_frozen[0]})")
                 self.p.step(f"ineligible: {why}; no repair attempted")
                 for b in ordered:
                     report["repairs"].append({"theorem": b["name"], "file": b["file"], "decl": b["key"],
@@ -1224,7 +1237,8 @@ def summarize_gate(g: dict) -> dict:
         checks[cid] = {"ok": c.get("ok"), "status": c.get("status"), "required": c.get("required"),
                        "violations": c.get("violations", [])[:50],
                        "info": {k: x for k, x in c.get("info", {}).items() if k not in ("broken_set",)}}
-    return {"verdict": v.get("verdict"), "failed_checks": v.get("failed_checks", []), "eligible": v.get("eligible"),
+    return {"verdict": v.get("verdict"), "reference": v.get("reference"),
+            "failed_checks": v.get("failed_checks", []), "eligible": v.get("eligible"),
             "unavailable": v.get("unavailable", []), "inherited_sorry": v.get("inherited_sorry", {}),
             "kernel_replay_incomplete": v.get("kernel_replay_incomplete", []), "native_code": v.get("native_code", []),
             "built": v.get("built"), "theorems": v.get("theorems", []), "heartbeats": v.get("heartbeats", []),

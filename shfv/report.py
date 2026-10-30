@@ -127,6 +127,8 @@ def gate_table(r: dict, g: dict) -> list[str]:
             mark = "✅" if c["ok"] else "❌"
             text = desc.format(inventory=inv, targets=", ".join(c.get("info", {}).get("targets", ["the project"])),
                                build=f" in {fmt_s(build)}" if build else "")
+            if cid in ("G1", "G2") and g.get("reference") == "head":
+                text += " (against the PR as written)"
             if cid == "G5" and (checker := (c.get("info") or {}).get("checker")):
                 text = re.sub(r"\s*\((cached build|built)\)$", "", checker)
                 text = text.replace("lean4checker", "`lean4checker`", 1).replace("bundled leanchecker", "`leanchecker` (bundled with Lean)")
@@ -179,6 +181,21 @@ STANDARD_AXIOMS = {"sorryAx", "propext", "Classical.choice", "Quot.sound"}
 
 def names(xs: list[str], n: int = 6) -> str:
     return ", ".join(f"`{x}`" for x in distinct_short_names(xs)[:n]) + (f" and {len(xs) - n} more" if len(xs) > n else "")
+
+
+HEAD_REFERENCE = ("**The gate checked only the bot's edits, against this PR as written.** The changes the PR itself "
+                  "made are listed below; the gate did not judge them. A reviewer should.")
+
+
+def reference_note(r: dict) -> list[str]:
+    """Live (the gate's reference is the PR head, DESIGN.md §4.9): what the gate did and did not
+    judge, up front, so an accepted repair is not read as a verdict on the PR's own changes."""
+    if (r.get("gate") or {}).get("reference") != "head":
+        return []
+    if (r.get("audit") or {}).get("outcome") == "no-change":
+        return ["**The gate checked only the bot's edits, against this PR as written.** The PR itself changed no "
+                "frozen statement, definition or trust assumption (complete audit below)."]
+    return [HEAD_REFERENCE]
 
 
 def change_trust_note(r: dict) -> list[str]:
@@ -260,7 +277,9 @@ def audit_section(r: dict, focus: str | None = None) -> list[str]:
         return out
     out.append(f"⚠️ **The {'PR' if live else 'change'} itself** changed {s['statements_changed']} theorem statement(s) and "
                f"{s['definitions_changed']} definition(s), and removed or renamed {s['removed']} declaration(s). "
-               "The bot does not judge these; a spec owner should check that none weakens a promise." + stubbed)
+               "The bot does not judge these" + (", and the gate did not either: it checked only the bot's edits"
+                                                  if (r.get("gate") or {}).get("reference") == "head" else "")
+               + "; a spec owner should check that none weakens a promise." + stubbed)
     out.append("")
     trust = []
     new_sorry = [x["decl"] for x in a["axioms_changed"] if "sorryAx" in x["added"]]
@@ -277,6 +296,8 @@ def audit_section(r: dict, focus: str | None = None) -> list[str]:
             f"`{short_name(d)}` (+{', '.join(f'`{y}`' for y in ys)})" for d, ys in new_ax[:15]))
     if a.get("trusted_models_changed"):
         trust.append("- **Trusted models changed:** " + ", ".join(f"`{p}`" for p in a["trusted_models_changed"]))
+    if a.get("roots_added"):
+        trust.append("- **Libraries added:** " + ", ".join(f"`{m}`" for m in a["roots_added"]))
     if trust:
         out += ["Trust changes:", ""] + trust + [""]
     stmts = sorted(a["statements_changed"], key=lambda x: (not (focus and focus.lower() in x["decl"].lower()), x["decl"]))
@@ -356,6 +377,15 @@ def render(r: dict) -> str:
                        + ". That declaration is unchanged by the repair and was already proved this way at the base "
                        "commit; the rest of that module was checked by the kernel during the clean rebuild, but "
                        "not re-checked independently.")
+        beyond = (((r.get("gate") or {}).get("checks", {}).get("G2") or {}).get("info") or {}).get(
+            "axioms_beyond_base_version") or {}
+        if beyond:
+            out.append("")
+            out.append(f"🏷️ **Rests on axioms its version before the PR did not use.** {len(beyond)} repaired theorem"
+                       f"{'s' * (len(beyond) != 1)} now rest{'s' * (len(beyond) == 1)} on axioms this PR's code uses "
+                       "(e.g. a model it rewrote), which the gate allows against the PR as written: "
+                       + "; ".join(f"`{short_name(t)}` (+{', '.join(f'`{x}`' for x in xs[:4])})"
+                                   for t, xs in list(beyond.items())[:6]))
         native = (r.get("gate") or {}).get("native_code") or []
         if native:
             out.append("")
@@ -410,6 +440,8 @@ def render(r: dict) -> str:
                        "the gate accepts for all of them, so nothing is proposed; the evidence is below.")
             if note := change_trust_note(r):
                 out += [""] + note[:-1]
+    if note := reference_note(r):
+        out += [""] + note
     out.append("")
     out.append("| | |")
     out.append("|---|---|")

@@ -182,6 +182,25 @@ def test_an_ineligible_case_says_what_the_change_did():
     assert "became extracted code" in md and "`deserialize` (+`curve.PrivateKey.deserialize`)" in md
 
 
+def test_live_report_says_what_the_gate_judged():
+    rep = {"theorem": "Ns.T", "file": "A.lean", "decl": "Ns.T", "outcome": "repaired", "attempts": []}
+    g2 = {"ok": True, "violations": [], "info": {"axioms_beyond_base_version": {"Ns.T": ["curve.PrivateKey.deserialize"]}}}
+    audit = {"outcome": "changed", "summary": {"statements_changed": 1, "definitions_changed": 0, "removed": 0},
+             "statements_changed": [], "definitions_changed": [], "removed": [], "axioms_changed": [],
+             "trusted_models_changed": ["M/External.lean"], "roots_added": ["Protocols"]}
+    live = dict(verdict="accepted", broken={"proofs": ["Ns.T"], "statements": []}, repairs=[rep], audit=audit,
+                gate={"verdict": "accepted", "reference": "head", "checks": {"G1": {"ok": True}, "G2": g2}})
+    md = render(minimal_report(**live))
+    top = md.split("| | |")[0]
+    assert "The gate checked only the bot's edits, against this PR as written.** The changes the PR itself made" in top
+    assert "Rests on axioms its version before the PR did not use" in md and "`curve.PrivateKey.deserialize`" in md
+    assert "**Libraries added:** `Protocols`" in md and "the gate did not either" in md
+    assert "(against the PR as written)" in md
+    live["gate"]["reference"] = "base"  # replay: none of it
+    md = render(minimal_report(**live))
+    assert "against this PR as written" not in md and "the gate did not either" not in md
+
+
 def test_removed_models_now_defined_by_the_extracted_code(tmp_path):
     from shfv.pipeline import mark_now_extracted
     (tmp_path / "X").mkdir()

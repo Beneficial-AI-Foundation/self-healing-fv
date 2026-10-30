@@ -186,6 +186,7 @@ def test_success_in_dependency_order(toy_case, monkeypatch):
     assert [c[0] for c in agent.calls] == ["double_spec", "double_even"]  # leaves first, from base `uses`
     assert agent.calls[1][1] == ["double_spec"] and agent.calls[1][2] == []  # prompt context is accurate
     assert rep["gate"]["verdict"] == "accepted", rep["gate"]
+    assert rep["gate"]["reference"] == "base"  # replay keeps the base as the reference (§4.9)
     assert outcomes(rep) == {"double_spec": "repaired", "double_even": "repaired"}
     assert rep["verdict"] == "accepted"
     assert rep["audit"]["outcome"] == "no-change", rep["audit"]  # only extracted code and proofs changed
@@ -521,8 +522,16 @@ def toy_live(tmp_path_factory):
         f.write("\ndef oops : Nat := missing_a\n\ndef oops2 : Nat := missing_b\n")
     git(repo, "commit", "-qam", "re-extract with a missing name")
     bad = git(repo, "rev-parse", "HEAD")
+    # branch `model`: the re-extraction plus the PR's own refresh of the trusted model (an axiom
+    # removed, another added) and a statement change of an unbroken theorem (DESIGN.md §4.9).
+    git(repo, "checkout", "-qb", "model", head)
+    (repo / "Toy/FunsExternal.lean").write_text("-- refreshed\naxiom ext_seed_v2 : Nat\n")
+    (repo / "Toy/Specs.lean").write_text((repo / "Toy/Specs.lean").read_text().replace(
+        "theorem triple_spec (x : Nat) : triple x = 3 * x", "theorem triple_spec (x : Nat) : triple x = x * 3"))
+    git(repo, "commit", "-qam", "re-extract and refresh the model")
+    model = git(repo, "rev-parse", "HEAD")
     git(repo, "checkout", "-q", "main")
-    return {"root": root, "repo": repo, "base": base, "head": head, "ok": ok, "bad": bad}
+    return {"root": root, "repo": repo, "base": base, "head": head, "ok": ok, "bad": bad, "model": model}
 
 
 def run_live(toy_live, monkeypatch, head, script, label):
@@ -562,6 +571,24 @@ def test_live_change_is_repaired_like_a_replay(toy_live, monkeypatch):
     assert all(e.get("bot_diff") for e in rep["repairs"])
     assert f"[#12 \"Re-extract\"](https://github.com/example/toy/pull/12) at `{toy_live['head'][:8]}`" in md
     assert "Changes made by the PR itself" in md and "failing proofs stubbed" in md
+    assert rep["gate"]["reference"] == "head"
+    assert "The gate checked only the bot's edits, against this PR as written.** The PR itself changed no" in md
+
+
+def test_live_gate_judges_the_bots_edits_against_the_pr_as_written(toy_live, monkeypatch):
+    """The PR itself removes an axiom of the trusted model and changes a statement: against the base
+    the case would be ineligible; against the head (§4.9) the bot's proof repairs are accepted, and
+    the PR's own changes are the audit's, shown for a reviewer."""
+    rep, md, agent = run_live(toy_live, monkeypatch, toy_live["model"], GOOD, "model")
+    assert rep["gate"]["reference"] == "head" and rep["verdict"] == "accepted", rep["gate"]["failed_checks"]
+    assert outcomes(rep) == {"double_spec": "repaired", "double_even": "repaired"}
+    assert not rep["broken"]["missing_frozen"]  # what the PR removed is not frozen
+    a = rep["audit"]
+    assert [x["decl"] for x in a["statements_changed"]] == ["triple_spec"] and "ext_seed" in [x["decl"] for x in a["removed"]]
+    assert a["trusted_models_changed"] == ["Toy/FunsExternal.lean"]
+    head = md.split("| | |")[0]  # up front, before the table
+    assert "The gate checked only the bot's edits, against this PR as written." in head and "A reviewer should." in head
+    assert "the gate did not either" in md and "(against the PR as written)" in md
 
 
 def test_live_head_that_builds_has_nothing_to_repair(toy_live, monkeypatch):
