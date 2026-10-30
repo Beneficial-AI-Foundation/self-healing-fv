@@ -357,7 +357,11 @@ def render(r: dict) -> str:
         out.append("")
         out.append(f"The change {pr} broke {n_proofs} proof{'s' * (n_proofs != 1)}. The bot repaired "
                    f"{'it' if n_proofs == 1 else 'them'}, and the gate checked the repair mechanically and accepted it: "
-                   "no theorem statement or definition changed, no new axioms or `sorry`, and the project rebuilds from scratch.")
+                   + ("the bot changed no theorem statement, definition or trusted model of the PR, added no axioms or "
+                      "`sorry`, and the project rebuilds from scratch."
+                      if (r.get("gate") or {}).get("reference") == "head" else
+                      "no theorem statement or definition changed, no new axioms or `sorry`, and the project rebuilds "
+                      "from scratch."))
         inherited = (r.get("gate") or {}).get("inherited_sorry") or {}
         if inherited:
             lemmas = sorted({s for v_ in inherited.values() for s in v_})
