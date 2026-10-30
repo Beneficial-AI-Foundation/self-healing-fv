@@ -174,6 +174,67 @@ def provenance_lines(r: dict) -> list[str]:
 AUDIT_SHOWN = 12  # before/after pairs shown in the comment; the rest are named, all are in report.json
 
 
+STANDARD_AXIOMS = {"sorryAx", "propext", "Classical.choice", "Quot.sound"}
+
+
+def names(xs: list[str], n: int = 6) -> str:
+    return ", ".join(f"`{x}`" for x in distinct_short_names(xs)[:n]) + (f" and {len(xs) - n} more" if len(xs) > n else "")
+
+
+def change_trust_note(r: dict) -> list[str]:
+    """When the gate's G1/G2 failures, or the case's ineligibility, come from the change's own trust
+    changes rather than the bot's edits: what the change did to the trusted models (libsignal-verify
+    PR 17). Only when the change's audit accounts for every one of them: missing frozen declarations
+    the change removed (G1), new axioms the change added to the same declarations (G2)."""
+    a, g = r.get("audit") or {}, r.get("gate") or {}
+    if a.get("outcome") != "changed":
+        return []
+    removed = {x["decl"]: x for x in a.get("removed", [])}
+    added_ax = {x["decl"]: set(x["added"]) for x in a.get("axioms_changed", [])}
+    missing = (r.get("broken") or {}).get("missing_frozen") or []
+    failed = [c for c in g.get("failed_checks", []) if c in ("G1", "G2")]
+    checks = g.get("checks") or {}
+    if failed:
+        if set(g["failed_checks"]) - {"G1", "G2"}:
+            return []
+        g1 = [u["decl"] for u in (checks.get("G1", {}).get("info") or {}).get("unobserved", [])]
+        if "G1" in failed and (not g1 or any(d not in removed for d in g1)):
+            return []
+        g2 = checks.get("G2", {}).get("violations", [])
+        for v in g2:
+            new = {y.strip() for y in v["msg"].split(":", 1)[-1].split(",")}
+            if not v.get("decl") or not new <= added_ax.get(v["decl"], set()):
+                return []
+        intro = (f"The bot's candidate was **rejected by the gate ({', '.join(failed)})**. "
+                 f"{'Both failures come' if len(failed) > 1 else 'The failure comes'} from the change itself, not from "
+                 "the bot's edits: the change rewrote the trusted models.")
+        rest_on = [(v["decl"], v["msg"].split(":", 1)[-1].strip()) for v in g2]
+    elif missing and all(d in removed for d in missing):
+        intro = (f"No repair was attempted: {len(missing)} declaration{'s' * (len(missing) != 1)} the gate freezes "
+                 f"{'are' if len(missing) != 1 else 'is'} gone from the broken state, because the change itself rewrote "
+                 "the trusted models.")
+        rest_on = [(d, ", ".join(sorted(ys - STANDARD_AXIOMS))) for d, ys in added_ax.items() if ys - STANDARD_AXIOMS]
+    else:
+        return []
+    now = [d for d, x in removed.items() if x.get("now_extracted")]
+    dropped = [d for d, x in removed.items() if not x.get("now_extracted")]
+    out = [intro, "", "What the change did:", ""]
+    if now:
+        out.append(f"- **{len(now)} trusted declaration{'s' * (len(now) != 1)} became extracted code**, so "
+                   f"{'they are' if len(now) != 1 else 'it is'} no longer assumed: {names(now)}")
+    if dropped:
+        out.append(f"- **{len(dropped)} trusted declaration{'s' * (len(dropped) != 1)} removed** (no longer used, "
+                   f"or provided elsewhere): {names(dropped)}")
+    if rest_on:
+        out.append(f"- **{len(rest_on)} declaration{'s' * (len(rest_on) != 1)} now rest{'s' * (len(rest_on) == 1)} on "
+                   "new axioms** the change added: " + "; ".join(
+                       f"`{d}` (+`{ys}`)" for d, (_, ys) in zip(distinct_short_names([x for x, _ in rest_on]), rest_on[:4]))
+                   + (f" and {len(rest_on) - 4} more" if len(rest_on) > 4 else ""))
+    out += ["", "The gate cannot certify statements whose declarations are gone (G1) and does not accept new axioms "
+            "on its own (G2): a person must review these trust changes. The bot never decides that.", ""]
+    return out
+
+
 def audit_section(r: dict, focus: str | None = None) -> list[str]:
     """§5.4 part 2: statement, definition and trust changes made by the triggering change itself."""
     a = r.get("audit")
@@ -203,8 +264,8 @@ def audit_section(r: dict, focus: str | None = None) -> list[str]:
     out.append("")
     trust = []
     new_sorry = [x["decl"] for x in a["axioms_changed"] if "sorryAx" in x["added"]]
-    standard = {"sorryAx", "propext", "Classical.choice", "Quot.sound"}  # sorry listed above; the rest are Lean's own
-    new_ax = [(x["decl"], [y for y in x["added"] if y not in standard]) for x in a["axioms_changed"]]
+    # sorry is listed above; the rest of STANDARD_AXIOMS are Lean's own
+    new_ax = [(x["decl"], [y for y in x["added"] if y not in STANDARD_AXIOMS]) for x in a["axioms_changed"]]
     new_ax = [(d, ys) for d, ys in new_ax if ys]
     if a.get("sorry_written"):
         trust.append(f"- **`sorry` written by the PR** ({len(a['sorry_written'])}): "
@@ -347,6 +408,8 @@ def render(r: dict) -> str:
         else:
             out.append(f"The change {pr} broke {n_proofs} proof{'s' * (n_proofs != 1)}. The bot did not produce a repair "
                        "the gate accepts for all of them, so nothing is proposed; the evidence is below.")
+            if note := change_trust_note(r):
+                out += [""] + note[:-1]
     out.append("")
     out.append("| | |")
     out.append("|---|---|")

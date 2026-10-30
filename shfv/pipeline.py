@@ -831,6 +831,7 @@ class Run:
         if stubbed_head:
             discount_stub_sorry(a, written_sorry(self.base, self.orig, self.cfg["protected"]["extracted"]))
         explain_hidden(a, B, H)
+        mark_now_extracted(a, self.broken_root, self.cfg["protected"]["extracted"])
         s = a["summary"]
         detail = (f"{s['statements_changed']} statement(s), {s['definitions_changed']} definition(s) changed, "
                   f"{s['removed']} removed; {s['new_sorry']} newly depend on sorry; "
@@ -1150,6 +1151,26 @@ def explain_hidden(audit: dict, B: Path, H: Path) -> None:
     for x in same:
         x["hidden_difference"] = hidden_difference(b.get(x["decl"], {}).get("canon", ""),
                                                    h.get(x["decl"], {}).get("canon", ""))
+
+
+def mark_now_extracted(audit: dict, head: Path, extracted: list[str]) -> None:
+    """Add `now_extracted` (the file) to the audit's removed declarations that the change's
+    extracted code now defines: a trusted model (often an axiom) replaced by extracted Rust, e.g.
+    libsignal-verify PR 17's `SignalMessage.compute_mac`. Matched by name in the source; display
+    only (the report's account of the change's trust changes), not used by any check."""
+    removed = audit.get("removed") or []
+    if not removed:
+        return
+    defined: dict[str, str] = {}
+    for rel in extracted:
+        if (head / rel).is_file():
+            for name in parse_decls((head / rel).read_text(errors="replace")):
+                defined.setdefault(name.split("#")[0], rel)
+    for x in removed:
+        d = x["decl"]
+        hit = defined.get(d) or next((f for n, f in defined.items() if "." in n and d.endswith("." + n)), None)
+        if hit:
+            x["now_extracted"] = hit
 
 
 def written_sorry(base: Path, head: Path, extracted: list[str]) -> list[str]:

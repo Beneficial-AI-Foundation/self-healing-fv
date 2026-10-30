@@ -42,7 +42,7 @@ def link_latest(case_runs: Path, run_dir: Path) -> None:
 
 
 def render(report_json: Path, work: Path, audit_focus: str | None = None) -> Path:
-    from .pipeline import explain_hidden, refresh_comparison
+    from .pipeline import explain_hidden, mark_now_extracted, refresh_comparison
     rep = json.loads(report_json.read_text())
     if audit_focus:
         rep["audit_focus"] = audit_focus
@@ -51,6 +51,10 @@ def render(report_json: Path, work: Path, audit_focus: str | None = None) -> Pat
     if rep.get("audit", {}).get("statements_changed"):
         head = "K.json" if rep["audit"].get("head_stubbed") else "H.json"  # live: the stubbed head
         explain_hidden(rep["audit"], case_dir / "snapshots" / "B.json", case_dir / "snapshots" / head)
+    config = Path((rep.get("config") or {}).get("path") or "")
+    if rep.get("audit", {}).get("removed") and config.is_file() and (case_dir / "broken").is_dir():
+        with open(config, "rb") as f:
+            mark_now_extracted(rep["audit"], case_dir / "broken", tomllib.load(f)["protected"]["extracted"])
     # Content comes from the run; presentation from the code rendering it now. Record both.
     rep.setdefault("renders", []).append({"at": provenance.now().isoformat(timespec="seconds"),
                                           "tool": provenance.tool_code()})

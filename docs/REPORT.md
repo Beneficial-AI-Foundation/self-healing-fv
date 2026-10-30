@@ -144,7 +144,7 @@ The output of `gate audit` on the base and the change's head:
 | `outcome` | `no-change`, `changed`, `incomplete`, or `not-applicable` (generated cases have no human change) |
 | `complete` | Whether every declaration could be compared |
 | `statements_changed`, `definitions_changed` | Each `{decl, module, before, after}` (pretty-printed for display; the fingerprint decided). A statement whose `before` and `after` print identically also has `hidden_difference`: where the fingerprints differ, e.g. universe levels (added by the pipeline from the snapshots, display only) |
-| `removed` | Frozen declarations gone from the head |
+| `removed` | Frozen declarations gone from the head. One the change's extracted code now defines (a trusted model replaced by extracted Rust) also has `now_extracted`, the file (added by the pipeline by name, display only). When the change's audit accounts for every G1/G2 failure of the gate, or for every missing frozen declaration of an ineligible case, the report says so and lists these trust changes. |
 | `axioms_changed` | Each `{decl, added, removed}` |
 | `trusted_models_changed` | Paths of trusted-model files whose text changed |
 | `coverage_problems`, `not_compared` | Why the audit is incomplete |
