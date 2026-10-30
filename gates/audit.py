@@ -16,6 +16,11 @@ Outcomes: `no-change` (both snapshots complete, no differences), `changed` (at l
 difference), `incomplete` (some declaration could not be compared, e.g. the head does not build;
 an incomplete audit never reports "no changes"). Changes to extracted code are not findings:
 every extraction update makes them.
+
+With the head as the gate's reference (live runs, §4.9, decided 2026-10-30) the gate judges only
+the bot's edits, and this audit is where the change's own statement and trust changes appear: it
+reports them for a reviewer and decides nothing. Root modules the base snapshot left out (a library
+the change adds) are listed in `roots_added`.
 """
 from __future__ import annotations
 
@@ -93,6 +98,7 @@ def audit(cfg: dict, base: dict, head: dict) -> dict:
             "not_compared": not_compared[:200], "not_compared_n": len(not_compared),
             "statements_changed": statements, "definitions_changed": bodies,
             "removed": removed, "axioms_changed": axioms, "added": added[:500], "added_n": len(added),
+            "roots_added": base.get("absent_roots", []),
             "trusted_models_changed": trusted_changed,
             "summary": {"statements_changed": len(statements), "definitions_changed": len(bodies),
                         "removed": len(removed), "axioms_changed": len(axioms),

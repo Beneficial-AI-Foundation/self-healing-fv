@@ -19,6 +19,14 @@
                     `bv_decide`) counts as passed but incomplete, and is flagged, only when the
                     declaration it stopped at is unchanged and already used native code at the base
 
+The reference (§4.9, `--reference`). "base", for replays: as above. "head", for live runs (decided
+2026-10-30): "the base" above reads "the change's head as written", i.e. the stubbed broken state.
+The frozen set is its records (what the change removed is not frozen, what it added is, and what
+does not elaborate there makes the case ineligible); trust closures are its, without the stubs'
+`sorry` (see `ref_closure` for closures that run through a stub). The gate then judges only the
+bot's edits. The change's own statement and trust changes go to `gate audit`, which reports them
+and decides nothing. The base snapshot may then leave out root modules the change adds.
+
 The gate fails closed. Before any check counts, the inputs must be trustworthy: the base snapshot
 built green, covers every audited module and every theorem written in its sources, and has a
 record for every broken theorem; all three snapshots were made by this gate version for this
@@ -76,7 +84,7 @@ def _fp(r: dict) -> tuple:
     return (r.get("kind"), r.get("canon"), r.get("body_canon"))
 
 
-def preconditions(cfg: dict, base: dict, broken: dict, cand: dict) -> list[str]:
+def preconditions(cfg: dict, base: dict, broken: dict, cand: dict, reference: str = "base") -> list[str]:
     """Reasons the gate cannot decide. Empty means the snapshots can be trusted as inputs."""
     out = []
     want_cfg, want_gate = config_hash(cfg), version()
@@ -85,6 +93,18 @@ def preconditions(cfg: dict, base: dict, broken: dict, cand: dict) -> list[str]:
             out.append(f"{name} snapshot was made by gate {s.get('gate_version')}, not {want_gate}")
         if s.get("config_sha256") != want_cfg:
             out.append(f"{name} snapshot was made for a different target config")
+        # A snapshot that left out root modules (a library the change adds) is never the frozen
+        # set: only the base may, and only when the head is the reference (§4.9).
+        if s.get("absent_roots") and (name != "base" or reference != "head"):
+            out.append(f"{name} snapshot leaves out root module(s) {', '.join(s['absent_roots'])}")
+    if reference == "head":
+        # The head is the reference: it must be as complete as a base reference would have to be.
+        if not broken.get("stmtcanon", {}).get("ok", False):
+            out.append("broken snapshot (the reference): fingerprinting failed")
+        n, missing = inventory.missing(broken)
+        if missing:
+            out.append(f"broken snapshot (the reference): {len(missing)} of {n} theorems written in the sources "
+                       f"have no record, e.g. {missing[0]}")
     if broken.get("toolchain") != cand.get("toolchain"):
         out.append(f"toolchain differs between broken ({broken.get('toolchain')}) and candidate "
                    f"({cand.get('toolchain')}) snapshots")
@@ -120,29 +140,48 @@ def preconditions(cfg: dict, base: dict, broken: dict, cand: dict) -> list[str]:
     return out
 
 
-def compare(cfg: dict, base: dict, broken: dict, cand: dict, diff: str) -> dict:
+def compare(cfg: dict, base: dict, broken: dict, cand: dict, diff: str, reference: str = "base") -> dict:
+    """`reference` (§4.9) is what the bot is held to. "base" (replay): the frozen set and the
+    trust baseline are the base's, so the change's own statement and trust changes count against
+    the candidate too. "head" (live, decided 2026-10-30): they are the change's as written, i.e.
+    the stubbed broken state's, and the gate judges only the bot's edits; the change's own
+    changes are the audit's (gates/audit.py), reported but not judged. Every check runs in both."""
+    if reference not in ("base", "head"):
+        raise ValueError(f"unknown reference {reference!r}")
+    head = reference == "head"
     checks: dict[str, dict] = {}
-    unavailable = preconditions(cfg, base, broken, cand)
+    unavailable = preconditions(cfg, base, broken, cand, reference)
     g0 = scope.check(cfg, base, broken, diff)
     checks["G0"] = g0
     bset = g0["info"]["broken_set"]
     repaired = {b["name"] for b in bset if b["name"]}
     for b in bset:
-        if not b["name"] or b["name"] not in base["records"]:
-            unavailable.append(f"broken theorem {b['key']} ({b['file']}) has no base record")
+        if not b["name"] or b["name"] not in (broken if head else base)["records"]:
+            unavailable.append(f"broken theorem {b['key']} ({b['file']}) has no {'head' if head else 'base'} record")
 
     # --- eligibility (§3.3 S2): every frozen declaration observed in the stubbed broken state.
     # A declaration a tactic added while a base proof elaborated (no source range, e.g. bv_decide's
     # `PUnit.enumToBitVec`) disappears when that proof is stubbed; it was never written, so it is
     # not frozen. Anything written stays frozen, and a missing one still makes the case ineligible.
-    generated = sorted(n for n, r in base["records"].items() if r.get("written") is False and n not in broken["records"])
-    inventory_ = {n: r for n, r in base["records"].items() if "error" not in r and n not in generated}
-    unobserved = []
-    for name, r in inventory_.items():
-        status = broken["modules"].get(r["module"], "missing")
-        if status != "observed" or name not in broken["records"] or "error" in broken["records"][name]:
-            unobserved.append({"decl": name, "module": r["module"],
-                               "status": status if status != "observed" else "missing"})
+    # Head reference: the frozen set is the stubbed broken state's own records, so a declaration
+    # the change removed is not frozen and one it added is; one that does not elaborate there, or
+    # a module not observed, still makes the case ineligible.
+    if head:
+        generated = []
+        inventory_ = {n: r for n, r in broken["records"].items() if "error" not in r}
+        unobserved = [{"decl": n, "module": r.get("module"), "status": "error"}
+                      for n, r in broken["records"].items() if "error" in r]
+        unobserved += [{"decl": m, "module": m, "status": s} for m, s in broken["modules"].items() if s != "observed"]
+    else:
+        generated = sorted(n for n, r in base["records"].items()
+                           if r.get("written") is False and n not in broken["records"])
+        inventory_ = {n: r for n, r in base["records"].items() if "error" not in r and n not in generated}
+        unobserved = []
+        for name, r in inventory_.items():
+            status = broken["modules"].get(r["module"], "missing")
+            if status != "observed" or name not in broken["records"] or "error" in broken["records"][name]:
+                unobserved.append({"decl": name, "module": r["module"],
+                                   "status": status if status != "observed" else "missing"})
     eligible = not unobserved and broken.get("stmtcanon", {}).get("ok", False) and bool(inventory_)
 
     # --- G1 statement identity, against the stubbed broken state.
@@ -170,19 +209,42 @@ def compare(cfg: dict, base: dict, broken: dict, cand: dict, diff: str) -> dict:
                              "unobserved_n": len(unobserved), "generated_not_frozen": generated[:200]}}
 
     # --- G2 trust base.
+    # The reference closure of each frozen declaration: (axioms, sorry sources). Base reference:
+    # its base record. Head reference: its record in the stubbed broken state, without the stubs'
+    # `sorry`; a stub hides the closure of the head's own proof, so a declaration whose closure
+    # runs through a stub may also rest on any axiom the head uses (never `sorry` or native code),
+    # on native code only if its base version did, and on `sorry` only through lemmas its base
+    # version reached that are still unproved in the head (§4.9).
+    stubs = repaired if head else set()
+    head_sorry = {s for r in broken["records"].values() for s in r.get("sorry_sources", [])} - stubs
+    head_axioms = {x for r in inventory_.values() for x in r.get("axioms", [])} - {SORRY, NATIVE}
+
+    def ref_closure(name: str) -> tuple[set[str], set[str]]:
+        r = inventory_.get(name) or {}
+        if not head:
+            return set(r.get("axioms", [])), set(r.get("sorry_sources", []))
+        srcs = set(r.get("sorry_sources", []))
+        axioms, sources = set(r.get("axioms", [])) - {SORRY}, srcs - stubs
+        if srcs & stubs:
+            b = base["records"].get(name) or {}
+            axioms |= head_axioms | (set(b.get("axioms", [])) & {NATIVE})
+            sources |= set(b.get("sorry_sources", [])) & head_sorry
+        return axioms | ({SORRY} if sources else set()), sources
+
     v2, inherited = [], {}
     for name, r in inventory_.items():
         c = cand["records"].get(name)
         if c is None or "error" in c:
             continue
-        allowed = BASE3 | set(r.get("axioms", []))
+        ref_axioms, ref_sources = ref_closure(name)
+        allowed = BASE3 | ref_axioms
         extra = sorted(set(c.get("axioms", [])) - allowed)
         if name in repaired and SORRY in c.get("axioms", []):
             # Sorry only where the base version already reached it, through the same unproved
             # lemmas, and flagged (owner decision 2026-10-26). A stub of a still-broken theorem
             # is never a base sorry source, so depending on one is still rejected here.
             srcs = set(c.get("sorry_sources", []))
-            new = sorted(srcs - set(r.get("sorry_sources", [])) if SORRY not in extra else srcs)
+            new = sorted(srcs - ref_sources if SORRY not in extra else srcs)
             if name in srcs or new or not srcs:
                 v2.append({"check": "G2", "decl": name, "msg": "depends on sorry"
                            + (f" through {', '.join(new[:5])}" if new else "")})
@@ -194,11 +256,14 @@ def compare(cfg: dict, base: dict, broken: dict, cand: dict, diff: str) -> dict:
             extra.remove(SORRY)
         if extra:
             v2.append({"check": "G2", "decl": name, "msg": f"new axioms in its closure: {', '.join(extra)}"})
-    base_sorry = {s for r in base["records"].values() for s in r.get("sorry_sources", [])}
+    ref_sorry = head_sorry if head else {s for r in base["records"].values() for s in r.get("sorry_sources", [])}
     cand_sorry = {s for r in cand["records"].values() for s in r.get("sorry_sources", [])}
-    for s in sorted(cand_sorry - base_sorry):
-        v2.append({"check": "G2", "decl": s, "msg": "carries a sorry that the base did not have"})
-    added = sorted(n for n in cand["records"] if n not in broken["records"] and n not in base["records"])
+    for s in sorted(cand_sorry - ref_sorry):
+        v2.append({"check": "G2", "decl": s, "msg": f"carries a sorry that the {reference} did not have"})
+    # Head reference: a declaration the change removed is added if the candidate brings it back;
+    # only the base's tactic-generated ones (a stub removed them, the repair regenerates them) are not.
+    added = sorted(n for n in cand["records"] if n not in broken["records"] and n not in base["records"]
+                   or head and n not in broken["records"] and base["records"][n].get("written") is not False)
     for a in added:
         r = cand["records"][a]
         if r.get("kind") == "axiom":
@@ -210,9 +275,15 @@ def compare(cfg: dict, base: dict, broken: dict, cand: dict, diff: str) -> dict:
     # `kernel_replay_incomplete` no longer marks these repairs. Native code new to a theorem is a
     # G2 violation above; this flag only names what G2 allowed because the base already had it.
     native = sorted(t for t in repaired if NATIVE in cand["records"].get(t, {}).get("axioms", [])
-                    and NATIVE in inventory_.get(t, {}).get("axioms", []))
+                    and NATIVE in ref_closure(t)[0])
+    # Head reference, report only: axioms a repaired theorem rests on that its base version did not
+    # (allowed above because the head uses them, e.g. a model the change rewrote).
+    beyond = {t: sorted(set(cand["records"][t].get("axioms", [])) - BASE3 - {SORRY}
+                        - set(base["records"].get(t, {}).get("axioms", [])))
+              for t in sorted(repaired) if head and t in cand["records"]}
     checks["G2"] = {"id": "G2", "ok": not v2, "violations": v2,
-                    "info": {"added": added, "inherited_sorry": inherited, "native_code": native}}
+                    "info": {"added": added, "inherited_sorry": inherited, "native_code": native,
+                             "axioms_beyond_base_version": {t: a for t, a in beyond.items() if a}}}
 
     # --- G3 clean build of exactly (stubbed broken state + diff).
     v3 = []
@@ -259,11 +330,11 @@ def compare(cfg: dict, base: dict, broken: dict, cand: dict, diff: str) -> dict:
                 # 2026-10-26 (DESIGN.md §4.3 G5): if that declaration is untouched by the repair and
                 # already used native code at the base, accept with the module flagged as incompletely
                 # replayed. If the repair itself is what cannot be replayed, the gate cannot decide.
-                owner = owning_record(stop, base["records"])
-                b_rec, k_rec, c_rec = (s["records"].get(owner) if owner else None for s in (base, broken, cand))
+                owner = owning_record(stop, (broken if head else base)["records"])
+                k_rec, c_rec = (s["records"].get(owner) if owner else None for s in (broken, cand))
                 untouched = (owner is not None and owner not in repaired and owner not in added
                              and k_rec is not None and c_rec is not None and _fp(k_rec) == _fp(c_rec)
-                             and NATIVE in b_rec.get("axioms", []))
+                             and NATIVE in ref_closure(owner)[0])
                 if untouched:
                     incomplete.append({"module": m, "stopped_at": owner, "native": stop})
                 else:
@@ -299,7 +370,7 @@ def compare(cfg: dict, base: dict, broken: dict, cand: dict, diff: str) -> dict:
         verdict = "passed-without-kernel-replay"
     else:
         verdict = "accepted"
-    return {"format": 2, "gate_version": version(), "verdict": verdict, "failed_checks": failed,
+    return {"format": 2, "gate_version": version(), "reference": reference, "verdict": verdict, "failed_checks": failed,
             "unavailable": unavailable, "eligible": eligible, "theorems": theorems,
             "inherited_sorry": inherited if verdict == "accepted" else {},
             "kernel_replay_incomplete": incomplete if verdict == "accepted" else [],

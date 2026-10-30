@@ -282,8 +282,27 @@ def inputs_hash(cfg: dict, tree: Path, dirs: dict[str, str] | None = None) -> st
     return h.hexdigest()[:16]
 
 
+def present_roots(tree: Path, cfg: dict) -> tuple[dict, list[str]]:
+    """(cfg without the root modules that have no file in `tree`, those root modules). For the
+    base of a live change that adds a library (libsignal-verify PR 17 adds `Protocols`): with the
+    head as the gate's reference (§4.9), the base is not the frozen set, so a library it does not
+    have yet is left out of its snapshot and named in `absent_roots`, and its build target with
+    it. compare refuses such a snapshot wherever it would be the reference."""
+    absent = []
+    for r in cfg["lean"]["root_modules"]:
+        try:
+            module_dirs(tree, {**cfg, "lean": {**cfg["lean"], "root_modules": [r]}})
+        except FileNotFoundError:
+            absent.append(r)
+    if len(absent) == len(cfg["lean"]["root_modules"]):
+        raise FileNotFoundError(f"no root module has a source file in {tree}")
+    lean = {**cfg["lean"], "root_modules": [r for r in cfg["lean"]["root_modules"] if r not in absent],
+            "build_targets": [t for t in cfg["lean"]["build_targets"] if t not in absent]}
+    return {**cfg, "lean": lean}, absent
+
+
 def snapshot(cfg: dict, tree: Path, *, clean: bool = False, apply_diff: Path | None = None,
-             workdir: Path | None = None, log: Path | None = None) -> dict:
+             workdir: Path | None = None, log: Path | None = None, allow_absent_roots: bool = False) -> dict:
     t0 = time.time()
     result: dict = {"format": 2, "gate_version": version(), "target": cfg["name"], "config_sha256": config_hash(cfg),
                     "clean": clean}
@@ -313,6 +332,9 @@ def snapshot(cfg: dict, tree: Path, *, clean: bool = False, apply_diff: Path | N
     result["tree"] = str(tree)
     result["workspace_project"] = workspace_project(cfg)
     tree = tree / workspace_project(cfg)  # from here on, `tree` is the Lake project
+    result["absent_roots"] = []
+    if allow_absent_roots:  # config_sha256 above stays the full config's
+        cfg, result["absent_roots"] = present_roots(tree, cfg)
     result["src_dirs"] = dirs = module_dirs(tree, cfg)
     if clean and (tree / ".lake" / "build").exists():
         raise RuntimeError(f"{tree}: --clean, but the project build output .lake/build exists")

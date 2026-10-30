@@ -3,6 +3,7 @@
   gate snapshot --config T.toml --tree DIR --out S.json [--clean] [--apply D.patch --workdir W]
   gate scope    --config T.toml --base B.json --broken K.json --diff D.patch [--out V.json]
   gate compare  --config T.toml --base B.json --broken K.json --candidate C.json --diff D.patch --out V.json
+                [--reference base|head]   (head: live, the change as written is the reference, §4.9)
   gate diff     --config T.toml --before DIR --after DIR --out D.patch
   gate audit    --config T.toml --base B.json --head H.json [--out A.json]   (exit 0 no-change, 1 changed, 2 incomplete)
   gate version
@@ -67,6 +68,9 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--apply", type=Path, help="snapshot a fresh copy of --tree with this diff applied")
     s.add_argument("--workdir", type=Path, help="with --apply: where the fresh copy is made")
     s.add_argument("--log", type=Path, help="write the build log here")
+    s.add_argument("--allow-absent-roots", action="store_true",
+                   help="leave out root modules with no file (the base of a change that adds a library; "
+                        "never usable as the reference, §4.9)")
     for name in ("scope", "compare"):
         c = sub.add_parser(name)
         c.add_argument("--config", type=Path, required=True)
@@ -76,10 +80,14 @@ def main(argv: list[str] | None = None) -> int:
         c.add_argument("--out", type=Path)
         if name == "compare":
             c.add_argument("--candidate", type=Path, required=True)
+            c.add_argument("--reference", choices=("base", "head"), default="base",
+                           help="what the bot is held to (§4.9): the base (replay, default) or the change's "
+                                "head as written, i.e. the stubbed broken state (live)")
     sub.add_parser("version")
     th = sub.add_parser("tree-hash")
     th.add_argument("--config", type=Path, required=True)
     th.add_argument("--tree", type=Path, required=True)
+    th.add_argument("--allow-absent-roots", action="store_true")
     au = sub.add_parser("audit")
     au.add_argument("--config", type=Path, required=True)
     au.add_argument("--base", type=Path, required=True)
@@ -96,7 +104,9 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     cfg = load_config(a.config)
     if a.cmd == "tree-hash":
-        print(json.dumps({"inputs_sha256": snapshot.inputs_hash(cfg, a.tree.resolve() / snapshot.workspace_project(cfg)),
+        tree = a.tree.resolve() / snapshot.workspace_project(cfg)
+        hcfg = snapshot.present_roots(tree, cfg)[0] if a.allow_absent_roots else cfg
+        print(json.dumps({"inputs_sha256": snapshot.inputs_hash(hcfg, tree),
                           "config_sha256": snapshot.config_hash(cfg), "gate_version": version()}))
         return 0
     try:
@@ -112,7 +122,8 @@ def main(argv: list[str] | None = None) -> int:
                             print(f"gate: refusing to apply a diff that touches {p}", file=sys.stderr)
                             return 2
             snap = snapshot.snapshot(cfg, a.tree.resolve(), clean=a.clean, apply_diff=a.apply,
-                                     workdir=a.workdir.resolve() if a.workdir else None, log=a.log)
+                                     workdir=a.workdir.resolve() if a.workdir else None, log=a.log,
+                                     allow_absent_roots=a.allow_absent_roots)
             write_json(snap, a.out)
             return 0
         if a.cmd == "audit":
@@ -131,7 +142,7 @@ def main(argv: list[str] | None = None) -> int:
             res = scope.check(cfg, base, broken, diff)
             write_json(res, a.out)
             return 0 if res["ok"] else 1
-        res = compare.compare(cfg, base, broken, read_json(a.candidate), diff)
+        res = compare.compare(cfg, base, broken, read_json(a.candidate), diff, reference=a.reference)
         write_json(res, a.out)
         return {"accepted": 0, "gate-unavailable": 2}.get(res["verdict"], 1)
     except Exception as e:  # the gate never "passes" on its own failure
