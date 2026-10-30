@@ -124,6 +124,25 @@ The report then names both versions: the code that produced the run, and the cod
 
 The exit status of `shfv repair` is 0 when the run completed, whatever its verdict, and 1 when it failed. The final line counts theorems by outcome.
 
+### Run on a live change
+
+Instead of a mined case, give a base and a head of the target repo, e.g. an open pull request (DESIGN.md §3.6):
+
+```
+git -C ~/baif/curve25519-dalek-lean-verify fetch origin pull/874/head
+uv run shfv repair --target dalek-lean-verify --base origin/master --head FETCH_HEAD --pr 874 --title "fix: tie clamped specs …"
+```
+
+- **The broken state is the head as committed**: its proofs, extracted code and pins. The base is the merge-base of `--base` and `--head`, so what the base branch did since the PR branched does not count as the PR's.
+- **No human fix**: no human-fix gate, no comparison, and the report does not mention one. The cause comes from the pin and file diff, by the same rule as mining (`proof-only` when nothing else explains the break).
+- **Everything after that is the replay code**: the head is built in rounds with failing proofs stubbed (`replay/replay_case.py`, `replay_live`), then the sweep, the agent, the gate and the report as in step 3. The gate still freezes the base's statements, so a PR that changes a statement and breaks its proof escalates, and the audit shows the change came from the PR.
+- **The audit** compares the base with the stubbed head, since the head does not build. The stubs' `sorry` is not counted; `sorry` the PR wrote is found in its sources ([REPORT.md](REPORT.md) §7).
+- **Two more verdicts**: `no-break` when the head builds, and the escalation `extraction-setup` when the extracted code itself does not build at the head.
+- The case id is `<target>/live-<head8>`. Workspaces and runs are named after it, and a second run on the same base and head reuses the analysis.
+- `--target` defaults to the target config whose GitHub repo is the clone's origin, and `--repo` to `~/baif/<repo name>`. Both commits must be in the clone.
+
+`.github/workflows/live.yml` runs this silently on open PRs ([ACTIONS.md](ACTIONS.md)). Its PR selection is `shfv live-select`.
+
 ## 4. Read the report
 
 `report.md` is exactly the comment the bot would post on the PR. It is written for a reviewer who has not read the design, and it opens with one of four verdicts:
@@ -343,8 +362,8 @@ workspace; MCP runs outside that command sandbox. See
 
 ## 9. Limits of this prototype
 
-- **Replays only.** Target configs exist for curve25519-dalek-lean-verify, SparsePostQuantumRatchet-verify (SPQR) and SymCrypt, on the toolchains of the replayed cases.
-- **Kernel replay stops at native code.** Modules with `native_decide` or `bv_decide` proofs are only partly re-checked by G5, and such acceptances are flagged (section 4). A complete re-check is V1 (DESIGN.md §11, question 21). Live CI is V1 (DESIGN.md §9); the prototype replays one case at a time on Actions ([ACTIONS.md](ACTIONS.md)).
+- **Replays, and silent live runs.** Target configs exist for curve25519-dalek-lean-verify, SparsePostQuantumRatchet-verify (SPQR) and SymCrypt, on the toolchains of the replayed cases. Live runs (section 3) only write reports; nothing is posted.
+- **Kernel replay stops at native code.** Modules with `native_decide` or `bv_decide` proofs are only partly re-checked by G5, and such acceptances are flagged (section 4). A complete re-check is V1 (DESIGN.md §11, question 21). Live CI in the target repos is V1 (DESIGN.md §9); the prototype replays one case at a time on Actions, and runs silently on open PRs from this repo ([ACTIONS.md](ACTIONS.md)).
 - **Agent adapters:** Claude Code and Codex CLI; Codex's budget and isolation limits are described above.
 - **Complete-case acceptance.** A change is accepted only if every broken theorem is repaired (DESIGN.md §4.3).
 - **Not built yet:** the sandbox and metering proxy for the agent (DESIGN.md §3.4, §9.5). Until then the cost caps are the agent harness's own enforcement (Claude Code has one, Codex none) plus the pipeline's accounting between attempts, not a hard limit, and nothing stops an agent from reading outside its workspace: the tripwire (section 4) only detects it.

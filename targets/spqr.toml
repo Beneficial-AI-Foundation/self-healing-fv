@@ -53,6 +53,15 @@ per_theorem_usd = false
 [repair]
 sweep = true
 
+[live]
+# The silent live workflow (.github/workflows/live.yml, shfv/live.py): open PRs whose Lean check
+# failed on the head, if the extraction check passed on the same head. Check names as the repo's
+# CI reports them.
+enabled = true
+lean_check = "Build Lean Project"
+extraction_check = "Check Aeneas Extraction"
+runner = "self-healing-fv"
+
 # Same list prices as targets/dalek-lean-verify.toml (source and verification there).
 [prices."claude-opus-5-5"]
 input = 4.0

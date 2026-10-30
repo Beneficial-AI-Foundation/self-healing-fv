@@ -196,6 +196,10 @@ Runner limits shape the design. A standard hosted runner has 4 cores, 16 GB RAM,
 | Delivery | run record only (plus the human fix for comparison) | comment or PR |
 | Everything else | same code | same code |
 
+**Prototype live input** (SCI-1717, before shadow mode). `shfv repair --base <sha> --head <sha>` runs the pipeline on a live change: the broken state is the head as committed, built in rounds with failing proofs stubbed as for a historical case, against the merge-base of base and head; there is no human fix. `.github/workflows/live.yml` runs it silently from this repo on the targets' open PRs whose Lean check failed, if the extraction check passed on the same head (S1). It posts nothing and needs no permission in the target repos (docs/ACTIONS.md). Two consequences of reusing the replay code unchanged:
+- **The gate freezes the base's statements**, as in replay. A PR that changes a statement and also breaks its proof therefore escalates (G1), and the audit shows that the change came from the PR. A theorem the PR adds that fails is not in the broken set, so it is reported and not repaired. Freezing the head's statements in live runs instead would change the acceptance rules: an owner decision (§4).
+- **The audit reads the stubbed head**, since the head does not build. The stubs' `sorry` is not counted as the PR's change; `sorry` the PR wrote is read from its sources instead.
+
 ## 4. Gates
 
 ### 4.1 Principles

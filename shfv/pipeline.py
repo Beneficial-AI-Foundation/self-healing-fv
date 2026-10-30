@@ -1,6 +1,7 @@
-"""The repair pipeline for one historical case (DESIGN.md §3.3), replay mode.
+"""The repair pipeline for one case (DESIGN.md §3.3): a historical case (replay) or a live change.
 
-  S1 input     case record (data/mined) + replay ground truth (data/replay)
+  S1 input     replay: case record (data/mined) + replay ground truth (data/replay);
+               live (§3.6): base and head commits (shfv/live.py), the head analyzed here
   S2 context   replay workspaces (base, stubbed broken, fixed), gate snapshots B, K and H,
                broken set, statement-broken theorems, extraction diff; the audit of the
                change itself (`gate audit`, §4.7)
@@ -49,6 +50,10 @@ NO_MODEL = "no-model"  # run ids of runs that called no model
 
 class GateUnavailable(Exception):
     pass
+
+
+class _Done(Exception):
+    """Nothing further to do in this run (live: the head's extracted code does not build)."""
 
 
 GATE_TIMEOUT_S = 4 * 3600  # far above any gate step; the gate bounds its own builds
@@ -169,7 +174,8 @@ class Run:
     def __init__(self, case_id: str, config: Path, agent: AgentAdapter, repo: Path, work: Path, runs: Path,
                  attempt_anyway: bool = False, gate_human_fix: bool | None = None, keep: bool = False,
                  label: str | None = None, replay_path: Path | None = None, use_agent: bool = True,
-                 budget_overrides: dict | None = None, unenforced_caps: list[str] | None = None):
+                 budget_overrides: dict | None = None, unenforced_caps: list[str] | None = None,
+                 live: dict | None = None):
         self.case_id, self.agent, self.repo = case_id, agent, repo.expanduser()
         self.use_agent = use_agent  # False: the sweep only, no model call (and no key needed)
         self.unenforced_caps = unenforced_caps or []  # caps the adapter cannot enforce (check_capabilities)
@@ -182,7 +188,10 @@ class Run:
         self.config = config.resolve()
         self.work, self.attempt_anyway, self.keep = work.resolve(), attempt_anyway, keep
         self.gate_human_fix = gate_human_fix
-        self.record, self.replay = load_case(case_id, replay_path)
+        # Live input (§3.6, shfv/live.py): a case record from base and head, no human fix; the head's
+        # analysis takes the place of the replay record once prepare() has built it.
+        self.live = live is not None
+        self.record, self.replay = (live, {}) if self.live else load_case(case_id, replay_path)
         self.generated = bool(self.record.get("generated"))
         # The Lake project inside a workspace tree, and inside the repo (records use repo paths).
         self.wp = self.cfg["lean"].get("workspace_project", "")
@@ -204,6 +213,8 @@ class Run:
     # ------------------------------------------------------------------ S1/S2
     def prepare(self) -> None:
         r = self.record
+        if self.live:
+            return self.prepare_live()
         if self.generated:
             # Generated cases: workspaces come from the data tooling (SCI-1714), never rebuilt here.
             base = self.work / self.cfg["replay"]["generated_base"]
@@ -213,6 +224,7 @@ class Run:
                     raise RuntimeError(f"{t}: generated-case workspace missing or not built (see SCI-1714)")
             self.base_root, self.broken_root, self.fixed_root = base, broken, None
             self.base, self.broken, self.fixed = base / self.wp, broken / self.wp, None
+            self.orig = self.base
             return
         trees = [self.case_dir / s for s in ("base", "broken", "fixed")]
         ok = all((t / ".lake" / "build").exists() for t in trees)
@@ -236,6 +248,40 @@ class Run:
                                    + f"; build logs in {self.case_dir / 'logs'}")
         self.base_root, self.broken_root, self.fixed_root = trees
         self.base, self.broken, self.fixed = (t / self.wp for t in trees)
+        # The broken state's sources before stubbing: in replay, the base proofs (only extracted
+        # code, pins and config come from the change).
+        self.orig = self.base
+
+    def prepare_live(self) -> None:
+        """Live input (§3.6): base and head come from the clone. The head as committed is the broken
+        state; its analysis (which proofs fail, which statements no longer elaborate) is saved as
+        <case>/live.json and reused while base and head are the same."""
+        r = self.record
+        saved = self.case_dir / "live.json"
+        trees = [self.case_dir / s for s in ("base", "broken")]
+        res = None
+        if saved.exists() and (self.case_dir / "head").is_dir() and \
+                all((t / self.wp / ".lake" / "build").exists() for t in trees):
+            res = json.loads(saved.read_text())
+            if (res.get("base_commit"), res.get("head_commit")) != (r["base_commit"], r["change_commit"]):
+                res = None
+        if res is None:
+            self.p.step(f"live: building the base {r['base_commit'][:8]} and analyzing the head "
+                        f"{r['change_commit'][:8]} (replay/replay_case.py)")
+            for t in trees + [self.case_dir / "head"]:
+                shutil.rmtree(t, ignore_errors=True)
+            res = replay_case.replay_live(self.case_id, self.repo, r["base_commit"], r["change_commit"], self.work)
+            saved.write_text(json.dumps(res, indent=1, ensure_ascii=False))
+        verdict = res.get("verdict", "")
+        if not verdict.startswith(("break confirmed", "no break", "setup failure")):
+            why = res.get("base", {}).get("tail") or res.get("broken_setup", {}).get("tail") or ""
+            raise RuntimeError(f"live input: {verdict}; build logs in {self.case_dir / 'logs'}"
+                               + (f"; last output: {why[-500:]}" if why else ""))
+        self.replay = repo_to_project(res, self.cfg["lean"].get("repo_lean_root", ""))
+        self.base_root, self.broken_root, self.fixed_root = trees + [None]
+        self.base, self.broken, self.fixed = trees[0] / self.wp, trees[1] / self.wp, None
+        # The head's own sources: the failing proofs as the PR wrote them (no stubs).
+        self.orig = self.case_dir / "head" / self.wp
 
     def snapshot(self, name: str, tree: Path) -> Path:
         """A gate snapshot of `tree`, reused only if it was made by this gate version, for this
@@ -305,7 +351,7 @@ class Run:
                 entry.update(outcome="proof-hard", reason=f"not attempted: {stop}")
                 continue
             if b.get("stubbed", True):  # restore the original (now failing) proof for the agent
-                orig = decl_text((self.base / b["file"]).read_text(), b["key"])
+                orig = decl_text((self.orig / b["file"]).read_text(), b["key"])
                 (cand / b["file"]).write_text(replace_body(src, b["key"], orig["proof"]))
             checkpoint = tree_sources(cand)
             det = details.get(key, {})
@@ -482,13 +528,13 @@ class Run:
             return []
 
     def delivery_diff(self, cand: Path, broken: list[dict]) -> str:
-        """The repair as it would apply to the change's head: the real broken sources (the base
-        proofs with the new extraction), not the stubbed state the gate works on (review
-        finding 15). Theorems left unrepaired keep their original failing proof."""
+        """The repair as it would apply to the change's head: the real broken sources (in replay
+        the base proofs with the new extraction; live, the head as committed), not the stubbed state
+        the gate works on (review finding 15). Theorems left unrepaired keep their original failing proof."""
         base_proof = {}
         for b in broken:
             if b.get("stubbed", True):
-                d = decl_text((self.base / b["file"]).read_text(), b["key"])
+                d = decl_text((self.orig / b["file"]).read_text(), b["key"])
                 if d:
                     base_proof[(b["file"], b["key"])] = d["proof"]
 
@@ -579,6 +625,7 @@ class Run:
                                    "repo_lean_root": self.cfg["lean"].get("repo_lean_root", ""),
                                    "change_commit": r["change_commit"], "change_pr": r.get("change_pr"),
                                    "change_pr_url": r.get("change_pr_url"), "change_subject": r["change_subject"],
+                                   "live": self.live, "base_tip": r.get("base_tip"), "head_ref": r.get("head_ref"),
                                    "cause": r["cause"], "causes": r.get("causes"), "pin_changes": pins,
                                    "fix_commits": r.get("fix", {}).get("fix_commits", [])},
                         "config": {"path": str(self.config.relative_to(ROOT)) if self.config.is_relative_to(ROOT) else str(self.config),
@@ -593,13 +640,41 @@ class Run:
             t0 = time.time()
             self.prepare()
             self.timing["prepare_s"] = time.time() - t0
+            if self.live:
+                a = self.replay
+                report["live_analysis"] = {
+                    "verdict": a.get("verdict"), "rounds": len(a.get("broken_rounds", [])),
+                    # Errors no proof edit can fix (imports, attributes, hung files): the case is then
+                    # ineligible, and these are what a human has to look at.
+                    "other_errors": [{k: e.get(k) for k in ("file", "line", "msg")}
+                                     for e in a.get("file_errors", []) + a.get("header_errors", [])][:20],
+                    "timeouts": [t["file"] for t in a.get("timeouts", [])]}
+            if self.live and self.replay.get("verdict", "").startswith("setup failure"):
+                # The head's extracted code does not build: no proof can be repaired against it (§3.3 S1).
+                # One escalation per file, its first errors with their lines.
+                by_file: dict[str, list[dict]] = {}
+                for e in self.replay.get("extraction_errors", []):
+                    by_file.setdefault(e["file"], []).append(e)
+                for f, errs in by_file.items():
+                    errors = [f"line {e.get('line')}: {e['msg']}" for e in errs[:5]]
+                    if len(errs) > 5:
+                        errors.append(f"… and {len(errs) - 5} more error(s) in this file")
+                    report["escalations"].append({"theorem": f, "file": f, "line": errs[0].get("line"),
+                                                  "outcome": "extraction-setup", "errors": errors})
+                report["broken"] = {"proofs": [], "statements": []}
+                report["toolchain"] = ((self.broken_root / "lean-toolchain").read_text().strip()
+                                       if (self.broken_root / "lean-toolchain").is_file() else None)
+                self.p.step("escalate: the extracted code does not build at the head → extraction-setup")
+                raise _Done
             t0 = time.time()
             B = self.snapshot("B", self.base_root)
             K = self.snapshot("K", self.broken_root)
             self.snapshot_paths = (B, K)
             self.timing["snapshots_s"] = time.time() - t0
             t0 = time.time()
-            report["audit"] = self.audit(B) if self.fixed_root else \
+            # Live, the head is the change itself; it does not build, so the audit reads its stubbed
+            # state K (statements and definitions as the PR wrote them, failing proofs as `sorry`).
+            report["audit"] = self.audit(B, K) if self.live else self.audit(B) if self.fixed_root else \
                 {"outcome": "not-applicable", "error": "generated case: no human change to audit"}
             self.timing["audit_s"] = time.time() - t0
             Kj, Bj = json.loads(K.read_text()), json.loads(B.read_text())
@@ -622,7 +697,7 @@ class Run:
                 full = next((n for n, rec in Bj["records"].items() if rec["module"] == self.modules(self.base).module(f)
                              and (n == name or n.endswith("." + name))), name)
                 errs = [e for e in self.replay.get("statement_errors", []) if e["file"] == f and e["decl"] == name]
-                d = decl_text((self.base / f).read_text(), name)
+                d = decl_text((self.orig / f).read_text(), name)
                 is_def = key in set(self.replay.get("definition_broken", []))
                 stmt_broken.append({"name": full, "key": name, "file": f, "line": errs[0]["line"] if errs else d["line"],
                                     "errors": [e["msg"] for e in errs], "statement": d["stmt"].strip() if d else None,
@@ -696,6 +771,10 @@ class Run:
                     self.p.result(f"the gate could not check the human fix: {str(e)[:200]}")
                 self.timing["human_fix_gate_s"] = time.time() - t0
             report["human_fix"] = self.compare_human(broken + stmt_broken, report) if self.fixed else []
+            if self.live:
+                self.record_edits(report)
+        except _Done:
+            pass
         except GateUnavailable as e:
             report["error"] = {"outcome": "gate-unavailable", "detail": str(e)}
         except KeyboardInterrupt:  # keep the partial run record (review finding 9)
@@ -734,11 +813,13 @@ class Run:
             self.out, self.run_id = new, run_id
         return self.run_id
 
-    def audit(self, B: Path) -> dict:
+    def audit(self, B: Path, H: Path | None = None) -> dict:
         """What the triggering change itself did to the frozen declarations (§4.7, path A): the
-        base against the change's head (in replay, the change commit). Independent of repair."""
+        base against the change's head (in replay, the change commit; live, the stubbed head `H`,
+        whose stubs make `sorry` dependencies there the bot's, not the change's). Independent of repair."""
+        stubbed_head = H is not None
         try:
-            H = self.snapshot("H", self.fixed_root)
+            H = H or self.snapshot("H", self.fixed_root)
         except GateUnavailable as e:
             return {"outcome": "incomplete", "error": str(e)[:500]}
         out = self.case_dir / "snapshots" / "audit.json"
@@ -746,6 +827,9 @@ class Run:
         if not out.exists():
             return {"outcome": "incomplete", "error": (g.stderr or "gate audit produced no result")[-500:]}
         a = json.loads(out.read_text())
+        a["head_stubbed"] = stubbed_head
+        if stubbed_head:
+            discount_stub_sorry(a, written_sorry(self.base, self.orig, self.cfg["protected"]["extracted"]))
         explain_hidden(a, B, H)
         s = a["summary"]
         detail = (f"{s['statements_changed']} statement(s), {s['definitions_changed']} definition(s) changed, "
@@ -840,6 +924,18 @@ class Run:
                     entry["possible_memorization"] = entry["similarity_to_human"] >= 0.9
             out.append(entry)
         return out
+
+    def record_edits(self, report: dict) -> None:
+        """Live: each attempted theorem's edit of its proof as the head has it (replay records the
+        same next to the human fix, in compare_human)."""
+        for e in report["repairs"]:
+            if not (e.get("attempts") or e.get("repaired_by")):
+                continue
+            cand = self.scratch / "candidate" / self.wp / e["file"]
+            orig = decl_text((self.orig / e["file"]).read_text(), e["decl"])
+            mine = decl_text(cand.read_text(), e["decl"]) if cand.exists() else None
+            if orig and mine and mine["proof"].strip() != STUB:
+                e["bot_diff"] = unified(orig["proof"], mine["proof"], e["file"])
 
     def totals(self, report: dict, wall: float) -> dict:
         atts = [a for e in report["repairs"] for a in e["attempts"]]
@@ -1056,6 +1152,50 @@ def explain_hidden(audit: dict, B: Path, H: Path) -> None:
                                                    h.get(x["decl"], {}).get("canon", ""))
 
 
+def written_sorry(base: Path, head: Path, extracted: list[str]) -> list[str]:
+    """`file::decl` of declarations whose source at `head` contains `sorry` and did not at `base`
+    (new declarations included): the `sorry` a live change wrote itself, read from the text."""
+    out = []
+    for d, dirs, files in os.walk(head):
+        dirs[:] = [x for x in dirs if x not in SKIP_DIRS]
+        for f in files:
+            rel = str((Path(d) / f).relative_to(head))
+            if not f.endswith(".lean") or rel in extracted:
+                continue
+            after = (head / rel).read_text(errors="replace")
+            if "sorry" not in after:
+                continue
+            before = parse_decls((base / rel).read_text(errors="replace")) if (base / rel).is_file() else {}
+            for name, x in parse_decls(after).items():
+                has = lambda decl: bool(re.search(r"\bsorry\b", decl["body"]))
+                if has(x) and not (name in before and has(before[name])):
+                    out.append(f"{rel}::{name}")
+    return sorted(out)
+
+
+def discount_stub_sorry(audit: dict, written: list[str]) -> None:
+    """Live audit (§4.7): the head does not build, so it is audited with its failing proofs
+    stubbed, which changes axiom closures both ways: `sorryAx` comes in, and whatever the stubbed
+    proofs used (`propext`, ...) goes out. Keep only axioms added other than `sorryAx`, list
+    instead the `sorry` the change wrote (`written`, from the sources), and redo the outcome by the
+    gate's rule (gates/audit.py). Reporting only: the audit decides no acceptance."""
+    n, kept = 0, []
+    for x in audit.get("axioms_changed", []):
+        n += "sorryAx" in x["added"]
+        added = [y for y in x["added"] if y != "sorryAx"]
+        if added:
+            kept.append({**x, "added": added, "removed": []})
+    audit["axioms_changed"], audit["sorry_from_stubs"], audit["sorry_written"] = kept, n, written
+    s = audit.get("summary", {})
+    s.update(axioms_changed=len(kept), new_sorry=0, sorry_written=len(written))
+    findings = any(audit.get(k) for k in ("statements_changed", "definitions_changed", "removed",
+                                           "axioms_changed", "trusted_models_changed", "sorry_written"))
+    if findings:
+        audit["outcome"] = "changed"
+    elif audit.get("outcome") == "changed":
+        audit["outcome"] = "no-change" if audit.get("complete") else "incomplete"
+
+
 def summarize_gate(g: dict) -> dict:
     v = g["verdict"]
     checks = {}
@@ -1072,10 +1212,13 @@ def summarize_gate(g: dict) -> dict:
 
 
 def overall(report: dict) -> str:
-    """accepted | passed-without-kernel-replay | escalated | failed (infrastructure or gate)."""
+    """accepted | passed-without-kernel-replay | escalated | failed (infrastructure or gate) |
+    no-break (live: the head builds, nothing to repair)."""
     if "error" in report:
         return "failed"
     outs = [e.get("outcome") for e in report["repairs"]] + [e["outcome"] for e in report["escalations"]]
+    if not outs and (report.get("live_analysis") or {}).get("verdict", "").startswith("no break"):
+        return "no-break"
     gv = report.get("gate", {}).get("verdict")
     if outs and all(o in ("infrastructure-failure", "gate-unavailable") for o in outs):
         return "failed"

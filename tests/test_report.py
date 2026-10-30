@@ -58,6 +58,15 @@ def test_native_code_is_flagged_on_an_accepted_repair():
         gate={"verdict": "accepted", "checks": {}, "native_code": []}))
 
 
+def test_native_code_is_flagged_on_a_live_repair_too():
+    rep = {"theorem": "Ns.T", "file": "A.lean", "decl": "Ns.T", "outcome": "repaired", "attempts": []}
+    r = minimal_report(verdict="accepted", broken={"proofs": ["Ns.T"], "statements": []}, repairs=[rep],
+                       gate={"verdict": "accepted", "checks": {}, "native_code": ["Ns.T"]})
+    r["inputs"].update(live=True, base_commit="b" * 40, head_ref=None)
+    md = render(r)
+    assert "Rests on native code, as before the change" in md and "human" not in md.lower()
+
+
 def test_failed_run_without_error_record_gives_the_gate_reason():
     rep = {"theorem": "T", "file": "A.lean", "decl": "T", "outcome": "gate-unavailable", "attempts": [],
            "reason": "kernel replay (G5) could not run: no checker"}

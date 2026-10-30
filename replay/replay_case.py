@@ -15,6 +15,9 @@ file-level) remain. The union of sorried declarations is the ground-truth broken
 statement-level errors are reported separately, and modules importing a still-failing module
 are reported as blocked (their status is unknown).
 
+A live change (replay_live, called by the pipeline; DESIGN.md §3.6) has no fixed state: the
+broken state is the head as committed, analyzed in the same rounds, against the base.
+
 Read-only on the target clone (source trees come from `git archive`). Everything is written
 under --work (default: work/, gitignored) and the result JSON under --out (default: runs/replay/).
 
@@ -273,9 +276,12 @@ def lake(cmd: list[str], cwd: Path, log: Path, orphans: list | None = None,
 
 
 def build_state(name: str, d: Path, logdir: Path, fetch_cache: bool,
-                store: Store | None = None, sha: str | None = None, prefix: str = "") -> dict:
+                store: Store | None = None, sha: str | None = None, prefix: str = "",
+                build: bool = True) -> dict:
     """Build the Lake project at `d`. `prefix` is d's path inside the repo (the config's
-    lean_root): Lake reports files relative to the project, records use repo-relative paths."""
+    lean_root): Lake reports files relative to the project, records use repo-relative paths.
+    `build=False` only seeds from the store and fetches Mathlib's cache (a state that is then
+    built in rounds by analyze_broken)."""
     log = logdir / f"{name}.log"
     timings, reuse, orphans = {}, None, []
     fetch_cache = fetch_cache and "mathlib" in {n for n, _ in Store.manifest(d)}  # cache = Mathlib's
@@ -294,6 +300,9 @@ def build_state(name: str, d: Path, logdir: Path, fetch_cache: bool,
         if rc != 0:
             return {"ok": False, "stage": "cache_get", "timings": timings, "reuse": reuse, "orphaned_pins": orphans,
                     "errors": parse_diags(out), "tail": out[-3000:]}
+    if not build:
+        return {"ok": True, "stage": "setup", "timings": timings, "reuse": reuse, "orphaned_pins": orphans,
+                "errors": [], "tail": ""}
     hung: list[str] = []
     rc, t, out = lake(["build"], d, log, orphans, hung)
     timings["build_s"] = round(t)
@@ -710,6 +719,67 @@ def replay_generated(case_id: str, cfg_name: str, base_root: Path, upgraded_root
     freshen(repo(broken_root))
     timing["broken_setup_s"] = round(time.time() - t0, 1)
     result.update(analyze_broken(repo(broken_root), proj(broken_root), cfg, Miner(None, cfg), logdir))
+    timing["broken_rounds_s"] = result.pop("_rounds_s")
+    timing["total_s"] = round(time.time() - t_start)
+    return result
+
+
+def replay_live(case_id: str, repo: Path, base: str, head: str, work: Path) -> dict:
+    """The broken state of a live change (DESIGN.md §3.6): `head` as committed (proofs, extracted
+    code and pins all from the head), against `base`, which must build green. Three trees under
+    <work>/<case>: base (built), broken (the head, built in rounds with failing proofs stubbed,
+    as for a historical case) and head (the head's sources untouched, never built: the failing
+    proofs as written). Nothing is overlaid: no external models from elsewhere, no human fix."""
+    cfg_name = case_id.split("/")[0]
+    git, cfg = Git(repo), REPO_CONFIGS[cfg_name]
+    miner = Miner(git, cfg)
+    root = work / case_id.replace("/", "-")
+    logdir = root / "logs"
+    logdir.mkdir(parents=True, exist_ok=True)
+    t_start = time.time()
+    store = Store(work, git)
+    result = {"case_id": case_id, "live": True, "base_commit": base, "head_commit": head,
+              "replayed_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+              "machine": {"cpus": os.cpu_count()}}
+    timing = result["timing"] = {}
+    lean_root = cfg["lean_root"]
+    proj = lambda state_dir: state_dir / lean_root if lean_root else state_dir
+
+    manifest = git.show(head, lean_path(cfg, "lake-manifest.json"))
+    path_deps = [f"{p['name']} ({p.get('dir')})" for p in (json.loads(manifest)["packages"] if manifest else [])
+                 if p.get("type") == "path"]
+    if path_deps:
+        result["verdict"] = f"unsupported: path dependencies {path_deps} (needs a local checkout)"
+        return result
+
+    t0 = time.time()
+    for state, rev in (("base", base), ("head", head)):
+        if not any((proj(root / state) / f).exists() for f in ("lakefile.toml", "lakefile.lean")):
+            export(git, rev, root / state)
+    freshen(root / "base")
+    timing["export_s"] = round(time.time() - t0, 1)
+    # Base first, so the broken state is seeded with its packages and project build (Lake
+    # re-checks hashes and rebuilds what the head changed).
+    result["base"] = build_state("base", proj(root / "base"), logdir, True, store, base, lean_root)
+    timing["base_s"] = result["base"]["timings"].get("build_s")
+    if not result["base"]["ok"]:
+        result["verdict"] = "invalid: base does not build"
+        timing["total_s"] = round(time.time() - t_start)
+        return result
+    t0 = time.time()
+    broken = root / "broken"
+    if broken.exists():
+        shutil.rmtree(broken)
+    export(git, head, broken)
+    freshen(broken)
+    result["broken_setup"] = build_state("broken-setup", proj(broken), logdir, True, store, head, lean_root,
+                                         build=False)
+    timing["broken_setup_s"] = round(time.time() - t0, 1)
+    if not result["broken_setup"]["ok"]:
+        result["verdict"] = "invalid: the head's dependencies could not be set up"
+        timing["total_s"] = round(time.time() - t_start)
+        return result
+    result.update(analyze_broken(broken, proj(broken), cfg, miner, logdir))
     timing["broken_rounds_s"] = result.pop("_rounds_s")
     timing["total_s"] = round(time.time() - t_start)
     return result

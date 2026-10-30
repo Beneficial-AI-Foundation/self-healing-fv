@@ -14,6 +14,8 @@ runs/<repo>-<sha8>/<run id>/report.md      the PR comment the bot would post
 runs/<repo>-<sha8>/latest                  symlink to the newest run
 ```
 
+A live run (`shfv repair --base <sha> --head <sha>`, DESIGN.md §3.6) has the case id `<repo>/live-<head8>` and writes to `runs/<repo>-live-<head8>/` the same way.
+
 The last line on stdout has the form `<VERDICT> · <counts by outcome> · <cost> · <time> → <path to report.md>`. Parse `report.json`, not that line.
 
 ## 2. Exit codes
@@ -28,6 +30,7 @@ The last line on stdout has the form `<VERDICT> · <counts by outcome> · <cost>
 | `shfv doctor` | Every check passed | Something is missing | – |
 | `shfv compare-human` | Written | A path holds no run record | – |
 | `shfv tripwire` | No run flagged | A run is flagged | – |
+| `shfv live-select` | Selection written, whether or not anything was picked (`count=0`) | The GitHub API failed, or a bad target | – |
 
 So exit 0 does not mean "repaired". Always read `verdict`.
 
@@ -48,12 +51,12 @@ Exit 2 is also argparse's code for bad arguments. Exit 2 never means a pass.
 | Field | Type | Meaning |
 |---|---|---|
 | `format` | int | Record format, currently `2` |
-| `case_id` | str | `<repo>/<sha8>` |
+| `case_id` | str | `<repo>/<sha8>`; live, `<repo>/live-<head8>` |
 | `run_id` | str | E.g. `20261026T094120Z-claude-opus-5-5[-label]`; `<time>-no-model[-label]` when the run called no model |
 | `started_at` | str | UTC, ISO 8601 |
 | `verdict` | str | The overall result (section 4) |
 | `repairs` | list | One entry per proof-repair target (section 5) |
-| `escalations` | list | One entry per theorem whose statement no longer type-checks (section 5) |
+| `escalations` | list | One entry per theorem whose statement no longer type-checks, or (live) per extracted file that does not build (section 5) |
 | `broken` | object | `proofs` and `statements` (names), `frozen_inventory` and `observed_in_broken` (counts), `unobserved_modules`, `missing_frozen` |
 | `gate` | object | The gate's verdict on the bot's candidate (section 6). Absent when nothing was attempted (e.g. a statement break, or an ineligible case). |
 | `delivery_diff` | str | The repair as a unified diff that applies to the change's head (the real broken sources). Present with `gate`. |
@@ -62,7 +65,8 @@ Exit 2 is also argparse's code for bad arguments. Exit 2 never means a pass.
 | `human_fix_gate` | object | Replay only, when enabled: the gate's verdict on the human fix, same shape as `gate` |
 | `totals` | object | Cost, tokens, time (section 9) |
 | `provenance` | object | What produced the run (section 9) |
-| `inputs` | object | `repo`, `base_commit`, `change_commit`, `change_pr`, `change_pr_url`, `change_subject`, `cause`, `causes`, `pin_changes`, `fix_commits`, `generated`, `repo_lean_root` |
+| `inputs` | object | `repo`, `base_commit`, `change_commit`, `change_pr`, `change_pr_url`, `change_subject`, `cause`, `causes`, `pin_changes`, `fix_commits`, `generated`, `repo_lean_root`, `live`, `base_tip`, `head_ref`. Live: `change_commit` is the head that was run, `base_commit` its merge-base with the PR's base, `base_tip` that base as given, `fix_commits` is empty, and `causes` comes from the same rule as mining (plus `proof-only` when no pin, extraction or Rust change explains the break) |
+| `live_analysis` | object | Live only: `verdict` of the head's analysis (`break confirmed`, `no break: …`, `setup failure: …`), `rounds` of stubbing, `other_errors` (errors outside theorem proofs, e.g. a bad import, which no proof edit can fix) and `timeouts` (files killed as hung) |
 | `config` | object | `path`, `sha256` (first 12 hex) and `budget` of the target config; `budget` is the one this run's adapter got (`[budget.<adapter>]` applied, caps turned off left out) and includes any per-run override, and `budget_overrides` lists them (`--per-run-usd`, `--per-run-minutes`) |
 | `agent` | object | `adapter`, `model`, `enabled` (false with `--no-agent`: the sweep only), `auth` (`login` or `api-key`), `tool_profile` (`minimal` or `lsp`), `turns_unit` (what a turn counts for this adapter: `API calls` for Claude Code, `agent messages` for Codex), `unenforced_caps` (caps the adapter could not enforce, allowed by `--allow-unenforced-caps`; empty otherwise) |
 | `gate_version` | str | Hash of the gate's sources |
@@ -81,6 +85,7 @@ Exit 2 is also argparse's code for bad arguments. Exit 2 never means a pass.
 | `escalated` | At least one theorem was not repaired | Read `escalations` and each `repairs[].outcome` and `reason`. Hand them to a person. |
 | `passed-without-kernel-replay` | Every gate check that ran passed, but G5 did not run | Treat as not accepted |
 | `failed` | The run itself failed (setup, build environment, or the gate could not decide for every theorem). Says nothing about the proofs. | Read `error`, fix the environment, re-run |
+| `no-break` | Live only: the head builds here, so there was nothing to repair. The `audit` still says what the change did. | Nothing, or check why the target's own Lean check failed |
 
 ## 5. Per-theorem outcomes
 
@@ -91,7 +96,8 @@ Each entry of `repairs` has `theorem` (fully qualified), `file`, `decl` (name as
 - `repaired_by`: `"sweep"` when the sweep produced the repair;
 - `reason`: why it was not repaired (free text);
 - `blocked_by`: for `blocked-on`, the theorems it waits for;
-- `prebuild_ok`: whether the file built after the last attempt.
+- `prebuild_ok`: whether the file built after the last attempt;
+- `bot_diff`: live only, the bot's edit of the proof as the head has it (in replay it is in `human_fix`).
 
 | `outcome` | Meaning |
 |---|---|
@@ -102,7 +108,7 @@ Each entry of `repairs` has `theorem` (fully qualified), `file`, `decl` (name as
 | `infrastructure-failure` | The agent or the environment failed before saying anything about the theorem |
 | `gate-unavailable` | The gate could not decide. Nothing is accepted, and nothing is held against the repair. |
 
-Each entry of `escalations` has `theorem`, `file`, `line`, `outcome` (always `statement-must-change` for now), `errors` (Lean's messages), `statement` (as it stands), `definition` (when a definition body no longer type-checks, else null), `extraction_change` (a list of `{name, before, after}` signatures of extracted functions named in the errors) and `rename_only` (always null for now).
+Each entry of `escalations` has `theorem`, `file`, `line`, `outcome` (`statement-must-change`; live also `extraction-setup`, when the extracted code itself does not build at the head: then `theorem` is the file's name and only `errors` follows), `errors` (Lean's messages), `statement` (as it stands), `definition` (when a definition body no longer type-checks, else null), `extraction_change` (a list of `{name, before, after}` signatures of extracted functions named in the errors) and `rename_only` (always null for now).
 
 Each attempt object has `adapter`, `model`, `resolved_model`, `stop` (`done`, `gave-up`, `max-turns`, `budget`, `timeout` or `error`), `tokens`, `tokens_complete`, `cost_usd`, `cost_status`, `reported_cost_usd`, `turns`, `seconds`, `final_message`, `diagnosis`, `transcript`, `error`. `turns` is in the adapter's own unit (`agent.turns_unit`), so it is not comparable across adapters.
 
@@ -144,6 +150,8 @@ The output of `gate audit` on the base and the change's head:
 | `coverage_problems`, `not_compared` | Why the audit is incomplete |
 | `summary` | Counts, including `new_sorry` |
 | `error` | Set by the pipeline instead of the fields above when the audit could not run (`outcome` is then `incomplete` or `not-applicable`) |
+| `head_stubbed` | Live: true. The head does not build, so it was audited in its stubbed state, with failing proofs as `sorry` |
+| `sorry_from_stubs`, `sorry_written` | Live: the stubs change axiom closures both ways, so the pipeline drops `sorryAx` and removed axioms from `axioms_changed` (`sorry_from_stubs` counts the entries that had `sorryAx`), lists instead the declarations whose source text gained a `sorry` (`sorry_written`, `file::decl`), and recomputes `outcome` by the gate's rule. Display only: the audit decides nothing. |
 
 `incomplete` never means "no change". The bot does not judge audit findings: route `changed` to a spec owner.
 

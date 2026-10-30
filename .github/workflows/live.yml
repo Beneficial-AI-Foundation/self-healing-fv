@@ -1,0 +1,102 @@
+# Silent live runs (SCI-1717; DESIGN.md §3.6, §9): the step before shadow mode. Picks the configured
+# targets' open PRs whose Lean check failed on the head (shfv live-select; selection rules in
+# shfv/live.py), runs the pipeline on each head against its merge-base with the PR's base, and
+# uploads report.json and report.md as artifacts. It runs in this repo only: it posts nothing to any
+# target repo and needs no permission there (the targets are public). How to use it: docs/ACTIONS.md.
+name: live
+
+on:
+  # Dispatch only: the daily cron ("17 3 * * *") is parked until there is a multi-repo need.
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "Only this target (targets/<target>.toml); needed with ref"
+        required: false
+        default: ""
+      ref:
+        description: "Run on this branch, tag or SHA of the target instead of picking PRs (need not be a PR)"
+        required: false
+        default: ""
+      skip_checks:
+        description: "With ref: run even if the extraction check did not pass on it"
+        type: boolean
+        default: false
+      agent:
+        description: "Run the agent (uses the ANTHROPIC_API_KEY secret). Off: the no-model sweep only"
+        type: boolean
+        default: true
+      per_run_usd:
+        description: "Per-run cost cap, USD (API-equivalent, from token counts)"
+        required: true
+        default: "3"
+      per_run_minutes:
+        description: "Per-run deadline, minutes"
+        required: true
+        default: "300"
+      max_runs:
+        description: "PRs to run at most (without ref)"
+        required: true
+        default: "2"
+
+# Read this repo (checkout) and its artifacts (which heads were already run). The target repos are
+# read through the public API with this token; nothing is written anywhere.
+permissions:
+  contents: read
+  actions: read
+
+# One live workflow at a time; a new one waits instead of cancelling a run in progress.
+concurrency:
+  group: live
+  cancel-in-progress: false
+
+jobs:
+  select:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.select.outputs.matrix }}
+      count: ${{ steps.select.outputs.count }}
+    env:
+      TARGET: ${{ inputs.target }}
+      REF: ${{ inputs.ref }}
+      SKIP_CHECKS: ${{ inputs.skip_checks }}
+      MAX_RUNS: ${{ inputs.max_runs }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Pick PRs
+        id: select
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          [[ "$TARGET" =~ ^[a-z0-9-]*$ && "$MAX_RUNS" =~ ^[0-9]+$ && ( -z "$REF" || "$REF" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]*$ ) ]] || {
+            echo "::error::bad input"; exit 1; }
+          args=(--max-runs "$MAX_RUNS" --github-output "$GITHUB_OUTPUT" --summary "$GITHUB_STEP_SUMMARY")
+          [ -z "$TARGET" ] || args+=(--target "$TARGET")
+          [ -z "$REF" ] || args+=(--ref "$REF")
+          [ "$SKIP_CHECKS" != "true" ] || args+=(--skip-checks)
+          python3 -m shfv.cli live-select "${args[@]}"
+
+  run:
+    needs: select
+    if: needs.select.outputs.count != '0'
+    strategy:
+      matrix: ${{ fromJSON(needs.select.outputs.matrix) }}
+      max-parallel: 1  # one live run at a time (runner minutes, model spend)
+      fail-fast: false
+    uses: ./.github/workflows/replay.yml
+    with:
+      target: ${{ matrix.target }}
+      base: ${{ matrix.base }}
+      head: ${{ matrix.head }}
+      fetch_ref: ${{ matrix.fetch_ref }}
+      pr: ${{ format('{0}', matrix.pr) }}
+      title: ${{ matrix.title }}
+      artifact: ${{ matrix.artifact }}
+      runner: ${{ matrix.runner }}
+      agent: ${{ inputs.agent }}
+      per_run_usd: ${{ inputs.per_run_usd }}
+      per_run_minutes: ${{ inputs.per_run_minutes }}
+    secrets:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
