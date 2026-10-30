@@ -880,7 +880,8 @@ class Run:
                   f"{s['removed']} removed; {s['new_sorry']} newly depend on sorry; "
                   f"{s['trusted_models_changed']} trusted model(s) changed"
                   + (f"; {s['axioms_added']} axiom(s) added" if s.get("axioms_added") else "")
-                  + (f"; {s['roots_added']} librar(ies) added" if s.get("roots_added") else "")) \
+                  + (f"; {s['roots_added']} librar{'y' if s['roots_added'] == 1 else 'ies'} added"
+                     if s.get("roots_added") else "")) \
             if a["outcome"] == "changed" else \
             "; ".join(a.get("coverage_problems", [])[:2])
         self.p.step(f"audit of the change itself: {a['outcome']}" + (f" · {detail}" if detail else ""))
