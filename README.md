@@ -1,5 +1,7 @@
 # self-healing-fv
 
+> **Work in progress.** This is a research prototype from the Beneficial AI Foundation (BAIF). The results so far are preliminary, and the code is not meant for production use.
+
 Self-healing CI for verified Rust (Rust → Charon/Aeneas → Lean).
 
 When Rust code, the Aeneas extractor, or the Lean toolchain changes, Lean proofs about the extracted code break. This project builds a CI bot that:
