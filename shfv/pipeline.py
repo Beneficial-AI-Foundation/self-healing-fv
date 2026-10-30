@@ -584,13 +584,14 @@ class Run:
              "--workdir", str(self.scratch / f"{label}-gate-tree"), "--clean", "--out", str(C),
              "--log", str(self.scratch / f"{label}.build.log"))
         V = self.scratch / f"{label}.V.json"
-        # Live, the gate holds the bot to the PR as written, not to the base (§4.9, decided 2026-10-30),
-        # and needs every proof S2 stubbed: in the text a stub looks like the head's own `sorry`.
+        # Live, the gate holds the bot to the PR as written, not to the base (§4.9, decided 2026-10-30).
+        # In the stubbed state a stub looks like the head's own `sorry`, so the gate finds the stubs by
+        # comparing with the head as committed; S2's own list is a cross-check.
         live = []
         if self.reference == "head":
             stubs = self.scratch / "stubs.json"
-            stubs.write_text(json.dumps(self.replay.get("broken_proofs", [])))
-            live = ["--stubs", str(stubs)]
+            stubs.write_text(json.dumps(self.stubbed()))
+            live = ["--head-tree", str(self.case_dir / "head"), "--stubs", str(stubs)]
         gate("compare", *common, "--candidate", str(C), "--out", str(V), "--reference", self.reference, *live,
              check=False)  # 2 = gate-unavailable
         if not V.exists():
@@ -601,6 +602,11 @@ class Run:
         if not self.keep:
             shutil.rmtree(self.scratch / f"{label}-gate-tree", ignore_errors=True)
         return res
+
+    def stubbed(self) -> list[str]:
+        """Every proof S2 stubbed (`file::declaration`): breaks, and all proofs of a hung file.
+        Analyses made before the record had `stubbed` list the breaks only."""
+        return self.replay.get("stubbed", self.replay.get("broken_proofs", []))
 
     def human_fix_tree(self) -> Path:
         """The human fix as a candidate: the stubbed broken state with the audited source files of
@@ -732,8 +738,7 @@ class Run:
             # ineligible (§4.9, rule 6), so the report escalates it and nothing is spent.
             in_set = {(b["file"], b["key"].split("#", 1)[0]) for b in broken} | sb
             detail = {f"{d['file']}::{d['decl']}": d for d in self.replay.get("broken_proofs_detail", [])}
-            added_stubs = [s for s in self.replay.get("broken_proofs", [])
-                           if self.live and tuple(s.split("::", 1)) not in in_set]
+            added_stubs = [s for s in self.stubbed() if self.live and tuple(s.split("::", 1)) not in in_set]
             for s in added_stubs:
                 f, key = s.split("::", 1)
                 d = detail.get(s, {})
