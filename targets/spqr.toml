@@ -61,6 +61,9 @@ enabled = true
 lean_check = "Build Lean Project"
 extraction_check = "Check Aeneas Extraction"
 runner = "self-healing-fv"
+# pr-repair.yml's comment (shfv comment): the Repair section goes into the sticky comment of
+# SPQR's own sorry-delta-comment.yml (marocchino header "sorry-delta"), not a comment of its own.
+comment_header = "sorry-delta"
 
 # Same list prices as targets/dalek-lean-verify.toml (source and verification there).
 [prices."claude-opus-5-5"]

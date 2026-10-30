@@ -257,6 +257,7 @@ def audit_section(r: dict, focus: str | None = None) -> list[str]:
 def render(r: dict) -> str:
     inp = r["inputs"]
     subject = re.sub(r"\s*\(#\d+\)\s*$", "", inp["change_subject"])
+    subject = subject.replace("@", "@\u200b")  # a PR title is free text: no mentions when it is posted
     pr = f"[#{inp['change_pr']} \"{subject}\"]({inp['change_pr_url']})" if inp.get("change_pr_url") \
         else (f"`{inp['change_commit'][:8]}` \"{subject}\"" if inp.get("change_commit")
               else f"the generated change \"{subject}\" (held-out case, no commit history)")

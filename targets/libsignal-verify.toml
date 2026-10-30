@@ -58,6 +58,17 @@ per_theorem_usd = false
 [repair]
 sweep = true
 
+[live]
+# Live runs (shfv/live.py): live.yml from this repo, and pr-repair.yml called from the target's PRs.
+# Same check names as SPQR (lean.yml "Lean Build" and aeneas.yml "Aeneas extraction", from the same
+# template). The standard runner: the repo builds in 75 s at 2.8 GB.
+enabled = true
+lean_check = "Build Lean Project"
+extraction_check = "Check Aeneas Extraction"
+runner = "ubuntu-latest"
+# No sticky comment of the repo's own: the bot keeps one comment per PR, under its own marker.
+comment_header = "self-healing-fv"
+
 # Same list prices as targets/dalek-lean-verify.toml (source and verification there).
 [prices."claude-opus-5-5"]
 input = 4.0

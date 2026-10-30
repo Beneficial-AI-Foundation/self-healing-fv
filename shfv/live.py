@@ -6,9 +6,12 @@ commits of a target repo, e.g. an open pull request.
   select       which open PRs of the configured targets the silent workflow should run on
                (.github/workflows/live.yml): authored by members, Lean check failing on the
                head, extraction check green on the same head, and not run before for that head.
+  select_pr    whether one PR qualifies, for pr-repair.yml, which a target repo calls on its own
+               PRs: the same rules, plus a same-repo branch, no opt-out label, and a change to a
+               pin or the extracted code.
 
-The workflow runs in this repo and only reads the target repos (they are public): it posts
-nothing anywhere and needs no permission there.
+live.yml runs in this repo and only reads the target repos (they are public): it posts nothing
+anywhere and needs no permission there. pr-repair.yml runs in the target repo, which grants it.
 """
 from __future__ import annotations
 
@@ -27,6 +30,7 @@ sys.path.insert(0, str(ROOT / "mining"))
 from mine_history import REPO_CONFIGS, Git, Miner, change_causes  # noqa: E402
 
 TRUSTED_AUTHORS = ("OWNER", "MEMBER", "COLLABORATOR")  # GitHub's author_association (§9.2)
+OPT_OUT = "no-self-heal"  # the label that keeps pr-repair.yml off a PR
 LEAN_FAILED = ("failure", "timed_out")
 API = "https://api.github.com"
 
@@ -161,6 +165,8 @@ def checks_skip(api, cfg: dict, head: str, lean_required: bool) -> str | None:
                 lean, f"\"{live['lean_check']}\" neither passed nor failed on this head")
     if live.get("extraction_check"):
         ex = check_state(api, repo, head, live["extraction_check"])
+        if ex == "pending":
+            return f"waiting for \"{live['extraction_check']}\" on this head; the run after it finishes decides"
         if ex != "passed":
             return (f"extraction not checked: \"{live['extraction_check']}\" is {ex} on this head, so the "
                     "extracted Lean code may not match the Rust; the bot repairs only against checked extraction")
@@ -219,6 +225,45 @@ def select_ref(api, target: str, cfg: dict, ref: str, skip_checks: bool = False)
                       pr["title"] if pr else f"ref {ref}")], [row]
 
 
+def select_pr(api, target: str, cfg: dict, repo: str, number: int, self_repo: str,
+              clone: Path | None = None) -> tuple[list[dict], list[dict]]:
+    """One PR of a repo that calls pr-repair.yml (DESIGN.md §9): (runs, decisions), as `select`.
+    `repo` is the calling repo, the target's or a private copy of it; the run records live there
+    too (`self_repo`). On top of `select`'s rules: the PR's branch must be in `repo` (a fork's code
+    never runs with the key), it must not carry OPT_OUT, and, given a clone with base and head, it
+    must change a pin or the extracted code: a PR that only edits proofs is proof work in
+    progress, not a break to repair."""
+    cfg = {**cfg, "github": repo}
+    pr = api(f"/repos/{repo}/pulls/{number}")
+    head = pr["head"]["sha"]
+    row = {"target": target, "repo": repo, "pr": number, "head": head[:8], "head_sha": head,
+           "title": pr["title"][:80]}
+    if (pr["head"].get("repo") or {}).get("full_name") != repo:
+        row["skip"] = "the PR's branch is in another repo (a fork): its code never runs with the key"
+    elif pr.get("state") != "open":
+        row["skip"] = "closed"
+    elif pr.get("author_association") not in TRUSTED_AUTHORS:
+        row["skip"] = f"author is {pr.get('author_association', 'unknown').lower()}, not a member or collaborator"
+    elif pr.get("draft"):
+        row["skip"] = "draft"
+    elif OPT_OUT in {lb["name"] for lb in pr.get("labels", [])}:
+        row["skip"] = f"labelled {OPT_OUT}"
+    elif already_run(api, self_repo, target, head):
+        row["skip"] = "already run on this head"
+    elif why := checks_skip(api, cfg, head, lean_required=True):
+        row["skip"] = why
+    else:
+        if clone:
+            row["cause"] = live_record(target, clone, pr["base"]["sha"], head)["cause"]
+        if row.get("cause") == "proof-only":
+            row["skip"] = "changes proofs only (no pin or extracted code): proof work in progress, not a break"
+        else:
+            row["run"] = True
+            return [run_entry(target, cfg, head, pr["base"]["sha"], f"refs/pull/{number}/head", number,
+                              pr["title"])], [row]
+    return [], [row]
+
+
 def summary(runs: list[dict], decisions: list[dict]) -> str:
     """The selection job's summary: every PR looked at and why it was or was not run."""
     out = ["## Live selection", "", f"{len(runs)} to run." if runs else "Nothing to run.", ""]
@@ -232,9 +277,16 @@ def summary(runs: list[dict], decisions: list[dict]) -> str:
 
 
 def main_select(target: str | None, ref: str | None, skip_checks: bool, max_runs: int,
-                self_repo: str, out: Path | None, summary_path: Path | None) -> int:
+                self_repo: str, out: Path | None, summary_path: Path | None, pr: int | None = None,
+                repo: str | None = None, clone: Path | None = None, decisions_path: Path | None = None) -> int:
     api = github_api(os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN"))
-    if ref:
+    if pr:
+        if not (target and repo):
+            raise SystemExit("--pr needs --target and --repo")
+        with open(ROOT / "targets" / f"{target}.toml", "rb") as fh:
+            cfg = tomllib.load(fh)
+        runs, decisions = select_pr(api, target, cfg, repo, pr, self_repo, clone)
+    elif ref:
         if not target:
             raise SystemExit("--ref needs --target")
         with open(ROOT / "targets" / f"{target}.toml", "rb") as fh:
@@ -252,4 +304,6 @@ def main_select(target: str | None, ref: str | None, skip_checks: bool, max_runs
     if out:
         with open(out, "a") as f:  # $GITHUB_OUTPUT
             f.write(f"matrix={json.dumps({'include': runs})}\ncount={len(runs)}\n")
+    if decisions_path:  # telemetry: every decision, skips too (shfv collect reads it)
+        decisions_path.write_text(json.dumps({"format": 1, "runs": runs, "decisions": decisions}, indent=1) + "\n")
     return 0
