@@ -6,7 +6,7 @@ Guidance for coding agents working in this repo (Claude Code, Codex CLI, Factory
 
 A CI bot for verified Rust (Rust → Charon/Aeneas → Lean). After a Rust, Aeneas, or Lean/Mathlib change breaks proofs, the bot first tries fixed edits without a model (the sweep), then an AI agent repairs the remaining proofs. A repair is accepted only if the model-free gate passes: no theorem statement changed, no new `axiom` or `sorry`, a clean rebuild, and a kernel re-check. Otherwise the bot escalates to a human with evidence. It never decides on its own whether a changed spec is acceptable.
 
-The prototype replays historical cases locally and writes a report; it opens no PRs. It can also run on a live change (base and head commits, e.g. an open PR), and `.github/workflows/live.yml` does so silently on the targets' failing PRs, posting nothing.
+The prototype replays historical cases locally and writes a report; it opens no PRs. It can also run on a live change (base and head commits, e.g. an open PR), and `.github/workflows/live.yml` does so silently on the targets' failing PRs, posting nothing. `.github/workflows/pr-repair.yml` is the reusable workflow a target repo can call on its own PRs; it writes a Repair section into the PR's comment (not deployed yet).
 
 ## Docs
 
@@ -25,13 +25,13 @@ The prototype replays historical cases locally and writes a report; it opens no 
 
 | Path | What it is |
 |---|---|
-| `shfv/` | The pipeline and CLI (`shfv repair`, `render`, `export`, `doctor`, `live-select`): replay a case or run on a live change, sweep, agent attempts, call the gate, write the report. `shfv/live.py` makes live case records and picks PRs for the live workflow. `shfv/agents/` holds the agent adapters and the prompt. |
+| `shfv/` | The pipeline and CLI (`shfv repair`, `render`, `export`, `doctor`, `live-select`, `comment`, `collect`): replay a case or run on a live change, sweep, agent attempts, call the gate, write the report. `shfv/live.py` makes live case records and picks PRs for the live workflows; `shfv/comment.py` writes the Repair section into a PR's comment; `shfv/collect.py` keeps one row per target run in `data/live/`. `shfv/agents/` holds the agent adapters and the prompt. |
 | `gates/` | The gate (`gate snapshot`, `scope`, `compare`, `audit`, `diff`, `version`): model-free, deterministic. `StmtCanon.lean` is the vendored statement fingerprint. |
 | `mining/` | `mine_history.py`: finds candidate cases in a repo's git history. `repos.json` lists the repos. |
 | `replay/` | `replay_case.py` builds a case's broken state and records which theorems fail; `evaluate.py` scores replays; `export_results.py` writes `data/`; `generate_aeneas_upgrade.py` makes SymCrypt's generated cases. |
 | `targets/` | One TOML config per target repo: build targets, protected files, agent, model, budgets, prices. |
 | `tests/` | Unit tests for the pipeline; `tests/gate/` has the gate tests, including the planted-violation tests, on a toy Lean project in `tests/gate/fixture/`. |
-| `.github/` | `workflows/replay.yml`, the manually dispatched replay on a hosted runner (also called for one live change); `workflows/live.yml`, the silent live runs on open PRs (manual dispatch; the cron is parked); `scripts/runner_stats.py` samples memory and disk during them |
+| `.github/` | `workflows/replay.yml`, the manually dispatched replay on a hosted runner (also called for one live change); `workflows/live.yml`, the silent live runs on open PRs (manual dispatch; the cron is parked); `workflows/pr-repair.yml`, the reusable workflow a target calls on its own PRs; `scripts/runner_stats.py` samples memory and disk during them |
 | `data/` | The committed dataset: `mined/<repo>.jsonl` case records, `replay/<repo>/<sha8>.json` replay ground truth. |
 
 Not in git: `runs/` (run records), `data/raw/`, clones of target repos, `.lake/`. Replay workspaces live outside this repo, in `~/baif/shfv-work/` (or `$SHFV_WORK`), so an agent working in one does not find this repo by walking up (`docs/DESIGN.md` §8.5); older ones may still be in `work/`.

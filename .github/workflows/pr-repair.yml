@@ -1,0 +1,150 @@
+# Self-heal on a target repo's own PRs (SCI-1717; DESIGN.md §9): the reusable workflow a target repo
+# calls from a thin workflow of its own (the caller is in docs/ACTIONS.md). It decides whether the PR
+# qualifies (shfv live-select --pr; rules in shfv/live.py `select_pr`), runs the live pipeline on it
+# (replay.yml), and writes the Repair section into the PR's sticky comment (shfv comment; the
+# target config's [live] comment_header says which). A PR that does not qualify gets nothing
+# posted: the reason is in the run's summary and in its decisions artifact (shfv collect).
+#
+# The run belongs to the calling repo: its token, its secrets, its caches, its artifacts. Only the
+# reports and the patch are uploaded there, never the prompts or transcripts.
+name: pr-repair
+
+on:
+  workflow_call:
+    inputs:
+      target: {type: string, required: true, description: "Target config name (targets/<target>.toml)"}
+      pr: {type: string, required: true, description: "The PR number (empty: nothing to do, e.g. a fork's PR)"}
+      runner: {type: string, default: ubuntu-latest}
+      agent: {type: boolean, default: true}
+      per_run_usd: {type: string, default: "3"}
+      per_run_minutes: {type: string, default: "120"}
+    secrets:
+      ANTHROPIC_API_KEY: {required: false}
+      SHFV_TOKEN: {required: false, description: "Read access to self-healing-fv, while it is private"}
+
+permissions: {}
+
+jobs:
+  select:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read       # the PR's commits, for its cause
+      pull-requests: read
+      checks: read         # the Lean and extraction checks on the head
+      actions: read        # the artifacts of earlier runs: one run per head
+    outputs:
+      matrix: ${{ steps.select.outputs.matrix }}
+      count: ${{ steps.select.outputs.count }}
+    env:
+      TARGET: ${{ inputs.target }}
+      PR: ${{ inputs.pr }}
+      REPO: ${{ github.repository }}
+    steps:
+      - name: Check inputs
+        run: |
+          [[ "$TARGET" =~ ^[a-z0-9-]+$ && "$PR" =~ ^[0-9]*$ ]] || { echo "::error::bad input"; exit 1; }
+          if [ -z "$PR" ]; then
+            echo "No same-repo PR for this run (a fork's PR, or a push): nothing to do." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      # This repo at this workflow's commit (by default checkout would take the caller's).
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        if: inputs.pr != ''
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          token: ${{ secrets.SHFV_TOKEN || github.token }}
+          persist-credentials: false
+
+      # History without file contents, and the PR's head: enough to tell a pin or extraction change
+      # from proof edits. Nothing of the PR is checked out or run.
+      - name: Fetch the PR's commits
+        if: inputs.pr != ''
+        env:
+          GIT_TOKEN: ${{ github.token }}
+        run: |
+          auth=(-c "http.https://github.com/.extraheader=AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GIT_TOKEN" | base64 -w0)")
+          git "${auth[@]}" clone --quiet --filter=blob:none --no-checkout "https://github.com/$REPO" "$RUNNER_TEMP/target"
+          git "${auth[@]}" -C "$RUNNER_TEMP/target" fetch --quiet origin "refs/pull/$PR/head"
+          # Later reads fetch file contents on demand; the token is needed for a private repo.
+          git -C "$RUNNER_TEMP/target" config http.https://github.com/.extraheader \
+            "AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GIT_TOKEN" | base64 -w0)"
+
+      - name: Decide
+        id: select
+        if: inputs.pr != ''
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/decisions"
+          python3 -m shfv.cli live-select --target "$TARGET" --pr "$PR" --repo "$REPO" --clone "$RUNNER_TEMP/target" \
+            --github-output "$GITHUB_OUTPUT" --summary "$GITHUB_STEP_SUMMARY" --decisions "$RUNNER_TEMP/decisions/decisions.json"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        if: inputs.pr != '' && !cancelled()
+        with:
+          name: decisions-${{ inputs.pr }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/decisions/decisions.json
+          if-no-files-found: ignore
+
+  repair:
+    needs: select
+    if: needs.select.outputs.count == '1'
+    permissions:
+      contents: read
+    uses: ./.github/workflows/replay.yml
+    with:
+      target: ${{ inputs.target }}
+      repo: ${{ github.repository }}
+      base: ${{ fromJSON(needs.select.outputs.matrix).include[0].base }}
+      head: ${{ fromJSON(needs.select.outputs.matrix).include[0].head }}
+      fetch_ref: ${{ fromJSON(needs.select.outputs.matrix).include[0].fetch_ref }}
+      pr: ${{ inputs.pr }}
+      title: ${{ fromJSON(needs.select.outputs.matrix).include[0].title }}
+      artifact: ${{ fromJSON(needs.select.outputs.matrix).include[0].artifact }}
+      runner: ${{ inputs.runner }}
+      agent: ${{ inputs.agent }}
+      per_run_usd: ${{ inputs.per_run_usd }}
+      per_run_minutes: ${{ inputs.per_run_minutes }}
+      record: reports
+      save_store: false  # the target's cache is its own (10 GB), and its Lean CI uses it
+    secrets:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      SHFV_TOKEN: ${{ secrets.SHFV_TOKEN }}
+
+  # No model key here, and the PR's code is never checked out: only this repo and the run's report.
+  comment:
+    needs: [select, repair]
+    if: needs.repair.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: write
+      actions: read
+    env:
+      TARGET: ${{ inputs.target }}
+      PR: ${{ inputs.pr }}
+      REPO: ${{ github.repository }}
+      ARTIFACT: ${{ fromJSON(needs.select.outputs.matrix).include[0].artifact }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          token: ${{ secrets.SHFV_TOKEN || github.token }}
+          persist-credentials: false
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
+        with:
+          name: ${{ env.ARTIFACT }}
+          path: ${{ runner.temp }}/record
+
+      - name: Write the Repair section
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          python3 -m shfv.cli comment "$RUNNER_TEMP/record/report.json" --target "$TARGET" --repo "$REPO" --pr "$PR" \
+            --run-url "$RUN_URL" --artifact "$ARTIFACT"

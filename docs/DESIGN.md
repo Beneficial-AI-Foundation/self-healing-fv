@@ -616,6 +616,7 @@ Releases are versioned. Each run record stores the bot version, gate version, ta
 - **Fork PRs:** the bot runs only after a maintainer adds the `self-heal` label. The approval binds to the **head SHA** at labelling time: on any new push the bot removes the label, and a maintainer must review and add it again. Building Lean code runs arbitrary code: `lakefile.lean`, macros and `#eval` all execute at build time. The `repair` job builds the PR's code *and* holds a model key, so it must never build unreviewed code from strangers. The label means "a maintainer has looked at this code". Jobs without secrets (`audit`, `context`, `behavior`, `gate`) carry no such risk, but they run under the same rule for simplicity.
 - **Delivery to fork PRs:** the bot cannot push branches to a fork. It posts the repair as a patch (a downloadable artifact, plus GitHub suggested changes for small diffs) that the author applies.
 - **Opt-out:** a `no-self-heal` label skips a PR, and a repository variable turns the bot off entirely.
+- **The pilot** (`pr-repair.yml`, 2026-10-30; docs/ACTIONS.md): same-repo PRs only (fork PRs are skipped; the label is not built yet), by members and collaborators, with the extraction check green on the head, and only if the PR changes a pin or the extracted code: a PR that only edits proofs is proof work in progress, not a break. A PR that does not qualify gets nothing posted. The result goes into the PR's sticky comment, the target's own or the bot's (a per-target choice), and the bot pushes nothing.
 
 ### 9.3 Secrets and permissions
 
