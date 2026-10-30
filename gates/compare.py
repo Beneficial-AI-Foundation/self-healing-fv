@@ -55,7 +55,7 @@ import hashlib
 import re
 
 from . import inventory, patch, scope, version
-from .snapshot import config_hash, module_file, module_of
+from .snapshot import config_hash, module_file, module_of, protected
 
 BASE3 = {"propext", "Classical.choice", "Quot.sound"}
 SORRY = "sorryAx"
@@ -247,14 +247,16 @@ def compare(cfg: dict, base: dict, broken: dict, cand: dict, diff: str, referenc
     # its base record. Head reference: its record in the stubbed broken state, without the stubs'
     # `sorry`. A stub hides the closure of the head's own proof, so a declaration whose closure runs
     # through a stub may rest on what its base version rested on (native code included), plus the
-    # axioms new at the head that some other head declaration uses (never `sorry` or native code;
-    # an axiom's closure names itself, so declaring one is not using it), and on `sorry` only
-    # through lemmas its base version reached that are still unproved in the head (§4.9).
+    # axioms new at the head that the head declares in a trusted-model file (never `sorry` or native
+    # code; decided 2026-10-30, Dana): a PR's own `axiom pr_cheat : False` in a spec file is not
+    # allowed, however the PR uses it. And on `sorry` only through lemmas its base version reached
+    # that are still unproved in the head (§4.9).
     stubs = (repaired | {o["name"] for o in outside if o["name"]}) if head else set()
     head_sorry = {s for r in broken["records"].values() for s in r.get("sorry_sources", [])} - stubs
-    base_axioms = {x for r in base["records"].values() for x in r.get("axioms", [])}
-    head_axioms = {x for n, r in inventory_.items() for x in r.get("axioms", []) if x != n} \
-        - base_axioms - {SORRY, NATIVE}
+    base_axioms = {x for r in base["records"].values() for x in r.get("axioms", [])} | set(base["records"])
+    head_axioms = {n for n, r in inventory_.items() if r.get("kind") == "axiom" and n not in base_axioms
+                   and protected(cfg, module_file(r["module"], broken.get("src_dirs"))) == "trusted_models"} \
+        - {SORRY, NATIVE}
 
     def ref_closure(name: str) -> tuple[set[str], set[str]]:
         r = inventory_.get(name) or {}

@@ -32,6 +32,7 @@ TRIPLE_BASE = "theorem triple_spec (x : Nat) : triple x = 3 * x := by\n  unfold 
 TRIPLE_PR = "theorem triple_spec (x : Nat) : triple x = x * 3 := by\n  unfold triple\n  omega\n"
 TODO = ("\ntheorem todo_lemma (x : Nat) : List.sum [x, x] = x + x := by sorry\n"
         "\naxiom pr_cheat : False\n"
+        "\ntheorem pr_use : 1 = 1 := pr_cheat.elim\n"
         "\ndef pr_def (x : Nat) : Nat := x + 1\n"
         "\ntheorem pair_two : List.sum [2, 2] = 2 + 2 := sum_pair 2\n")
 BASE_GAP = "theorem base_gap (x : Nat) : List.sum [x, x] = x + x := by sorry\n\n"
@@ -158,9 +159,10 @@ def test_inherited_sorry_is_accepted_and_flagged(env):
 
 # ------------------------------------------------------------------ review findings (2026-10-30)
 
-def test_bot_rests_on_an_axiom_the_change_declares_but_nothing_uses(env):
-    """Finding 1: an axiom's closure names itself, so declaring `pr_cheat : False` is not using it.
-    The bot may not rest a repair on it, though the head has it; base mode rejects it too."""
+def test_bot_rests_on_an_axiom_the_change_declares_outside_the_models(env):
+    """Review finding 1 and re-review item 2 (decided 2026-10-30): `pr_cheat : False` is declared in
+    a spec file, not a trusted model, so the bot may not rest a repair on it, though the head has it
+    and even uses it (`pr_use`, which used to make it allowable). Base mode rejects it too."""
     proof = "theorem double_spec (x : Nat) : double x = 2 * x := pr_cheat.elim\n"
     for ref in ("head", "base"):
         rc, v, _ = run(env, "pr-cheat", fix(proof), reference=ref)

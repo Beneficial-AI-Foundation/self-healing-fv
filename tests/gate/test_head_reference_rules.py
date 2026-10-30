@@ -115,6 +115,28 @@ def test_all_stubs_of_a_hung_file_must_be_listed():
     assert not any("disagrees" in u for u in v["unavailable"])
 
 
+def pr_axiom_case(module):
+    """The PR declares axiom PA in `module`, its own lemma L uses it, and the repair of T rests on it."""
+    base, broken, cand, diff = case(cand_axioms=BASE3 + ["PA"])
+    pa = {**rec(["PA"]), "kind": "axiom", "module": module}
+    for s in (broken, cand):
+        s["records"]["PA"] = pa
+        s["records"]["L"] = rec(BASE3 + ["PA"])
+        s["modules"][module] = "observed"
+    return base, broken, cand, diff
+
+
+def test_a_new_axiom_counts_only_if_a_trusted_model_declares_it():
+    """Decided 2026-10-30 (re-review item 2): a PR-added axiom is allowed behind a stub only if it is
+    declared in a trusted-model file of the target config, however the PR itself uses it."""
+    v = head(*pr_axiom_case("Toy.FunsExternal"))  # Toy/FunsExternal.lean: a trusted model in TOY_CONFIG
+    assert v["verdict"] == "accepted", v["checks"]["G2"]["violations"]
+    assert v["checks"]["G2"]["info"]["axioms_beyond_base_version"] == {"T": ["PA"]}
+    v = head(*pr_axiom_case("M"))  # M.lean: a spec file; L's use does not make PA allowable
+    assert v["verdict"] == "rejected" and any(x["decl"] == "T" and "PA" in x["msg"]
+                                              for x in v["checks"]["G2"]["violations"])
+
+
 def test_the_head_sources_are_required_and_must_match_the_stubbed_state():
     base, broken, cand, diff = case()
     v = compare.compare(CFG, base, broken, cand, diff, reference="head", stubs=STUBS)
