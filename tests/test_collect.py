@@ -151,6 +151,57 @@ def test_a_repair_without_its_patch_stops_the_collection(files):
         collect.collect(api, None, "o/spqr", "self-heal.yml", seen=set(), fetch=fetch)
 
 
+def collect_one(tmp_path, monkeypatch, r):
+    out = tmp_path / "live" / "spqr.jsonl"
+    monkeypatch.setattr(collect, "github_api", lambda token: None)
+    monkeypatch.setattr(collect, "collect", lambda a, t, repo, wf, seen: [dict(r)])
+    collect.main("o/spqr", "spqr", "self-heal.yml", out)
+    return json.loads(out.read_text().splitlines()[-1]), out.parent
+
+
+@pytest.mark.parametrize("pr,head", [("../../../x", "a" * 40), (7, "../../evil" + "a" * 30), (True, "a" * 40),
+                                     (7, "A" * 40), (None, "a" * 40)])
+def test_a_hostile_pr_or_head_never_names_a_file(tmp_path, monkeypatch, pr, head):
+    """They come from the target's decisions.json: untrusted."""
+    api, fetch, _ = patch_api(REPAIRED, {"repair.patch": PATCH})
+    [r] = collect.collect(api, None, "o/spqr", "self-heal.yml", seen=set(), fetch=fetch)
+    r.update(pr=pr, pr_head=head)
+    line, root = collect_one(tmp_path, monkeypatch, r)
+    assert line["patch_path"] is None and line["patch_sha256"] and any("malformed" in f for f in line["flags"])
+    assert not [p for p in tmp_path.rglob("*") if p.is_file() and p.suffix == ".patch"]
+
+
+def test_an_oversized_patch_keeps_only_its_hash(tmp_path, monkeypatch):
+    big = "+" + "x" * (collect.MAX_PATCH + 1) + "\n"
+    api, fetch, _ = patch_api({**REPAIRED, "delivery_diff": big}, {"repair.patch": big})
+    [r] = collect.collect(api, None, "o/spqr", "self-heal.yml", seen=set(), fetch=fetch)
+    line, root = collect_one(tmp_path, monkeypatch, r)
+    assert line["patch_path"] is None and line["patch_sha256"] == hashlib.sha256(big.encode()).hexdigest()
+    assert any("only its hash" in f for f in line["flags"]) and not (root / "spqr").exists()
+
+
+def test_an_oversized_member_stops_the_collection(monkeypatch):
+    """A zip bomb: the member is read with a bound whatever its header claims."""
+    monkeypatch.setattr(collect, "MAX_MEMBER", 1000)
+    api, fetch, _ = patch_api(REPAIRED, {"repair.patch": PATCH + "x" * 5000})
+    with pytest.raises(SystemExit, match="uncompressed"):
+        collect.collect(api, None, "o/spqr", "self-heal.yml", seen=set(), fetch=fetch)
+
+
+def test_an_oversized_artifact_is_not_downloaded():
+    api, fetch, fetched = patch_api(REPAIRED, {"repair.patch": PATCH})
+    real = api.__call__
+
+    def sized(path):
+        out = real(path)
+        for a in out.get("artifacts", []):
+            a["size_in_bytes"] = collect.MAX_ARTIFACT + 1
+        return out
+    with pytest.raises(SystemExit, match="over"):
+        collect.collect(sized, None, "o/spqr", "self-heal.yml", seen=set(), fetch=fetch)
+    assert not fetched
+
+
 def test_a_run_without_a_repair_has_no_patch():
     api, fetch, _ = patch_api(REPORT, {})
     [r] = collect.collect(api, None, "o/spqr", "self-heal.yml", seen=set(), fetch=fetch)

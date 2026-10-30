@@ -144,6 +144,10 @@ jobs:
 - **No row without its patch.** A run whose report has a repair but whose artifact has no matching `repair.patch` stops the collection.
 - **Never rewritten.** Collecting again adds only new runs, and never rewrites a patch file.
 - **No prompts or transcripts.** Only the `decisions-…` and `live-…` artifacts are downloaded, and the target's artifacts hold neither.
+- **Artifact contents are untrusted** (they are the target repo's).
+  - Downloads are capped at 50 MB per artifact and 20 MB per file inside it; anything larger stops the collection.
+  - A patch over 1 MB keeps only its hash, since large files stay out of git.
+  - A patch is written only if the PR number is an integer and the head a full commit SHA, so a crafted name can't place a file outside `patches/`. Otherwise only the hash is kept, and the row is flagged.
 
 For the pilot, collection is manual: run it weekly (at the latest every 90 days, before artifacts expire) and commit `data/live/`.
 

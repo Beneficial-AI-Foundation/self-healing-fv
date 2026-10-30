@@ -21,6 +21,7 @@ import hashlib
 import io
 import json
 import os
+import re
 import urllib.error
 import urllib.request
 import zipfile
@@ -30,6 +31,12 @@ from .live import github_api
 
 FORMAT = 2  # 2: the patch, and what a bot-vs-merged comparison needs
 MAX_PAGES = 10  # 1000 runs a collection; more waits for the next one
+# The artifacts are the target repo's, so their contents are untrusted: bounded sizes (a zip bomb
+# stops the collection), and patch files named only from a well-formed PR number and head.
+MAX_ARTIFACT = 50 << 20  # bytes downloaded per artifact
+MAX_MEMBER = 20 << 20    # bytes decompressed per file in it
+MAX_PATCH = 1 << 20      # larger patches keep their hash and are not written (no large files in git)
+HEX40 = re.compile(r"[0-9a-f]{40}")
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -50,12 +57,24 @@ def download(token: str | None, url: str) -> zipfile.ZipFile:
             raise
         location = e.headers["Location"]
     with urllib.request.urlopen(location, timeout=120) as r:
-        return zipfile.ZipFile(io.BytesIO(r.read()))
+        data = r.read(MAX_ARTIFACT + 1)
+    if len(data) > MAX_ARTIFACT:
+        raise SystemExit(f"{url}: artifact over {MAX_ARTIFACT} bytes; not collecting it")
+    return zipfile.ZipFile(io.BytesIO(data))
 
 
 def read_text(z: zipfile.ZipFile, name: str) -> str | None:
-    hits = [n for n in z.namelist() if n.rsplit("/", 1)[-1] == name]
-    return z.read(hits[0]).decode() if hits else None
+    """A file of the artifact, read with a bound whatever its header claims."""
+    hits = [i for i in z.infolist() if i.filename.rsplit("/", 1)[-1] == name]
+    if not hits:
+        return None
+    if hits[0].file_size > MAX_MEMBER:
+        raise SystemExit(f"{hits[0].filename}: over {MAX_MEMBER} bytes uncompressed; not collecting it")
+    with z.open(hits[0]) as f:
+        data = f.read(MAX_MEMBER + 1)
+    if len(data) > MAX_MEMBER:
+        raise SystemExit(f"{hits[0].filename}: over {MAX_MEMBER} bytes uncompressed; not collecting it")
+    return data.decode()
 
 
 def read_json(z: zipfile.ZipFile, name: str) -> dict | None:
@@ -63,10 +82,14 @@ def read_json(z: zipfile.ZipFile, name: str) -> dict | None:
     return json.loads(text) if text is not None else None
 
 
-def patch_name(r: dict) -> str:
-    """A stable, unique file name for a run's patch: PR, head, run."""
-    head = (r.get("pr_head") or r.get("change_commit") or r.get("head") or "unknown")[:8]
-    return f"{r.get('pr') or 'nopr'}-{head}-{r['run_id']}.patch"
+def patch_name(r: dict) -> str | None:
+    """A stable, unique file name for a run's patch: PR, head, run. None unless the PR number is
+    an integer and the head a full commit SHA (they come from the target's artifacts)."""
+    pr, head, run_id = r.get("pr"), r.get("pr_head") or r.get("change_commit"), r.get("run_id")
+    if not (isinstance(pr, int) and not isinstance(pr, bool) and pr > 0 and isinstance(head, str)
+            and HEX40.fullmatch(head) and isinstance(run_id, int)):
+        return None
+    return f"{pr}-{head[:8]}-{run_id}.patch"
 
 
 def row(run: dict, decisions: dict | None, report: dict | None, patch: str | None = None) -> dict:
@@ -126,6 +149,9 @@ def collect(api, token: str | None, repo: str, workflow: str, seen: set[int],
             for a in arts:
                 if a.get("expired"):
                     continue
+                if (a.get("size_in_bytes") or 0) > MAX_ARTIFACT:
+                    raise SystemExit(f"run {run['id']}: artifact {a['name']} is over {MAX_ARTIFACT} bytes; "
+                                     "not collecting it")
                 if a["name"].startswith("decisions-"):
                     decisions = read_json(fetch(token, a["archive_download_url"]), "decisions.json")
                 elif a["name"].startswith("live-"):
@@ -153,7 +179,14 @@ def main(repo: str, target: str, workflow: str, out: Path) -> int:
     for r in rows:  # patches first: a row never points at a file that is not there
         if (text := r.pop("_patch", None)) is None:
             continue
-        f = patches / patch_name(r)
+        if len(text.encode()) > MAX_PATCH:
+            r["flags"].append(f"patch over {MAX_PATCH} bytes: only its hash is kept")
+            continue
+        name = patch_name(r)
+        f = patches / name if name else None
+        if f is None or not f.resolve().is_relative_to(patches.resolve()):
+            r["flags"].append("malformed PR number or head in the decisions record: only the patch's hash is kept")
+            continue
         if f.exists():
             if f.read_text() != text:
                 raise SystemExit(f"{f} exists with different content; not overwriting it")
