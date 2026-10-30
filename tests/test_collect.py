@@ -2,9 +2,12 @@
 decisions and report artifacts, against a mocked GitHub API."""
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 import zipfile
+
+import pytest
 
 from shfv import collect
 
@@ -74,6 +77,84 @@ def test_flags_gate_unavailable():
 def test_skip_row():
     r = collect.row(run(9), decisions(run=False, skip="changes proofs only"), None)
     assert r["decision"] == "changes proofs only" and r["flags"] == [] and "verdict" not in r
+
+
+def zipped_files(files: dict) -> zipfile.ZipFile:
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        for name, text in files.items():
+            z.writestr(name, text)
+    return zipfile.ZipFile(io.BytesIO(buf.getvalue()))
+
+
+PATCH = "--- a/A.lean\n+++ b/A.lean\n@@ -1 +1 @@\n-x\n+y\n"
+REPAIRED = {**REPORT, "delivery_diff": PATCH,
+            "inputs": {"cause": "aeneas", "base_commit": "b" * 40, "base_tip": "d" * 40, "change_commit": "a" * 40},
+            "repairs": [{"theorem": "Ns.T", "file": "A.lean", "outcome": "repaired"}],
+            "escalations": [{"theorem": "Ns.U", "file": "B.lean", "outcome": "proof-hard"}]}
+
+
+def patch_api(report, files):
+    """One finished run: its decisions artifact, its run record (`files`), and runner stats."""
+    arts = {9: {"decisions-7-9-1": None, "live-spqr-aaaaaaaa": None, "runner-stats-x": None}}
+    fetched = []
+
+    def fetch(token, url):
+        fetched.append(url)
+        if url == "zip:decisions-7-9-1":
+            return zipped("decisions.json", decisions())
+        assert url == "zip:live-spqr-aaaaaaaa", url  # nothing else is ever downloaded
+        return zipped_files({"report.json": json.dumps(report), **files})
+    return FakeAPI([run(9)], arts), fetch, fetched
+
+
+def test_a_repair_keeps_its_patch_and_what_a_comparison_needs(tmp_path, monkeypatch):
+    api, fetch, fetched = patch_api(REPAIRED, {"repair.patch": PATCH})
+    [r] = collect.collect(api, None, "o/spqr", "self-heal.yml", seen=set(), fetch=fetch)
+    assert "zip:runner-stats-x" not in fetched
+    assert r["base_commit"] == "b" * 40 and r["change_commit"] == "a" * 40 and r["pr"] == 7 and r["pr_head"] == "a" * 40
+    assert r["theorems"] == [{"theorem": "Ns.T", "file": "A.lean", "outcome": "repaired"},
+                             {"theorem": "Ns.U", "file": "B.lean", "outcome": "proof-hard"}]
+    assert r["delivery_diff_bytes"] == len(PATCH) and r["patch_sha256"] == hashlib.sha256(PATCH.encode()).hexdigest()
+
+    out = tmp_path / "live" / "spqr.jsonl"
+    monkeypatch.setattr(collect, "github_api", lambda token: api)
+    monkeypatch.setattr(collect, "collect", lambda a, t, repo, wf, seen: [
+        dict(x) for x in [r] if x["run_id"] not in seen])
+    collect.main("o/spqr", "spqr", "self-heal.yml", out)
+    [line] = [json.loads(x) for x in out.read_text().splitlines()]
+    f = out.parent / line["patch_path"]
+    assert line["patch_path"] == f"spqr/patches/7-{'a' * 8}-9.patch" and f.read_text() == PATCH
+    assert "_patch" not in line
+
+
+def test_collecting_again_never_rewrites_a_patch(tmp_path, monkeypatch):
+    api, fetch, _ = patch_api(REPAIRED, {"repair.patch": PATCH})
+    [r] = collect.collect(api, None, "o/spqr", "self-heal.yml", seen=set(), fetch=fetch)
+    out = tmp_path / "spqr.jsonl"
+    monkeypatch.setattr(collect, "github_api", lambda token: api)
+    monkeypatch.setattr(collect, "collect", lambda a, t, repo, wf, seen: [dict(r)])  # the same run again
+    collect.main("o/spqr", "spqr", "self-heal.yml", out)
+    f = tmp_path / "spqr" / "patches" / collect.patch_name(r)
+    mtime = f.stat().st_mtime_ns
+    collect.main("o/spqr", "spqr", "self-heal.yml", out)
+    assert f.stat().st_mtime_ns == mtime
+    f.write_text("tampered\n")
+    with pytest.raises(SystemExit, match="not overwriting"):
+        collect.main("o/spqr", "spqr", "self-heal.yml", out)
+
+
+@pytest.mark.parametrize("files", [{}, {"repair.patch": "something else\n"}])
+def test_a_repair_without_its_patch_stops_the_collection(files):
+    api, fetch, _ = patch_api(REPAIRED, files)
+    with pytest.raises(SystemExit, match="not collecting a row without its patch"):
+        collect.collect(api, None, "o/spqr", "self-heal.yml", seen=set(), fetch=fetch)
+
+
+def test_a_run_without_a_repair_has_no_patch():
+    api, fetch, _ = patch_api(REPORT, {})
+    [r] = collect.collect(api, None, "o/spqr", "self-heal.yml", seen=set(), fetch=fetch)
+    assert r["patch_sha256"] is None and r["patch_path"] is None and "_patch" not in r
 
 
 def test_main_appends_only_new_runs(tmp_path, monkeypatch):

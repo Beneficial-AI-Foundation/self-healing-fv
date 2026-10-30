@@ -139,7 +139,13 @@ jobs:
 
 `workflow_run` fires only from the workflow file on the default branch, so it acts once merged. A public repo can call only a public reusable workflow, so this repo must be public first; a private copy of a target in the org can call it now, if this repo's Settings → Actions → General → Access allows repositories in the organization, with a `SHFV_TOKEN` secret that can read this repo (for the checkouts).
 
-**Telemetry:** `shfv collect --repo <owner/name> --target <target>` reads the caller's runs through the API and appends one row per run to `data/live/<target>.jsonl`: the decision (skips too), and for a run that repaired, verdict, outcomes, cost, time and versions. It flags runs that crashed (no decisions, or picked with no report) and `gate-unavailable`. Collect at least every 90 days, before the artifacts expire.
+**Telemetry:** `shfv collect --repo <owner/name> --target <target>` reads the caller's runs through the API and appends one row per run to `data/live/<target>.jsonl`: the decision (skips too), and for a run that repaired, verdict, outcomes, cost, time and versions. It flags runs that crashed (no decisions, or picked with no report) and `gate-unavailable`.
+- **The bot's patches are kept.** The artifacts expire after 90 days, and the main shadow-mode question is whether the bot's fix matched what the human merged. So each run's `repair.patch` is saved as `data/live/<target>/patches/<pr>-<head8>-<run id>.patch`. The row records `patch_path` and `patch_sha256`, and has what that comparison needs: target, PR, its head and base (`pr_head`, `base_commit`, `base_tip`), and every theorem with its outcome.
+- **No row without its patch.** A run whose report has a repair but whose artifact has no matching `repair.patch` stops the collection.
+- **Never rewritten.** Collecting again adds only new runs, and never rewrites a patch file.
+- **No prompts or transcripts.** Only the `decisions-…` and `live-…` artifacts are downloaded, and the target's artifacts hold neither.
+
+For the pilot, collection is manual: run it weekly (at the latest every 90 days, before artifacts expire) and commit `data/live/`.
 
 ## What a run produces
 
