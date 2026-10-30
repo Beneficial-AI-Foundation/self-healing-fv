@@ -1241,6 +1241,10 @@ def summarize_gate(g: dict) -> dict:
             "failed_checks": v.get("failed_checks", []), "eligible": v.get("eligible"),
             "unavailable": v.get("unavailable", []), "inherited_sorry": v.get("inherited_sorry", {}),
             "kernel_replay_incomplete": v.get("kernel_replay_incomplete", []), "native_code": v.get("native_code", []),
+            # Flag (live, §4.9; report only): repaired theorems resting on axioms their version before
+            # the PR did not use. Lifted from G2's info like the gate's own flags: on `accepted` only.
+            "axioms_beyond_base_version": ((v.get("checks", {}).get("G2") or {}).get("info") or {}).get(
+                "axioms_beyond_base_version", {}) if v.get("verdict") == "accepted" else {},
             "built": v.get("built"), "theorems": v.get("theorems", []), "heartbeats": v.get("heartbeats", []),
             "checks": checks, "diff": g["diff"], "gate_version": v.get("gate_version"),
             "candidate_build_seconds": g.get("candidate_build_seconds")}

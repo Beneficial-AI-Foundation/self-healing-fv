@@ -184,16 +184,21 @@ def test_an_ineligible_case_says_what_the_change_did():
 
 def test_live_report_says_what_the_gate_judged():
     rep = {"theorem": "Ns.T", "file": "A.lean", "decl": "Ns.T", "outcome": "repaired", "attempts": []}
-    g2 = {"ok": True, "violations": [], "info": {"axioms_beyond_base_version": {"Ns.T": ["curve.PrivateKey.deserialize"]}}}
+    beyond = {"Ns.T": ["curve.PrivateKey.deserialize", "Old.ax"]}
+    g2 = {"ok": True, "violations": [], "info": {"axioms_beyond_base_version": beyond}}
     audit = {"outcome": "changed", "summary": {"statements_changed": 1, "definitions_changed": 0, "removed": 0},
              "statements_changed": [], "definitions_changed": [], "removed": [], "axioms_changed": [],
-             "trusted_models_changed": ["M/External.lean"], "roots_added": ["Protocols"]}
+             "trusted_models_changed": ["M/External.lean"], "roots_added": ["Protocols"],
+             "added": ["curve.PrivateKey.deserialize"]}
     live = dict(verdict="accepted", broken={"proofs": ["Ns.T"], "statements": []}, repairs=[rep], audit=audit,
-                gate={"verdict": "accepted", "reference": "head", "checks": {"G1": {"ok": True}, "G2": g2}})
+                gate={"verdict": "accepted", "reference": "head", "axioms_beyond_base_version": beyond,
+                      "checks": {"G1": {"ok": True}, "G2": g2}})
     md = render(minimal_report(**live))
     top = md.split("| | |")[0]
     assert "The gate checked only the bot's edits, against this PR as written.** The changes the PR itself made" in top
-    assert "Rests on axioms its version before the PR did not use" in md and "`curve.PrivateKey.deserialize`" in md
+    assert "🏷️ **Rests on axioms this PR added or newly relies on.**" in top  # up front, like the other flags
+    assert ("- `T`: `curve.PrivateKey.deserialize` (added by this PR), "
+            "`Old.ax` (already in the project, not used here before)") in top
     assert "**Libraries added:** `Protocols`" in md and "the gate did not either" in md
     assert "(against the PR as written)" in md
     live["gate"]["reference"] = "base"  # replay: none of it

@@ -198,6 +198,27 @@ def reference_note(r: dict) -> list[str]:
     return [HEAD_REFERENCE]
 
 
+def new_axiom_flag(r: dict) -> list[str]:
+    """The 🏷️ flag for repaired theorems that rest on axioms their version before the PR did not
+    use (live, DESIGN.md §4.9; `gate.axioms_beyond_base_version`). The gate allows them because the
+    PR head uses them; an unsound one (say, one implying False) would let a repair prove anything,
+    so each is named, per theorem, with whether this PR added it (from the audit)."""
+    g = r.get("gate") or {}
+    beyond = g.get("axioms_beyond_base_version") or {}
+    if not beyond:
+        return []
+    pr_added = set((r.get("audit") or {}).get("added") or [])
+    lines = ["", f"🏷️ **Rests on {'an axiom' if sum(map(len, beyond.values())) == 1 else 'axioms'} this PR "
+             "added or newly relies on.** The gate accepts this against the PR as written, because the PR's own "
+             "code uses the axiom; it does not judge whether the axiom is sound. An unsound one would let any proof "
+             "through, so check:"]
+    for t, xs in list(beyond.items())[:10]:
+        lines.append(f"- `{short_name(t)}`: " + ", ".join(
+            f"`{x}` ({'added by this PR' if x in pr_added else 'already in the project, not used here before'})"
+            for x in xs[:6]))
+    return lines
+
+
 def change_trust_note(r: dict) -> list[str]:
     """When the gate's G1/G2 failures, or the case's ineligibility, come from the change's own trust
     changes rather than the bot's edits: what the change did to the trusted models (libsignal-verify
@@ -381,15 +402,7 @@ def render(r: dict) -> str:
                        + ". That declaration is unchanged by the repair and was already proved this way at the base "
                        "commit; the rest of that module was checked by the kernel during the clean rebuild, but "
                        "not re-checked independently.")
-        beyond = (((r.get("gate") or {}).get("checks", {}).get("G2") or {}).get("info") or {}).get(
-            "axioms_beyond_base_version") or {}
-        if beyond:
-            out.append("")
-            out.append(f"🏷️ **Rests on axioms its version before the PR did not use.** {len(beyond)} repaired theorem"
-                       f"{'s' * (len(beyond) != 1)} now rest{'s' * (len(beyond) == 1)} on axioms this PR's code uses "
-                       "(e.g. a model it rewrote), which the gate allows against the PR as written: "
-                       + "; ".join(f"`{short_name(t)}` (+{', '.join(f'`{x}`' for x in xs[:4])})"
-                                   for t, xs in list(beyond.items())[:6]))
+        out += new_axiom_flag(r)
         native = (r.get("gate") or {}).get("native_code") or []
         if native:
             out.append("")

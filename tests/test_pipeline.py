@@ -530,8 +530,16 @@ def toy_live(tmp_path_factory):
         "theorem triple_spec (x : Nat) : triple x = 3 * x", "theorem triple_spec (x : Nat) : triple x = x * 3"))
     git(repo, "commit", "-qam", "re-extract and refresh the model")
     model = git(repo, "rev-parse", "HEAD")
+    # branch `axiom`: the re-extraction plus an axiom the PR adds to the trusted model, which a repair can use.
+    git(repo, "checkout", "-qb", "axiom", head)
+    with open(repo / "Toy/FunsExternal.lean", "a") as f:
+        f.write("\naxiom sum_pair (x : Nat) : List.sum [x, x] = x + x\n")
+    (repo / "Toy/Specs.lean").write_text("import Toy.FunsExternal\n" + (repo / "Toy/Specs.lean").read_text())
+    git(repo, "commit", "-qam", "re-extract, with a new model axiom")
+    axiom = git(repo, "rev-parse", "HEAD")
     git(repo, "checkout", "-q", "main")
-    return {"root": root, "repo": repo, "base": base, "head": head, "ok": ok, "bad": bad, "model": model}
+    return {"root": root, "repo": repo, "base": base, "head": head, "ok": ok, "bad": bad, "model": model,
+            "axiom": axiom}
 
 
 def run_live(toy_live, monkeypatch, head, script, label):
@@ -589,6 +597,31 @@ def test_live_gate_judges_the_bots_edits_against_the_pr_as_written(toy_live, mon
     head = md.split("| | |")[0]  # up front, before the table
     assert "The gate checked only the bot's edits, against this PR as written." in head and "A reviewer should." in head
     assert "the gate did not either" in md and "(against the PR as written)" in md
+
+
+def test_a_repair_resting_on_an_axiom_the_pr_added_is_flagged(toy_live, monkeypatch):
+    """Accepted against the PR as written (the head uses the axiom), and flagged per theorem in the
+    report, the PR comment (both modes) and the strict counts: an unsound PR axiom would otherwise let a
+    repair prove anything with only a JSON field to show for it (DESIGN.md §4.9)."""
+    from shfv import comment, human_compare
+    from tests.test_comment import THEIRS, FakeGraphQL, c
+    script = {"double_spec": ("done", ":= by\n  unfold double\n  rw [sum_pair]\n  omega", None),
+              "double_even": GOOD["double_even"]}
+    rep, md, _ = run_live(toy_live, monkeypatch, toy_live["axiom"], script, "axiom")
+    assert rep["verdict"] == "accepted" and rep["gate"]["reference"] == "head"  # the verdict is unchanged
+    assert rep["gate"]["axioms_beyond_base_version"]["double_spec"] == ["sum_pair"]
+    assert "this PR added or newly relies on.**" in md.split("| | |")[0]  # up front, with the other flags
+    assert "- `double_spec`: `sum_pair` (added by this PR)" in md
+    row = next(r for r in human_compare.rows(rep) if r["theorem"] == "double_spec")
+    assert row["new_axioms"] is True
+    s = human_compare.summarize([{**rep, "human_fix": [{"theorem": "double_spec"}]}],
+                                [{**r, "human_group": "kept the statement"} for r in human_compare.rows(rep)])
+    assert s["new_axioms"] >= 1 and s["strict"] == s["repaired"] - s["new_axioms"]
+    sec = comment.section(rep, "https://run", "live-toy-x", comment.LIMIT)
+    for header, existing in (("sorry-delta", [c("s", f"## Sorry delta\n{THEIRS}")]), (comment.OWN, [])):
+        api = FakeGraphQL(existing)
+        comment.post(api, "example/toy", 12, sec, header)
+        assert "`sum_pair` (added by this PR)" in api.comments[-1]["body"], header
 
 
 def test_live_head_that_builds_has_nothing_to_repair(toy_live, monkeypatch):

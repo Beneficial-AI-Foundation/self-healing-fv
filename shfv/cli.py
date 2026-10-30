@@ -393,6 +393,8 @@ def main(argv: list[str] | None = None) -> int:
         by_outcome += f" (kernel replay incomplete {len(incomplete)})"
     if native := (rep.get("gate") or {}).get("native_code"):
         by_outcome += f" (native code {len(native)})"
+    if beyond := (rep.get("gate") or {}).get("axioms_beyond_base_version"):
+        by_outcome += f" (axioms new to the theorem {len(beyond)})"
     run.p.final(f"{rep['verdict'].upper()} · {by_outcome} · {report_mod.usd(t['cost_usd'], t.get('cost_status'))} · {fmt_s(t['wall_seconds'])} → "
                 f"{m.relative_to(ROOT) if m.is_relative_to(ROOT) else m}")
     if "error" in rep:

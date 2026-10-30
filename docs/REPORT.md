@@ -81,7 +81,7 @@ Exit 2 is also argparse's code for bad arguments. Exit 2 never means a pass.
 
 | `verdict` | Meaning | What a caller can do |
 |---|---|---|
-| `accepted` | Every broken proof was repaired and the gate accepted the whole candidate, kernel replay included | Use `delivery_diff`. Check the flags in `gate.inherited_sorry`, `gate.kernel_replay_incomplete` and `gate.native_code`; count flagged acceptances separately. |
+| `accepted` | Every broken proof was repaired and the gate accepted the whole candidate, kernel replay included | Use `delivery_diff`. Check the flags in `gate.inherited_sorry`, `gate.kernel_replay_incomplete`, `gate.native_code` and (live) `gate.axioms_beyond_base_version`; count flagged acceptances separately. |
 | `escalated` | At least one theorem was not repaired | Read `escalations` and each `repairs[].outcome` and `reason`. Hand them to a person. |
 | `passed-without-kernel-replay` | Every gate check that ran passed, but G5 did not run | Treat as not accepted |
 | `failed` | The run itself failed (setup, build environment, or the gate could not decide for every theorem). Says nothing about the proofs. | Read `error`, fix the environment, re-run |
@@ -129,7 +129,7 @@ Each attempt object has `adapter`, `model`, `resolved_model`, `stop` (`done`, `g
 | `inherited_sorry` | Flag: `{theorem: [unproved base lemmas it reaches]}`. Non-empty only on `accepted`. |
 | `kernel_replay_incomplete` | Flag: `[{module, stopped_at, native}]`, modules where the kernel replay stopped at a native-code proof that was already there at the base. Non-empty only on `accepted`. |
 | `native_code` | Flag: `[theorem]`, repaired theorems that rest on native code (`Lean.ofReduceBool`), as their base versions did. Report only. Non-empty only on `accepted`. |
-| `checks.G2.info.axioms_beyond_base_version` | `reference: head` only: `{theorem: [axioms]}`, repaired theorems that rest on axioms their base version did not use and the PR head does (e.g. a model the PR rewrote). Allowed by G2, named in the report. Report only. |
+| `axioms_beyond_base_version` | Flag, `reference: head` only: `{theorem: [axioms]}`, repaired theorems that rest on axioms their base version did not use and the PR head does (e.g. one the PR added to a model). Allowed by G2; a 🏷️ line per theorem in the report says which axioms the PR added. Report only. Non-empty only on `accepted` (the gate's own copy is in `checks.G2.info`). Count it as a flagged acceptance, like the three above. |
 | `heartbeats` | `maxHeartbeats` raises in the diff |
 | `diff` | The candidate diff the gate checked, relative to the stubbed broken state (not the change's head; for that, use `delivery_diff`) |
 | `gate_version` | The gate that decided |

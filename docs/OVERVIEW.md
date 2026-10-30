@@ -113,6 +113,7 @@ What an acceptance does **not** guarantee:
 
 - **That the spec is good.** A correct proof of a weak statement passes. The gate only promises the statement did not change.
 - **That the PR's own changes are fine** (live). An accepted repair says the bot's edits kept the PR's statements and trust as the PR wrote them. Whether the PR's own statement, model and axiom changes are acceptable is the reviewer's call; the audit lists them.
+- **That a PR's axiom is sound** (live). A repair may rest on an axiom the PR added (an unsound one, say one that implies `False`, would prove anything). Such a repair carries a 🏷️ flag naming the axiom, and counts as a flagged acceptance, not a strict one.
 - **Safety against deliberately crafted false proofs.** The threat model is honest mistakes and obvious shortcuts, not an adversary.
 - **That the gate itself is correct.** The gate is not formally verified yet. Proving its key properties is planned (DESIGN.md §4.8): first that its fingerprint ignores bound-variable names but not meaning, later that "accepted" implies "statements unchanged".
 
