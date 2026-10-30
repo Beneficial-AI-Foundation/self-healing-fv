@@ -148,17 +148,20 @@ def preconditions(cfg: dict, base: dict, broken: dict, cand: dict, reference: st
 
 
 def compare(cfg: dict, base: dict, broken: dict, cand: dict, diff: str, reference: str = "base",
-            stubs: list[str] | None = None) -> dict:
+            stubs: list[str] | None = None, head_sources: dict[str, str] | None = None) -> dict:
     """`reference` (§4.9) is what the bot is held to. "base" (replay): the frozen set and the
     trust baseline are the base's, so the change's own statement and trust changes count against
     the candidate too. "head" (live, decided 2026-10-30): they are the change's as written, i.e.
     the stubbed broken state's, and the gate judges only the bot's edits; the change's own
     changes are the audit's (gates/audit.py), reported but not judged. Every check runs in both.
 
-    `stubs` (head reference, required there): every proof the pipeline stubbed (S2), as
-    `file::declaration`. The head's own `sorry` and a stub look alike in the text, so the gate
-    cannot tell them apart; a stub outside the broken set (e.g. a theorem the change added, whose
-    proof fails) makes the case ineligible, since the candidate would still carry it."""
+    `head_sources` (head reference, required there): the audited sources of the head as committed.
+    The head's own `sorry` and a stub look alike in the stubbed state, so the gate finds the stubs
+    itself by comparing the two (scope.derived_stubs); anything else that differs, or no head
+    sources, and it cannot decide. A stub outside the broken set (e.g. a theorem the change added,
+    whose proof fails) makes the case ineligible, since the candidate would still carry it.
+    `stubs` (optional): the pipeline's own list (`file::declaration`), only a cross-check: if it
+    disagrees with what the gate found, the gate cannot decide."""
     if reference not in ("base", "head"):
         raise ValueError(f"unknown reference {reference!r}")
     head = reference == "head"
@@ -172,12 +175,20 @@ def compare(cfg: dict, base: dict, broken: dict, cand: dict, diff: str, referenc
         if not b["name"] or b["name"] not in (broken if head else base)["records"]:
             unavailable.append(f"broken theorem {b['key']} ({b['file']}) has no {'head' if head else 'base'} record")
     outside: list[dict] = []  # stubs the candidate cannot repair (head reference)
-    if head and stubs is None:
-        unavailable.append("the head reference needs the pipeline's list of stubbed proofs (--stubs)")
-    for s in stubs or [] if head else []:
-        file, _, key = s.partition("::")
-        if not any(b["file"] == file and scope.short(b["key"]) == key for b in bset):
-            outside.append({"file": file, "key": key, "name": scope.full_name(broken, file, key)})
+    if head:
+        if head_sources is None:
+            unavailable.append("the head reference needs the head's own sources (--head-tree)")
+            found = []
+        else:
+            found, problems = scope.derived_stubs(head_sources, broken)
+            unavailable += [f"the stubbed broken state is not the head plus stubs: {p}" for p in problems[:5]]
+        in_set = {(b["file"], b["key"]) for b in bset}
+        outside = [s for s in found if (s["file"], s["key"]) not in in_set]
+        if stubs is not None and head_sources is not None:
+            mine = {f"{s['file']}::{scope.short(s['key'])}" for s in found}
+            if set(stubs) != mine:
+                unavailable.append("the pipeline's list of stubbed proofs disagrees with the stubs the gate found: "
+                                   f"listed only {sorted(set(stubs) - mine)[:3]}, found only {sorted(mine - set(stubs))[:3]}")
 
     # --- eligibility (§3.3 S2): every frozen declaration observed in the stubbed broken state.
     # A declaration a tactic added while a base proof elaborated (no source range, e.g. bv_decide's

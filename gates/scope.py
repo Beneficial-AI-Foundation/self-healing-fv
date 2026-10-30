@@ -61,6 +61,36 @@ def broken_set(base: dict, broken: dict) -> list[dict]:
     return out
 
 
+def derived_stubs(head_sources: dict[str, str], broken: dict) -> tuple[list[dict], list[str]]:
+    """Head reference (§4.9): the proofs the stubbed broken state has as stubs, found by comparing
+    its sources with the head as committed, model-free: every declaration whose body is a stub
+    there and not in the head. (stubs, problems): anything else that differs means the stubbed
+    state is not the head plus stubs, and the gate cannot decide."""
+    stubs, problems = [], []
+    for file, ktext in sorted(broken["sources"].items()):
+        htext = head_sources.get(file)
+        if htext is None:
+            problems.append(f"{file} is in the stubbed broken state but not in the head")
+            continue
+        if htext == ktext:
+            continue
+        (kd, kg), (hd, hg) = leandecls.parse(ktext), leandecls.parse(htext)
+        kby, hby = {d["key"]: d for d in kd}, {d["key"]: d for d in hd}
+        if set(kby) != set(hby) or [g.strip() for g in kg if g.strip()] != [g.strip() for g in hg if g.strip()]:
+            problems.append(f"{file} differs from the head outside proof bodies")
+            continue
+        for key, k in kby.items():
+            h = hby[key]
+            if (k["kind"], k["statement"], k["prefix"]) != (h["kind"], h["statement"], h["prefix"]):
+                problems.append(f"{file}: `{key}` differs from the head outside its proof")
+            elif k["body"] != h["body"]:
+                if k["body"] == STUB and h["body"] != STUB:
+                    stubs.append({"file": file, "key": key, "name": full_name(broken, file, key)})
+                else:
+                    problems.append(f"{file}: the proof of `{key}` differs from the head and is not a stub")
+    return stubs, problems
+
+
 def banned(text: str) -> list[str]:
     return [label for pat, label in BANNED if re.search(pat, text, re.M)]
 

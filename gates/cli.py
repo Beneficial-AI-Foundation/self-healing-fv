@@ -3,7 +3,7 @@
   gate snapshot --config T.toml --tree DIR --out S.json [--clean] [--apply D.patch --workdir W]
   gate scope    --config T.toml --base B.json --broken K.json --diff D.patch [--out V.json]
   gate compare  --config T.toml --base B.json --broken K.json --candidate C.json --diff D.patch --out V.json
-                [--reference base|head --stubs S.json]   (head: live, the change as written is the reference, §4.9)
+                [--reference base|head --head-tree DIR [--stubs S.json]]   (head: live, the change as written is the reference, §4.9)
   gate diff     --config T.toml --before DIR --after DIR --out D.patch
   gate audit    --config T.toml --base B.json --head H.json [--out A.json]   (exit 0 no-change, 1 changed, 2 incomplete)
   gate version
@@ -83,8 +83,11 @@ def main(argv: list[str] | None = None) -> int:
             c.add_argument("--reference", choices=("base", "head"), default="base",
                            help="what the bot is held to (§4.9): the base (replay, default) or the change's "
                                 "head as written, i.e. the stubbed broken state (live)")
-            c.add_argument("--stubs", type=Path, help="with --reference head (required there): JSON list of every "
-                           "proof the pipeline stubbed, as file::declaration")
+            c.add_argument("--head-tree", type=Path, help="with --reference head (required there): the head as "
+                           "committed (unstubbed), whose sources the gate compares with the stubbed state to find "
+                           "the stubs itself")
+            c.add_argument("--stubs", type=Path, help="with --reference head, optional: the pipeline's JSON list of "
+                           "the proofs it stubbed (file::declaration), cross-checked against the gate's own")
     sub.add_parser("version")
     th = sub.add_parser("tree-hash")
     th.add_argument("--config", type=Path, required=True)
@@ -144,8 +147,12 @@ def main(argv: list[str] | None = None) -> int:
             res = scope.check(cfg, base, broken, diff)
             write_json(res, a.out)
             return 0 if res["ok"] else 1
+        head_sources = None
+        if a.head_tree:  # the same audited files the stubbed state has, as the head has them
+            hp = a.head_tree.resolve() / snapshot.workspace_project(cfg)
+            head_sources = {p: (hp / p).read_text() for p in broken.get("sources", {}) if (hp / p).is_file()}
         res = compare.compare(cfg, base, broken, read_json(a.candidate), diff, reference=a.reference,
-                              stubs=json.loads(a.stubs.read_text()) if a.stubs else None)
+                              stubs=json.loads(a.stubs.read_text()) if a.stubs else None, head_sources=head_sources)
         write_json(res, a.out)
         return {"accepted": 0, "gate-unavailable": 2}.get(res["verdict"], 1)
     except Exception as e:  # the gate never "passes" on its own failure

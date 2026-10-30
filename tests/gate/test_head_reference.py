@@ -65,14 +65,17 @@ def env(tmp_path_factory):
     specs.write_text("import Toy.FunsExternal\n" + text.replace(SPEC_BASE, TODO + "\n" + STUB)
                      .replace(TRIPLE_BASE, TRIPLE_PR).replace(LE_ADD, ""))
     assert TRIPLE_PR in specs.read_text() and STUB in specs.read_text()
+    head = root / "head"  # the PR's head as committed: its double_spec proof, which fails
+    shutil.copytree(broken, head)
+    (head / SPECS).write_text((broken / SPECS).read_text().replace(STUB, SPEC_BASE))
     r = gate("snapshot", "--config", str(cfg), "--tree", str(base), "--out", str(root / "B.json"), "--allow-absent-roots")
     assert r.returncode == 0, r.stderr
     r = gate("snapshot", "--config", str(cfg), "--tree", str(broken), "--out", str(root / "K.json"))
     assert r.returncode == 0, r.stderr
-    return {"root": root, "cfg": cfg, "broken": broken, "K": root / "K.json"}
+    return {"root": root, "cfg": cfg, "broken": broken, "K": root / "K.json", "head": head}
 
 
-def run(env, name: str, specs, reference: str = "head", extra: dict | None = None, stubs=STUBS):
+def run(env, name: str, specs, reference: str = "head", extra: dict | None = None, stubs=STUBS, head_tree=True):
     """Plant a candidate (specs: new Specs.lean text from the stubbed one) and gate it."""
     root, cfg = env["root"], env["cfg"]
     cand = root / f"cand-{name}"
@@ -96,6 +99,7 @@ def run(env, name: str, specs, reference: str = "head", extra: dict | None = Non
     s = root / f"{name}.stubs.json"
     s.write_text(json.dumps(stubs))
     v = gate("compare", *common, "--candidate", str(c), "--reference", reference,
+             *(["--head-tree", str(env["head"])] if head_tree else []),
              *(["--stubs", str(s)] if stubs is not None else []), "--out", str(root / f"{name}.{reference}.V.json"))
     assert v.returncode in (0, 1, 2), v.stderr
     return v.returncode, json.loads((root / f"{name}.{reference}.V.json").read_text()), scope
@@ -189,13 +193,35 @@ def test_a_theorem_the_change_added_whose_proof_fails_blocks_acceptance(env):
     shutil.rmtree(k2, ignore_errors=True)
     shutil.copytree(env["broken"], k2, ignore=shutil.ignore_patterns(".lake"))
     (k2 / SPECS).write_text((k2 / SPECS).read_text() + "\ntheorem pr_new : 1 + 1 = 2 := by sorry\n")
+    head2 = root / "head-pr-new"  # as committed, pr_new has a proof (which fails)
+    shutil.rmtree(head2, ignore_errors=True)
+    shutil.copytree(env["head"], head2)
+    (head2 / SPECS).write_text((head2 / SPECS).read_text() + "\ntheorem pr_new : 1 + 1 = 2 := by\n  exact wrong\n")
     assert gate("snapshot", "--config", str(cfg), "--tree", str(k2), "--out", str(root / "K2.json")).returncode == 0
-    env2 = {**env, "broken": k2, "K": root / "K2.json"}
-    rc, v, _ = run(env2, "pr-new", fix(VALID), stubs=STUBS + ["Toy/Specs.lean::pr_new"])
-    assert v["verdict"] == "rejected" and not v["eligible"]
-    assert [o["key"] for o in v["checks"]["G1"]["info"]["stubbed_outside_broken_set"]] == ["pr_new"]
-    rc, v, _ = run(env2, "pr-new", fix(VALID), stubs=None)  # without the pipeline's stub list: no decision
-    assert v["verdict"] == "gate-unavailable" and any("--stubs" in u for u in v["unavailable"])
+    env2 = {**env, "broken": k2, "K": root / "K2.json", "head": head2}
+    # The gate finds the stub itself, with or without the pipeline's list (re-review finding 1).
+    for stubs in (STUBS + ["Toy/Specs.lean::pr_new"], None):
+        rc, v, _ = run(env2, "pr-new", fix(VALID), stubs=stubs)
+        assert v["verdict"] == "rejected" and not v["eligible"], (stubs, v["unavailable"])
+        assert [o["key"] for o in v["checks"]["G1"]["info"]["stubbed_outside_broken_set"]] == ["pr_new"]
+    # A partial or empty list from the pipeline disagrees with the gate: no decision, never accepted.
+    for stubs in (STUBS, []):
+        rc, v, _ = run(env2, "pr-new", fix(VALID), stubs=stubs)
+        assert v["verdict"] == "gate-unavailable" and any("disagrees" in u for u in v["unavailable"]), stubs
+    rc, v, _ = run(env2, "pr-new", fix(VALID), head_tree=False)  # without the head's own sources: no decision
+    assert v["verdict"] == "gate-unavailable" and any("--head-tree" in u for u in v["unavailable"])
+
+
+def test_a_stubbed_state_that_is_not_the_head_plus_stubs_cannot_be_judged(env):
+    """If the stubbed state differs from the head anywhere but in stubbed proofs, the gate's own
+    stub list cannot be trusted, so it does not decide."""
+    root = env["root"]
+    head3 = root / "head-other"
+    shutil.rmtree(head3, ignore_errors=True)
+    shutil.copytree(env["head"], head3)
+    (head3 / SPECS).write_text((head3 / SPECS).read_text().replace(TRIPLE_PR, TRIPLE_BASE))
+    rc, v, _ = run({**env, "head": head3}, "valid", fix(VALID))
+    assert v["verdict"] == "gate-unavailable" and any("not the head plus stubs" in u for u in v["unavailable"])
 
 
 # ------------------------------------------------------------------ the bot is still held to everything
@@ -250,6 +276,17 @@ def test_bot_adds_native_code(env):
     rc, v, _ = run(env, "native", fix(helper + proof))
     assert_rejected(v, "G2")
     assert any("Lean.ofReduceBool" in x["msg"] for x in v["checks"]["G2"]["violations"])
+
+
+def test_bot_uses_lean_of_reduce_nat(env):
+    """Re-review finding 6, end to end: `Lean.ofReduceNat` trusts compiled code like
+    `native_decide`. Banned in the text (G0), and native code new to the theorem (G2)."""
+    proof = ("theorem double_spec (x : Nat) : double x = 2 * x := by\n"
+             "  have _h := @Lean.ofReduceNat\n  unfold double\n  simp\n  omega\n")
+    rc, v, scope = run(env, "reduce-nat", fix(proof))
+    assert any("kernel bypass" in x["msg"] for x in scope["violations"])
+    assert_rejected(v, "G0", "G2")
+    assert any(x["decl"] == "double_spec" and "Lean.ofReduceBool" in x["msg"] for x in v["checks"]["G2"]["violations"])
 
 
 def test_a_reference_that_leaves_out_a_root_module_is_refused():

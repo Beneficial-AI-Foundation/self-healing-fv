@@ -14,8 +14,11 @@ NATIVE = BASE3 + ["Lean.ofReduceBool"]
 STUBS = ["M.lean::T"]
 
 
-def head(base, broken, cand, diff, stubs=STUBS):
-    return compare.compare(CFG, base, broken, cand, diff, reference="head", stubs=stubs)
+def head(base, broken, cand, diff, stubs=STUBS, head_sources=None):
+    """Compare against the head. Its sources default to the base's: in case() the PR changed no
+    spec file, so the head as committed has T's old (now failing) proof."""
+    return compare.compare(CFG, base, broken, cand, diff, reference="head", stubs=stubs,
+                           head_sources=head_sources if head_sources is not None else dict(base["sources"]))
 
 
 def test_the_plain_repair_is_accepted_against_the_head():
@@ -89,7 +92,33 @@ def test_a_stub_outside_the_broken_set_makes_the_case_ineligible():
     base, broken, cand, diff = case()
     broken["sources"]["M.lean"] += "\ntheorem U : True := by sorry\n"  # added by the change, stubbed
     broken["records"]["U"] = rec(BASE3 + ["sorryAx"], ["U"])
+    head_src = {"M.lean": base["sources"]["M.lean"] + "\ntheorem U : True := by\n  exact wrong\n"}
+    for stubs in (STUBS + ["M.lean::U"], None):  # found by the gate itself, list or no list
+        v = head(base, broken, cand, diff, stubs=stubs, head_sources=head_src)
+        assert not v["eligible"] and v["verdict"] == "rejected", v["unavailable"]
+        assert [o["key"] for o in v["checks"]["G1"]["info"]["stubbed_outside_broken_set"]] == ["U"]
+    # Re-review finding 1: a partial or empty list used to let this through as accepted.
+    for stubs in (STUBS, []):
+        v = head(base, broken, cand, diff, stubs=stubs, head_sources=head_src)
+        assert v["verdict"] == "gate-unavailable" and any("disagrees" in u for u in v["unavailable"])
+
+
+def test_all_stubs_of_a_hung_file_must_be_listed():
+    """A hung file has every proof stubbed, broken or not. The analysis used to record only the
+    breaks (`broken_proofs`); it now records them all (`stubbed`), and the gate finds them all."""
+    base, broken, cand, diff = case()
+    base["sources"]["M.lean"] += "theorem U : True := trivial\n"
+    broken["sources"]["M.lean"] += "theorem U : True := by sorry\n"
+    v = head(base, broken, cand, diff, stubs=STUBS)  # the breaks only: disagrees
+    assert v["verdict"] == "gate-unavailable" and any("disagrees" in u for u in v["unavailable"])
     v = head(base, broken, cand, diff, stubs=STUBS + ["M.lean::U"])
-    assert not v["eligible"] and v["verdict"] != "accepted"
-    assert [o["key"] for o in v["checks"]["G1"]["info"]["stubbed_outside_broken_set"]] == ["U"]
-    assert head(base, broken, cand, diff, stubs=None)["verdict"] == "gate-unavailable"
+    assert not any("disagrees" in u for u in v["unavailable"])
+
+
+def test_the_head_sources_are_required_and_must_match_the_stubbed_state():
+    base, broken, cand, diff = case()
+    v = compare.compare(CFG, base, broken, cand, diff, reference="head", stubs=STUBS)
+    assert v["verdict"] == "gate-unavailable" and any("--head-tree" in u for u in v["unavailable"])
+    other = {"M.lean": "theorem T : False := trivial\n"}  # not the head of this stubbed state
+    v = head(base, broken, cand, diff, head_sources=other)
+    assert v["verdict"] == "gate-unavailable" and any("not the head plus stubs" in u for u in v["unavailable"])
