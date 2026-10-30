@@ -27,6 +27,7 @@ gh run download <run id> -R Beneficial-AI-Foundation/self-healing-fv     # fetch
 | `per_run_usd` | `3` | Per-run cost cap (`--per-run-usd`), API-equivalent from token counts. Until the metering proxy exists (§9.5), it is Claude Code's own enforcement plus the pipeline's accounting, not a hard limit. |
 | `per_run_minutes` | `300` | Per-run deadline (`--per-run-minutes`), from the start of preparation |
 | `runner` | `ubuntu-latest` | Runner label. A dalek replay needs the larger runner `self-healing-fv` (8 cores, 32 GB, 300 GB SSD; see Pilot results) |
+| `upload_transcripts` | off | Also upload the agent's raw transcripts in the run record. Off by default because anyone can download a public repo's artifacts (see "What a run produces"). |
 
 The agent needs the repository secret `ANTHROPIC_API_KEY`. The dispatch fails at once if `agent` is on and the secret is missing. Set it without printing it, for example from the macOS Keychain:
 
@@ -58,7 +59,7 @@ The `select` job's summary lists every open PR it looked at and the reason it wa
 **How each picked PR runs:** `live.yml` calls `replay.yml` with the target, the PR's base and head SHAs, and `refs/pull/<n>/head` to fetch (which also serves PRs from forks). One at a time (`max-parallel: 1`), and one `live` workflow at a time. Everything else is the replay job above: the same runner setup, bubblewrap, key handling, resource sampler and replay store cache (keyed on the head). By default the agent is on, with a $3 per-run cap and 300 minutes; the runner is the target's `[live] runner` (`self-healing-fv`, the 8-core runner).
 
 **What it uploads:**
-- **`live-<target>-<head8>`**: the run record (`report.json`, `report.md`, each attempt's prompt and transcript). `report.md` is what shadow mode would post. The name is also the "already run" marker.
+- **`live-<target>-<head8>`**: the run record (`report.json`, `report.md`, each attempt's prompt; transcripts only with the `upload_transcripts` input). `report.md` is what shadow mode would post. The name is also the "already run" marker.
 - **`runner-stats-live-<target>-<head8>-…`**: as for a replay.
 - The job summary: the live input (repo, PR, head, merge-base), resources and `report.md`.
 
@@ -143,10 +144,10 @@ jobs:
 ## What a run produces
 
 - **Job summary** (the run's page): the runner (cores, memory, disk), resource use per pipeline stage, any OOM kills, disk use at the end, and `report.md`.
-- **Artifact `run-record-…`**: the run directory, `runs/<case>/<run id>/` (CLI.md section 5): `report.json`, `report.md`, and each attempt's prompt and transcript. Transcripts are model output; review them before sharing.
-- **Artifact `runner-stats-…`**: the pipeline's output (`shfv.log`), the resource samples every 5 seconds (`samples.csv`), the summary (`resources.md`), and the replay's build logs.
+- **Artifact `run-record-…`**: the run directory, `runs/<case>/<run id>/` (CLI.md section 5): `report.json`, `report.md`, and each attempt's prompt and the bot's `suggestion.patch`. **Raw model output is left out by default**: each attempt's `transcript.jsonl` and, for Codex, its `codex-home/` (session state). Dispatch with `upload_transcripts` on to include them; review them before sharing.
+- **Artifact `runner-stats-…`**: the pipeline's output (`shfv.log`, which shows the agent's tool calls one line each, not its messages), the resource samples every 5 seconds (`samples.csv`), the summary (`resources.md`), and the replay's build logs.
 
-Artifacts are kept for 90 days. The repo is private, so only people with access to it can see them.
+Artifacts are kept for 90 days. Anyone can download a public repo's artifacts, which is why transcripts are opt-in. A target repo's runs of `pr-repair.yml` never upload prompts or transcripts at all (`record: reports`).
 
 ## Replay store cache
 

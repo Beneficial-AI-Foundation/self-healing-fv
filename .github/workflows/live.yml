@@ -37,6 +37,10 @@ on:
         description: "PRs to run at most (without ref)"
         required: true
         default: "2"
+      upload_transcripts:
+        description: "Also upload the agent's raw transcripts (anyone can download a public repo's artifacts)"
+        type: boolean
+        default: false
 
 # Read this repo (checkout) and its artifacts (which heads were already run). The target repos are
 # read through the public API with this token; nothing is written anywhere.
@@ -98,5 +102,6 @@ jobs:
       agent: ${{ inputs.agent }}
       per_run_usd: ${{ inputs.per_run_usd }}
       per_run_minutes: ${{ inputs.per_run_minutes }}
+      upload_transcripts: ${{ inputs.upload_transcripts }}
     secrets:
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}

@@ -31,6 +31,10 @@ on:
         description: "Runner label"
         required: true
         default: ubuntu-latest
+      upload_transcripts:
+        description: "Also upload the agent's raw transcripts (anyone can download a public repo's artifacts)"
+        type: boolean
+        default: false
   # Live input, from live.yml: one change of a target repo, picked there (shfv live-select).
   workflow_call:
     inputs:
@@ -50,6 +54,7 @@ on:
       repo: {type: string, default: "", description: "Clone this repo (owner/name) instead of the target config's, e.g. a private copy"}
       record: {type: string, default: full, description: "full: the whole run record; reports: report.json, report.md and the patch, no prompts or transcripts (for a public target's artifacts)"}
       save_store: {type: boolean, default: true, description: "Save the replay store cache (off in a target repo: its cache is the target's own)"}
+      upload_transcripts: {type: boolean, default: false, description: "With record: full, also upload the agent's raw transcripts"}
     secrets:
       ANTHROPIC_API_KEY: {required: false}
       SHFV_TOKEN: {required: false, description: "Read access to this repo, for a caller while it is private"}
@@ -344,8 +349,20 @@ jobs:
           d and open(sys.argv[2], "w").write(d)' "$out/report.json" "$out/repair.patch" 2>/dev/null || true
           echo "RUN_DIR=$out" >> "$GITHUB_ENV"
 
-      # The run record (§3.3 S7): report.json, report.md, and the agent's prompts and transcripts.
-      # Live, its name (live-<target>-<head8>) is how live.yml knows a head was already run.
+      # Raw model output stays on the runner unless asked for: anyone can download a public repo's
+      # artifacts. Dropped: each attempt's transcript.jsonl (Claude Code's or Codex's event stream) and
+      # Codex's CODEX_HOME (its session state). Kept: reports, prompts, the bot's suggestion.patch.
+      - name: Drop transcripts
+        if: always() && env.RUN_DIR != '' && inputs.record != 'reports' && !inputs.upload_transcripts
+        run: |
+          out="$RUNNER_TEMP/record-no-transcripts"
+          rm -rf "$out" && mkdir -p "$out"
+          cp -R "$RUN_DIR/." "$out/"
+          find "$out" -path '*/attempts/*' \( -name transcript.jsonl -o -name codex-home \) -prune -exec rm -rf {} +
+          echo "RUN_DIR=$out" >> "$GITHUB_ENV"
+
+      # The run record (§3.3 S7): report.json, report.md, the agent's prompts and, if asked for, its
+      # transcripts. Live, its name (live-<target>-<head8>) is how live.yml knows a head was already run.
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         if: always() && env.RUN_DIR != ''
         with:
