@@ -188,6 +188,21 @@ def test_an_oversized_member_stops_the_collection(monkeypatch):
         collect.collect(api, None, "o/spqr", "self-heal.yml", seen=set(), fetch=fetch)
 
 
+def test_a_member_that_is_not_utf8_stops_the_collection_cleanly():
+    api, fetch, _ = patch_api(REPAIRED, {})
+
+    def bad_fetch(token, url):
+        if "live-" not in url:
+            return fetch(token, url)
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as z:
+            z.writestr("report.json", json.dumps(REPAIRED))
+            z.writestr("repair.patch", b"\xff\xfe not utf-8")
+        return zipfile.ZipFile(io.BytesIO(buf.getvalue()))
+    with pytest.raises(SystemExit, match="not UTF-8"):
+        collect.collect(api, None, "o/spqr", "self-heal.yml", seen=set(), fetch=bad_fetch)
+
+
 def test_an_oversized_artifact_is_not_downloaded():
     api, fetch, fetched = patch_api(REPAIRED, {"repair.patch": PATCH})
     real = api.__call__

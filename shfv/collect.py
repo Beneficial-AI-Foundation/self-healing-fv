@@ -74,7 +74,10 @@ def read_text(z: zipfile.ZipFile, name: str) -> str | None:
         data = f.read(MAX_MEMBER + 1)
     if len(data) > MAX_MEMBER:
         raise SystemExit(f"{hits[0].filename}: over {MAX_MEMBER} bytes uncompressed; not collecting it")
-    return data.decode()
+    try:
+        return data.decode()
+    except UnicodeDecodeError:
+        raise SystemExit(f"{hits[0].filename}: not UTF-8 text; not collecting it") from None
 
 
 def read_json(z: zipfile.ZipFile, name: str) -> dict | None:
