@@ -239,6 +239,12 @@ def test_pr_repair_picks_a_qualifying_pr():
     assert rows[0]["head_sha"] == HEAD and rows[0]["repo"] == "example/toy"
 
 
+def test_pr_repair_runs_on_a_draft():
+    """Unlike the silent scan: a bump with broken proofs is what people open as a draft."""
+    picked, rows = select_pr(FakeAPI([own_pr(draft=True)], failing()))
+    assert picked and rows[0]["run"]
+
+
 def test_pr_repair_reads_the_calling_repo_not_the_configs():
     """A private copy of the target calls it: its PRs and checks are the copy's."""
     api = FakeAPI([own_pr(repo="me/copy")], failing())
@@ -250,8 +256,7 @@ def test_pr_repair_reads_the_calling_repo_not_the_configs():
 @pytest.mark.parametrize("kw,why", [({"repo": "someone/fork"}, "a fork"),
                                     ({"state": "closed"}, "closed"),
                                     ({"assoc": "CONTRIBUTOR"}, "not a member"),
-                                    ({"draft": True}, "draft"),
-                                    ({"labels": ["no-self-heal"]}, "labelled no-self-heal")])
+                                    ({"labels":["no-self-heal"]}, "labelled no-self-heal")])
 def test_pr_repair_skips_silently(kw, why):
     api = FakeAPI([own_pr(**kw)], failing())
     picked, rows = select_pr(api)

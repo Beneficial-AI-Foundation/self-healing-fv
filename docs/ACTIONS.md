@@ -92,7 +92,8 @@ gh workflow run live.yml -R Beneficial-AI-Foundation/self-healing-fv -f agent=fa
 | Rule | Why |
 |---|---|
 | The PR's branch is in the calling repo | A fork's code never runs on a runner that holds the key |
-| Open, not a draft, author `OWNER`/`MEMBER`/`COLLABORATOR` | As for `live.yml` |
+| Open, author `OWNER`/`MEMBER`/`COLLABORATOR` | As for `live.yml` |
+| Drafts qualify (unlike `live.yml`) | The repo opted in by adding the caller, and the bot only comments; a bump with broken proofs is what people open as a draft (decided 2026-11-02) |
 | No `no-self-heal` label | The maintainers' switch for one PR. For the whole repo: the repo variable `SELF_HEAL=off`, read by the caller. |
 | Lean check failed and extraction check passed on the head; neither still running | As for `live.yml`. Still running: "waiting for …", and the run after it decides. |
 | No unexpired artifact `live-<target>-<head8>` in the calling repo | One run per head SHA |

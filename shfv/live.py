@@ -232,7 +232,9 @@ def select_pr(api, target: str, cfg: dict, repo: str, number: int, self_repo: st
     too (`self_repo`). On top of `select`'s rules: the PR's branch must be in `repo` (a fork's code
     never runs with the key), it must not carry OPT_OUT, and, given a clone with base and head, it
     must change a pin or the extracted code: a PR that only edits proofs is proof work in
-    progress, not a break to repair."""
+    progress, not a break to repair. Unlike `select`, drafts qualify (decided 2026-11-02, Dana):
+    the repo opted in by adding the caller, the bot only comments, and a bump with broken proofs
+    is what people open as a draft."""
     cfg = {**cfg, "github": repo}
     pr = api(f"/repos/{repo}/pulls/{number}")
     head = pr["head"]["sha"]
@@ -244,8 +246,6 @@ def select_pr(api, target: str, cfg: dict, repo: str, number: int, self_repo: st
         row["skip"] = "closed"
     elif pr.get("author_association") not in TRUSTED_AUTHORS:
         row["skip"] = f"author is {pr.get('author_association', 'unknown').lower()}, not a member or collaborator"
-    elif pr.get("draft"):
-        row["skip"] = "draft"
     elif OPT_OUT in {lb["name"] for lb in pr.get("labels", [])}:
         row["skip"] = f"labelled {OPT_OUT}"
     elif already_run(api, self_repo, target, head):
