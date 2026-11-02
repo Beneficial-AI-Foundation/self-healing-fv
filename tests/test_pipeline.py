@@ -380,6 +380,23 @@ def test_gate_unavailable_never_becomes_a_repair_outcome(toy_case, monkeypatch):
     assert set(outcomes(rep).values()) == {"gate-unavailable"}  # no `candidate` left behind
 
 
+def test_a_tree_the_gate_refuses_to_hash_is_gate_unavailable_with_the_gates_reason(toy_case, monkeypatch):
+    """`gate tree-hash` exits 1 with a traceback when a root module has no source file (libsignal PR 17's
+    tree has no ProtocolsTest, found by the fork smoke test): the run says why, not `JSONDecodeError`."""
+    real = pipeline.gate
+    why = "FileNotFoundError: root module ProtocolsTest: no source file (is its library under a srcDir …?)"
+
+    def refusing_gate(*args, check=True):
+        if args[0] == "tree-hash":
+            return pipeline.proc.Result(1, "", f"Traceback (most recent call last):\n  ...\n{why}\n", False)
+        return real(*args, check=check)
+    monkeypatch.setattr(pipeline, "gate", refusing_gate)
+    rep, _, _ = run_case(toy_case, monkeypatch, GOOD, "nohash", expect_error=True)
+    assert rep["verdict"] == "failed" and rep["error"]["outcome"] == "gate-unavailable"
+    assert "root module ProtocolsTest: no source file" in rep["error"]["detail"]
+    assert "JSONDecodeError" not in rep["error"]["detail"]
+
+
 def test_a_run_that_called_no_model_is_renamed(tmp_path):
     from types import SimpleNamespace
     from shfv import provenance

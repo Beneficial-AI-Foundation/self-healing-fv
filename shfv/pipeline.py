@@ -292,7 +292,11 @@ class Run:
         lack a library the change adds."""
         out = self.case_dir / "snapshots" / f"{name}.json"
         flag = ["--allow-absent-roots"] if allow_absent_roots else []
-        want = json.loads(gate("tree-hash", "--config", str(self.config), "--tree", str(tree), *flag).stdout)
+        th = gate("tree-hash", "--config", str(self.config), "--tree", str(tree), *flag)
+        if th.returncode != 0:  # e.g. a root module with no source file at this tree: the gate refuses it
+            lines = th.stderr.strip().splitlines()
+            raise GateUnavailable(f"gate tree-hash on {name}: {lines[-1][-500:] if lines else f'exit {th.returncode}'}")
+        want = json.loads(th.stdout)
         if out.exists():
             try:
                 head = json.loads(out.read_text())
