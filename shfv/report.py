@@ -178,6 +178,13 @@ def provenance_lines(r: dict) -> list[str]:
 AUDIT_SHOWN = 12  # before/after pairs shown in the comment; the rest are named, all are in report.json
 
 
+def universe_only(x: dict) -> bool:
+    """A statement change that prints identically and differs only in universe levels (an Aeneas
+    `Type` → `Type _` change gives dozens): display order only, the audit still lists it."""
+    why = x.get("hidden_difference") or ""
+    return x["before"] == x["after"] and why.startswith("universe levels") and "constants:" not in why
+
+
 STANDARD_AXIOMS = {"sorryAx", "propext", "Classical.choice", "Quot.sound"}
 
 
@@ -316,6 +323,10 @@ def audit_section(r: dict, focus: str | None = None) -> list[str]:
                                                   if is_head(r) else "")
                + "; a spec owner should check that none weakens a promise." + stubbed)
     out.append("")
+    if a.get("complete") is False:
+        # Found changes are real, but a head that does not build hides others (libsignal-verify 4.35 dry run).
+        out += [f"⚪ **Coverage incomplete:** {a.get('not_compared_n', 0)} declaration(s) could not be compared "
+                f"({'; '.join(a.get('coverage_problems', [])[:3])}). Statements among them may also have changed.", ""]
     trust = []
     new_sorry = [x["decl"] for x in a["axioms_changed"] if "sorryAx" in x["added"]]
     # sorry is listed above; the rest of STANDARD_AXIOMS are Lean's own
@@ -338,9 +349,12 @@ def audit_section(r: dict, focus: str | None = None) -> list[str]:
         trust.append("- **Libraries added:** " + ", ".join(f"`{m}`" for m in a["roots_added"]))
     if trust:
         out += ["Trust changes:", ""] + trust + [""]
-    stmts = sorted(a["statements_changed"], key=lambda x: (not (focus and focus.lower() in x["decl"].lower()), x["decl"]))
+    stmts = sorted(a["statements_changed"], key=lambda x: (not (focus and focus.lower() in x["decl"].lower()),
+                                                           universe_only(x), x["decl"]))
     if stmts:
-        out.append(f"<details><summary>Statements changed ({len(stmts)})"
+        n_uni = sum(map(universe_only, stmts))
+        out.append(f"<details><summary>Statements changed ({len(stmts)}"
+                   + (f"; {n_uni} differ only in universe levels, listed last" if n_uni else "") + ")"
                    + (f", those matching “{focus}” first" if focus else "") + "</summary>")
         out.append("")
         for x in stmts[:AUDIT_SHOWN]:
