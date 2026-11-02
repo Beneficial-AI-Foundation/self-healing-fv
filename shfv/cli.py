@@ -42,7 +42,7 @@ def link_latest(case_runs: Path, run_dir: Path) -> None:
 
 
 def render(report_json: Path, work: Path, audit_focus: str | None = None) -> Path:
-    from .pipeline import explain_hidden, refresh_comparison
+    from .pipeline import explain_hidden, mark_now_extracted, refresh_comparison
     rep = json.loads(report_json.read_text())
     if audit_focus:
         rep["audit_focus"] = audit_focus
@@ -51,6 +51,10 @@ def render(report_json: Path, work: Path, audit_focus: str | None = None) -> Pat
     if rep.get("audit", {}).get("statements_changed"):
         head = "K.json" if rep["audit"].get("head_stubbed") else "H.json"  # live: the stubbed head
         explain_hidden(rep["audit"], case_dir / "snapshots" / "B.json", case_dir / "snapshots" / head)
+    config = Path((rep.get("config") or {}).get("path") or "")
+    if rep.get("audit", {}).get("removed") and config.is_file() and (case_dir / "broken").is_dir():
+        with open(config, "rb") as f:
+            mark_now_extracted(rep["audit"], case_dir / "broken", tomllib.load(f)["protected"]["extracted"])
     # Content comes from the run; presentation from the code rendering it now. Record both.
     rep.setdefault("renders", []).append({"at": provenance.now().isoformat(timespec="seconds"),
                                           "tool": provenance.tool_code()})
@@ -283,10 +287,38 @@ def main(argv: list[str] | None = None) -> int:
                    help="this repo, whose run-record artifacts say which heads were already run")
     s.add_argument("--github-output", type=Path, help="append matrix=… and count=… here ($GITHUB_OUTPUT)")
     s.add_argument("--summary", type=Path, help="append the selection table here ($GITHUB_STEP_SUMMARY)")
+    s.add_argument("--pr", type=int, help="pr-repair.yml: decide on this one PR of --repo (needs --target)")
+    s.add_argument("--repo", help="with --pr: the calling repo (owner/name), the target's or a private copy of it")
+    s.add_argument("--clone", type=Path, help="with --pr: a clone holding the PR's base and head, to tell a pin or "
+                   "extraction change from proof edits")
+    s.add_argument("--decisions", type=Path, help="write the runs and every decision here as JSON (telemetry)")
+    cm = sub.add_parser("comment", help="pr-repair.yml: write the Repair section into a PR's sticky comment "
+                        "(GraphQL, with $GITHUB_TOKEN)")
+    cm.add_argument("report", type=Path, help="the run's report.json")
+    cm.add_argument("--repo", required=True, help="owner/name")
+    cm.add_argument("--pr", type=int, required=True)
+    cm.add_argument("--run-url", required=True, help="the workflow run, linked from the section")
+    cm.add_argument("--artifact", required=True, help="the run record's artifact name, named in the section")
+    cm.add_argument("--target", required=True, help="target config; its [live] comment_header says which "
+                    "sticky comment: the target's own (e.g. SPQR's sorry-delta) or the bot's (self-healing-fv)")
+    co = sub.add_parser("collect", help="append the callers' pr-repair runs to data/live/<target>.jsonl (telemetry)")
+    co.add_argument("--repo", required=True, help="the calling repo (owner/name)")
+    co.add_argument("--target", required=True)
+    co.add_argument("--workflow", default="self-heal.yml", help="the caller's workflow file (default self-heal.yml)")
+    co.add_argument("--out", type=Path, help="default: data/live/<target>.jsonl")
     a = ap.parse_args(argv)
     if a.cmd == "live-select":
         from . import live
-        return live.main_select(a.target, a.ref, a.skip_checks, a.max_runs, a.self_repo, a.github_output, a.summary)
+        return live.main_select(a.target, a.ref, a.skip_checks, a.max_runs, a.self_repo, a.github_output, a.summary,
+                                a.pr, a.repo, a.clone, a.decisions)
+    if a.cmd == "comment":
+        from . import comment
+        with open(ROOT / "targets" / f"{a.target}.toml", "rb") as f:
+            header = tomllib.load(f).get("live", {}).get("comment_header", comment.OWN)
+        return comment.main(a.report, a.repo, a.pr, a.run_url, a.artifact, header)
+    if a.cmd == "collect":
+        from . import collect
+        return collect.main(a.repo, a.target, a.workflow, a.out or ROOT / "data" / "live" / f"{a.target}.jsonl")
     if a.cmd == "tripwire":
         return scan_tripwire(a.runs, a.repo, a.json)
     if a.cmd == "compare-human":
@@ -361,6 +393,8 @@ def main(argv: list[str] | None = None) -> int:
         by_outcome += f" (kernel replay incomplete {len(incomplete)})"
     if native := (rep.get("gate") or {}).get("native_code"):
         by_outcome += f" (native code {len(native)})"
+    if beyond := (rep.get("gate") or {}).get("axioms_beyond_base_version"):
+        by_outcome += f" (axioms new to the theorem {len(beyond)})"
     run.p.final(f"{rep['verdict'].upper()} · {by_outcome} · {report_mod.usd(t['cost_usd'], t.get('cost_status'))} · {fmt_s(t['wall_seconds'])} → "
                 f"{m.relative_to(ROOT) if m.is_relative_to(ROOT) else m}")
     if "error" in rep:

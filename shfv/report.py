@@ -31,6 +31,8 @@ OUTCOME_TEXT = {
     "gate-unavailable": "the gate could not decide, so nothing about this theorem was accepted or rejected",
     "passed-checks": "every gate check that ran passed, but the kernel replay (G5) has not run, so it is not accepted",
     "extraction-setup": "the extracted code does not build at the head, so no proof can be repaired against it",
+    "added-by-pr": "added by this PR, its proof fails, and the bot does not repair it: it repairs only theorems that "
+                   "have a version before the PR",
 }
 
 
@@ -127,6 +129,8 @@ def gate_table(r: dict, g: dict) -> list[str]:
             mark = "✅" if c["ok"] else "❌"
             text = desc.format(inventory=inv, targets=", ".join(c.get("info", {}).get("targets", ["the project"])),
                                build=f" in {fmt_s(build)}" if build else "")
+            if cid in ("G1", "G2") and g.get("reference") == "head":
+                text += " (against the PR as written)"
             if cid == "G5" and (checker := (c.get("info") or {}).get("checker")):
                 text = re.sub(r"\s*\((cached build|built)\)$", "", checker)
                 text = text.replace("lean4checker", "`lean4checker`", 1).replace("bundled leanchecker", "`leanchecker` (bundled with Lean)")
@@ -174,6 +178,115 @@ def provenance_lines(r: dict) -> list[str]:
 AUDIT_SHOWN = 12  # before/after pairs shown in the comment; the rest are named, all are in report.json
 
 
+STANDARD_AXIOMS = {"sorryAx", "propext", "Classical.choice", "Quot.sound"}
+
+
+def names(xs: list[str], n: int = 6) -> str:
+    return ", ".join(f"`{x}`" for x in distinct_short_names(xs)[:n]) + (f" and {len(xs) - n} more" if len(xs) > n else "")
+
+
+HEAD_REFERENCE = ("**The gate checked only the bot's edits, against this PR as written.** The changes the PR itself "
+                  "made are listed below; the gate did not judge them. A reviewer should.")
+
+
+def is_head(r: dict) -> bool:
+    """Whether the gate's reference is the PR head (live, §4.9); report.json records it at the top
+    level, older runs inside `gate` only."""
+    return (r.get("reference") or (r.get("gate") or {}).get("reference")) == "head"
+
+
+def reference_note(r: dict) -> list[str]:
+    """Live (the gate's reference is the PR head, DESIGN.md §4.9): what the gate did and did not
+    judge, up front, so an accepted repair is not read as a verdict on the PR's own changes."""
+    g = r.get("gate") or {}
+    if (r.get("reference") or g.get("reference")) != "head":
+        return []
+    outcome = (r.get("audit") or {}).get("outcome")
+    if not g:  # no candidate reached the gate (an ineligible case, nothing to repair)
+        return [] if outcome != "changed" else [
+            "**No repair was gated.** The changes the PR itself made are listed below; nothing here judged them. "
+            "A reviewer should."]
+    if outcome == "no-change":
+        return ["**The gate checked only the bot's edits, against this PR as written.** The PR itself changed no "
+                "frozen statement, definition or trust assumption (complete audit below)."]
+    return [HEAD_REFERENCE]
+
+
+def new_axiom_flag(r: dict) -> list[str]:
+    """The 🏷️ flag for repaired theorems that rest on axioms their version before the PR did not
+    use (live, DESIGN.md §4.9; `gate.axioms_beyond_base_version`). The gate allows them because the
+    PR head uses them; an unsound one (say, one implying False) would let a repair prove anything,
+    so each is named, per theorem, with whether this PR added it (from the audit)."""
+    g = r.get("gate") or {}
+    beyond = g.get("axioms_beyond_base_version") or {}
+    if not beyond:
+        return []
+    pr_added = set((r.get("audit") or {}).get("added") or [])
+    lines = ["", f"🏷️ **Rests on {'an axiom' if sum(map(len, beyond.values())) == 1 else 'axioms'} this PR "
+             "added or newly relies on.** The gate accepts this against the PR as written, because the PR's own "
+             "code uses the axiom; it does not judge whether the axiom is sound. An unsound one would let any proof "
+             "through, so check:"]
+    for t, xs in list(beyond.items())[:10]:
+        lines.append(f"- `{short_name(t)}`: " + ", ".join(
+            f"`{x}` ({'added by this PR' if x in pr_added else 'already in the project, not used here before'})"
+            for x in xs[:6]))
+    return lines
+
+
+def change_trust_note(r: dict) -> list[str]:
+    """When the gate's G1/G2 failures, or the case's ineligibility, come from the change's own trust
+    changes rather than the bot's edits: what the change did to the trusted models (libsignal-verify
+    PR 17). Only when the change's audit accounts for every one of them: missing frozen declarations
+    the change removed (G1), new axioms the change added to the same declarations (G2)."""
+    a, g = r.get("audit") or {}, r.get("gate") or {}
+    if a.get("outcome") != "changed":
+        return []
+    removed = {x["decl"]: x for x in a.get("removed", [])}
+    added_ax = {x["decl"]: set(x["added"]) for x in a.get("axioms_changed", [])}
+    missing = (r.get("broken") or {}).get("missing_frozen") or []
+    failed = [c for c in g.get("failed_checks", []) if c in ("G1", "G2")]
+    checks = g.get("checks") or {}
+    if failed:
+        if set(g["failed_checks"]) - {"G1", "G2"}:
+            return []
+        g1 = [u["decl"] for u in (checks.get("G1", {}).get("info") or {}).get("unobserved", [])]
+        if "G1" in failed and (not g1 or any(d not in removed for d in g1)):
+            return []
+        g2 = checks.get("G2", {}).get("violations", [])
+        for v in g2:
+            new = {y.strip() for y in v["msg"].split(":", 1)[-1].split(",")}
+            if not v.get("decl") or not new <= added_ax.get(v["decl"], set()):
+                return []
+        intro = (f"The bot's candidate was **rejected by the gate ({', '.join(failed)})**. "
+                 f"{'Both failures come' if len(failed) > 1 else 'The failure comes'} from the change itself, not from "
+                 "the bot's edits: the change rewrote the trusted models.")
+        rest_on = [(v["decl"], v["msg"].split(":", 1)[-1].strip()) for v in g2]
+    elif missing and all(d in removed for d in missing):
+        intro = (f"No repair was attempted: {len(missing)} declaration{'s' * (len(missing) != 1)} the gate freezes "
+                 f"{'are' if len(missing) != 1 else 'is'} gone from the broken state, because the change itself rewrote "
+                 "the trusted models.")
+        rest_on = [(d, ", ".join(sorted(ys - STANDARD_AXIOMS))) for d, ys in added_ax.items() if ys - STANDARD_AXIOMS]
+    else:
+        return []
+    now = [d for d, x in removed.items() if x.get("now_extracted")]
+    dropped = [d for d, x in removed.items() if not x.get("now_extracted")]
+    out = [intro, "", "What the change did:", ""]
+    if now:
+        out.append(f"- **{len(now)} trusted declaration{'s' * (len(now) != 1)} became extracted code**, so "
+                   f"{'they are' if len(now) != 1 else 'it is'} no longer assumed: {names(now)}")
+    if dropped:
+        out.append(f"- **{len(dropped)} trusted declaration{'s' * (len(dropped) != 1)} removed** (no longer used, "
+                   f"or provided elsewhere): {names(dropped)}")
+    if rest_on:
+        out.append(f"- **{len(rest_on)} declaration{'s' * (len(rest_on) != 1)} now rest{'s' * (len(rest_on) == 1)} on "
+                   "new axioms** the change added: " + "; ".join(
+                       f"`{d}` (+`{ys}`)" for d, (_, ys) in zip(distinct_short_names([x for x, _ in rest_on]), rest_on[:4]))
+                   + (f" and {len(rest_on) - 4} more" if len(rest_on) > 4 else ""))
+    out += ["", "The gate cannot certify statements whose declarations are gone (G1) and does not accept new axioms "
+            "on its own (G2): a person must review these trust changes. The bot never decides that.", ""]
+    return out
+
+
 def audit_section(r: dict, focus: str | None = None) -> list[str]:
     """§5.4 part 2: statement, definition and trust changes made by the triggering change itself."""
     a = r.get("audit")
@@ -187,7 +300,7 @@ def audit_section(r: dict, focus: str | None = None) -> list[str]:
     # Live: the head was audited with its failing proofs stubbed, so `sorry` was compared in the sources.
     stubbed = (" `sorry` is compared in the sources: the head does not build, so it was read with its failing "
                "proofs stubbed.") if a.get("head_stubbed") and (r.get("broken") or {}).get("proofs") else ""
-    if a["outcome"] == "no-change":
+    if a["outcome"] == "no-change" and not (a.get("axioms_added") or a.get("roots_added")):
         return out + ["✅ No frozen statement, definition or trust assumption changed (complete comparison)." + stubbed, ""]
     if a["outcome"] == "incomplete" and not a.get("summary"):
         return out + [f"⚪ The audit could not run: {a.get('error', 'unknown reason')}", ""]
@@ -199,12 +312,14 @@ def audit_section(r: dict, focus: str | None = None) -> list[str]:
         return out
     out.append(f"⚠️ **The {'PR' if live else 'change'} itself** changed {s['statements_changed']} theorem statement(s) and "
                f"{s['definitions_changed']} definition(s), and removed or renamed {s['removed']} declaration(s). "
-               "The bot does not judge these; a spec owner should check that none weakens a promise." + stubbed)
+               "The bot does not judge these" + (", and the gate did not either: it checked only the bot's edits"
+                                                  if is_head(r) else "")
+               + "; a spec owner should check that none weakens a promise." + stubbed)
     out.append("")
     trust = []
     new_sorry = [x["decl"] for x in a["axioms_changed"] if "sorryAx" in x["added"]]
-    standard = {"sorryAx", "propext", "Classical.choice", "Quot.sound"}  # sorry listed above; the rest are Lean's own
-    new_ax = [(x["decl"], [y for y in x["added"] if y not in standard]) for x in a["axioms_changed"]]
+    # sorry is listed above; the rest of STANDARD_AXIOMS are Lean's own
+    new_ax = [(x["decl"], [y for y in x["added"] if y not in STANDARD_AXIOMS]) for x in a["axioms_changed"]]
     new_ax = [(d, ys) for d, ys in new_ax if ys]
     if a.get("sorry_written"):
         trust.append(f"- **`sorry` written by the PR** ({len(a['sorry_written'])}): "
@@ -216,6 +331,11 @@ def audit_section(r: dict, focus: str | None = None) -> list[str]:
             f"`{short_name(d)}` (+{', '.join(f'`{y}`' for y in ys)})" for d, ys in new_ax[:15]))
     if a.get("trusted_models_changed"):
         trust.append("- **Trusted models changed:** " + ", ".join(f"`{p}`" for p in a["trusted_models_changed"]))
+    if a.get("axioms_added"):
+        trust.append(f"- **Axioms added** ({len(a['axioms_added'])}, wherever declared, used or not): "
+                     + ", ".join(f"`{x}`" for x in a["axioms_added"][:20]) + (" …" if len(a["axioms_added"]) > 20 else ""))
+    if a.get("roots_added"):
+        trust.append("- **Libraries added:** " + ", ".join(f"`{m}`" for m in a["roots_added"]))
     if trust:
         out += ["Trust changes:", ""] + trust + [""]
     stmts = sorted(a["statements_changed"], key=lambda x: (not (focus and focus.lower() in x["decl"].lower()), x["decl"]))
@@ -257,6 +377,7 @@ def audit_section(r: dict, focus: str | None = None) -> list[str]:
 def render(r: dict) -> str:
     inp = r["inputs"]
     subject = re.sub(r"\s*\(#\d+\)\s*$", "", inp["change_subject"])
+    subject = subject.replace("@", "@\u200b")  # a PR title is free text: no mentions when it is posted
     pr = f"[#{inp['change_pr']} \"{subject}\"]({inp['change_pr_url']})" if inp.get("change_pr_url") \
         else (f"`{inp['change_commit'][:8]}` \"{subject}\"" if inp.get("change_commit")
               else f"the generated change \"{subject}\" (held-out case, no commit history)")
@@ -274,7 +395,11 @@ def render(r: dict) -> str:
         out.append("")
         out.append(f"The change {pr} broke {n_proofs} proof{'s' * (n_proofs != 1)}. The bot repaired "
                    f"{'it' if n_proofs == 1 else 'them'}, and the gate checked the repair mechanically and accepted it: "
-                   "no theorem statement or definition changed, no new axioms or `sorry`, and the project rebuilds from scratch.")
+                   + ("the bot changed no theorem statement, definition or trusted model of the PR, added no axioms or "
+                      "`sorry`, and the project rebuilds from scratch."
+                      if is_head(r) else
+                      "no theorem statement or definition changed, no new axioms or `sorry`, and the project rebuilds "
+                      "from scratch."))
         inherited = (r.get("gate") or {}).get("inherited_sorry") or {}
         if inherited:
             lemmas = sorted({s for v_ in inherited.values() for s in v_})
@@ -294,6 +419,7 @@ def render(r: dict) -> str:
                        + ". That declaration is unchanged by the repair and was already proved this way at the base "
                        "commit; the rest of that module was checked by the kernel during the clean rebuild, but "
                        "not re-checked independently.")
+        out += new_axiom_flag(r)
         native = (r.get("gate") or {}).get("native_code") or []
         if native:
             out.append("")
@@ -346,6 +472,10 @@ def render(r: dict) -> str:
         else:
             out.append(f"The change {pr} broke {n_proofs} proof{'s' * (n_proofs != 1)}. The bot did not produce a repair "
                        "the gate accepts for all of them, so nothing is proposed; the evidence is below.")
+            if note := change_trust_note(r):
+                out += [""] + note[:-1]
+    if note := reference_note(r):
+        out += [""] + note
     out.append("")
     out.append("| | |")
     out.append("|---|---|")

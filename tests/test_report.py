@@ -135,6 +135,94 @@ def test_a_bounded_cost_says_so_in_every_table():
     assert usd(0.5, "partial") == "at least $0.50" and usd(0.5, "computed") == "$0.50" and usd(None) == "cost unknown"
 
 
+def trust_rewrite(**gate_kw):
+    """libsignal-verify PR 17 in small: the change turned an axiom into extracted code, dropped a
+    model, and moved a declaration onto a new axiom; the bot's candidate was rejected on G1 and G2."""
+    audit = {"outcome": "changed", "summary": {"statements_changed": 0, "definitions_changed": 0, "removed": 2},
+             "statements_changed": [], "definitions_changed": [],
+             "removed": [{"decl": "proto.Msg.compute_mac", "module": "X.FunsExternal", "now_extracted": "X/Funs.lean"},
+                         {"decl": "generic_array.GenericArray", "module": "X.TypesExternal"}],
+             "axioms_changed": [{"decl": "core.PrivateKey.deserialize", "added": ["curve.PrivateKey.deserialize", "propext"],
+                                 "removed": ["core.PrivateKey.deserialize"]}]}
+    gate = {"verdict": "rejected", "failed_checks": ["G1", "G2"], "checks": {
+        "G1": {"ok": False, "violations": [], "info": {"unobserved": [
+            {"decl": "proto.Msg.compute_mac", "status": "missing"}, {"decl": "generic_array.GenericArray", "status": "missing"}]}},
+        "G2": {"ok": False, "violations": [{"check": "G2", "decl": "core.PrivateKey.deserialize",
+                                            "msg": "new axioms in its closure: curve.PrivateKey.deserialize"}]}}}
+    gate.update(gate_kw)
+    return minimal_report(broken={"proofs": ["T"], "statements": []}, audit=audit, gate=gate)
+
+
+def test_a_rejection_caused_by_the_change_says_what_the_change_did():
+    md = render(trust_rewrite())
+    assert "rejected by the gate (G1, G2)" in md and "come from the change itself, not from the bot's edits" in md
+    assert "**1 trusted declaration became extracted code**" in md and "`compute_mac`" in md
+    assert "**1 trusted declaration removed**" in md and "`GenericArray`" in md
+    assert "now rests on new axioms** the change added: `deserialize` (+`curve.PrivateKey.deserialize`)" in md
+
+
+def test_a_rejection_the_change_does_not_explain_gets_no_such_note():
+    """A new axiom the change did not add is the candidate's own: no "from the change" note."""
+    r = trust_rewrite()
+    r["gate"]["checks"]["G2"]["violations"][0]["msg"] = "new axioms in its closure: sneaky.axiom"
+    assert "come from the change itself" not in render(r)
+    r = trust_rewrite(failed_checks=["G0", "G1", "G2"])  # another check failed too
+    assert "come from the change itself" not in render(r)
+    r = trust_rewrite()
+    r["gate"]["checks"]["G1"]["info"]["unobserved"].append({"decl": "Spec.T", "status": "missing"})
+    assert "come from the change itself" not in render(r)
+
+
+def test_an_ineligible_case_says_what_the_change_did():
+    r = trust_rewrite()
+    r.pop("gate")
+    r["broken"]["missing_frozen"] = ["proto.Msg.compute_mac", "generic_array.GenericArray"]
+    md = render(r)
+    assert "No repair was attempted: 2 declarations the gate freezes are gone" in md
+    assert "became extracted code" in md and "`deserialize` (+`curve.PrivateKey.deserialize`)" in md
+
+
+def test_live_report_says_what_the_gate_judged():
+    rep = {"theorem": "Ns.T", "file": "A.lean", "decl": "Ns.T", "outcome": "repaired", "attempts": []}
+    beyond = {"Ns.T": ["curve.PrivateKey.deserialize", "Old.ax"]}
+    g2 = {"ok": True, "violations": [], "info": {"axioms_beyond_base_version": beyond}}
+    audit = {"outcome": "changed", "summary": {"statements_changed": 1, "definitions_changed": 0, "removed": 0},
+             "statements_changed": [], "definitions_changed": [], "removed": [], "axioms_changed": [],
+             "trusted_models_changed": ["M/External.lean"], "roots_added": ["Protocols"],
+             "added": ["curve.PrivateKey.deserialize"]}
+    live = dict(verdict="accepted", broken={"proofs": ["Ns.T"], "statements": []}, repairs=[rep], audit=audit,
+                gate={"verdict": "accepted", "reference": "head", "axioms_beyond_base_version": beyond,
+                      "checks": {"G1": {"ok": True}, "G2": g2}})
+    md = render(minimal_report(**live))
+    top = md.split("| | |")[0]
+    assert "The gate checked only the bot's edits, against this PR as written.** The changes the PR itself made" in top
+    assert "🏷️ **Rests on axioms this PR added or newly relies on.**" in top  # up front, like the other flags
+    assert ("- `T`: `curve.PrivateKey.deserialize` (added by this PR), "
+            "`Old.ax` (already in the project, not used here before)") in top
+    assert "**Libraries added:** `Protocols`" in md and "the gate did not either" in md
+    assert "(against the PR as written)" in md
+    # Review finding 5: a G0 rejection's verdict and an ineligible run (no gate entry) keep the mode,
+    # from report.json's top-level `reference`.
+    g0 = minimal_report(**{**live, "verdict": "escalated", "reference": "head",
+                           "gate": {"verdict": "rejected", "failed_checks": ["G0"], "checks": {"G0": {"ok": False}}}})
+    assert "The gate checked only the bot's edits, against this PR as written." in render(g0)
+    inel = minimal_report(**{**live, "verdict": "escalated", "reference": "head"})
+    inel.pop("gate")
+    assert "No repair was gated.** The changes the PR itself made are listed below" in render(inel)
+    live["gate"]["reference"] = "base"  # replay: none of it
+    md = render(minimal_report(**live))
+    assert "against this PR as written" not in md and "the gate did not either" not in md
+
+
+def test_removed_models_now_defined_by_the_extracted_code(tmp_path):
+    from shfv.pipeline import mark_now_extracted
+    (tmp_path / "X").mkdir()
+    (tmp_path / "X" / "Funs.lean").write_text("namespace crate\n\ndef proto.Msg.compute_mac (x : U8) : Result U8 :=\n  ok x\n")
+    a = {"removed": [{"decl": "crate.proto.Msg.compute_mac"}, {"decl": "generic_array.GenericArray"}]}
+    mark_now_extracted(a, tmp_path, ["X/Funs.lean", "X/Types.lean"])
+    assert a["removed"][0]["now_extracted"] == "X/Funs.lean" and "now_extracted" not in a["removed"][1]
+
+
 def test_render_keeps_the_recorded_comparison_when_the_replay_trees_are_elsewhere(tmp_path):
     import json
     from shfv import cli

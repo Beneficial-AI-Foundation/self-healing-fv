@@ -99,6 +99,10 @@ When the gate accepts a repair, these checks passed:
 | G5 Kernel replay | The changed modules are re-checked by the Lean kernel (`lean4checker`, or `leanchecker` on newer Lean). |
 | Audit | Separately from the repair, lists every statement, definition and trust change made by the triggering change itself, for a person to judge. |
 
+**What "before" means: the reference** (DESIGN.md §4.9, decided 2026-10-30).
+- **On a live PR, the reference is the PR as written.** The gate checks only the bot's edits: the bot may not change any statement, definition, trusted model or axiom the PR head has, nor add `sorry` or axioms beyond the head's. What the PR itself changed relative to its base (a statement, a model it refreshed, an axiom it added, a library) is *not judged by the gate*. The audit lists it at the top of the report, which says so: "The gate checked only the bot's edits, against this PR as written. The changes the PR itself made are listed below; the gate did not judge them. A reviewer should."
+- **On a historical replay, the reference is the base commit**, as before, so results stay comparable.
+
 Three more rules:
 
 - **Inherited `sorry` is accepted, but flagged.** The target repos still have unproved lemmas at the base. A repair may depend on them only if it adds no `sorry` of its own and reaches the same unproved lemmas its old proof reached. Such acceptances carry a flag, so results can be counted with and without them. The same goes for modules where the kernel replay stops early at a proof by native code (`native_decide`, `bv_decide`) that was already there at the base.
@@ -108,6 +112,8 @@ Three more rules:
 What an acceptance does **not** guarantee:
 
 - **That the spec is good.** A correct proof of a weak statement passes. The gate only promises the statement did not change.
+- **That the PR's own changes are fine** (live). An accepted repair says the bot's edits kept the PR's statements and trust as the PR wrote them. Whether the PR's own statement, model and axiom changes are acceptable is the reviewer's call; the audit lists them.
+- **That a PR's axiom is sound** (live). A repair may rest on an axiom the PR added (an unsound one, say one that implies `False`, would prove anything). Such a repair carries a 🏷️ flag naming the axiom, and counts as a flagged acceptance, not a strict one.
 - **Safety against deliberately crafted false proofs.** The threat model is honest mistakes and obvious shortcuts, not an adversary.
 - **That the gate itself is correct.** The gate is not formally verified yet. Proving its key properties is planned (DESIGN.md §4.8): first that its fingerprint ignores bound-variable names but not meaning, later that "accepted" implies "statements unchanged".
 

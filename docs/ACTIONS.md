@@ -27,6 +27,7 @@ gh run download <run id> -R Beneficial-AI-Foundation/self-healing-fv     # fetch
 | `per_run_usd` | `3` | Per-run cost cap (`--per-run-usd`), API-equivalent from token counts. Until the metering proxy exists (§9.5), it is Claude Code's own enforcement plus the pipeline's accounting, not a hard limit. |
 | `per_run_minutes` | `300` | Per-run deadline (`--per-run-minutes`), from the start of preparation |
 | `runner` | `ubuntu-latest` | Runner label. A dalek replay needs the larger runner `self-healing-fv` (8 cores, 32 GB, 300 GB SSD; see Pilot results) |
+| `upload_transcripts` | off | Also upload the agent's raw transcripts in the run record. Off by default because anyone can download a public repo's artifacts (see "What a run produces"). |
 
 The agent needs the repository secret `ANTHROPIC_API_KEY`. The dispatch fails at once if `agent` is on and the secret is missing. Set it without printing it, for example from the macOS Keychain:
 
@@ -42,7 +43,7 @@ Give the key its own spend limit with the provider (§9.3): that is the only lim
 
 **When it runs:** on manual dispatch only. The daily `schedule` trigger is parked until there is a multi-repo need; a dispatch without `ref` does what a scheduled run would.
 
-**What it picks** (`shfv live-select`, `shfv/live.py`), for each target config with `[live] enabled = true` (dalek and SPQR):
+**What it picks** (`shfv live-select`, `shfv/live.py`), for each target config with `[live] enabled = true` (dalek, SPQR and libsignal-verify):
 
 | Rule | Why |
 |---|---|
@@ -58,7 +59,7 @@ The `select` job's summary lists every open PR it looked at and the reason it wa
 **How each picked PR runs:** `live.yml` calls `replay.yml` with the target, the PR's base and head SHAs, and `refs/pull/<n>/head` to fetch (which also serves PRs from forks). One at a time (`max-parallel: 1`), and one `live` workflow at a time. Everything else is the replay job above: the same runner setup, bubblewrap, key handling, resource sampler and replay store cache (keyed on the head). By default the agent is on, with a $3 per-run cap and 300 minutes; the runner is the target's `[live] runner` (`self-healing-fv`, the 8-core runner).
 
 **What it uploads:**
-- **`live-<target>-<head8>`**: the run record (`report.json`, `report.md`, each attempt's prompt and transcript). `report.md` is what shadow mode would post. The name is also the "already run" marker.
+- **`live-<target>-<head8>`**: the run record (`report.json`, `report.md`, each attempt's prompt; transcripts only with the `upload_transcripts` input). `report.md` is what shadow mode would post. The name is also the "already run" marker.
 - **`runner-stats-live-<target>-<head8>-…`**: as for a replay.
 - The job summary: the live input (repo, PR, head, merge-base), resources and `report.md`.
 
@@ -80,13 +81,84 @@ gh workflow run live.yml -R Beneficial-AI-Foundation/self-healing-fv -f agent=fa
 | `per_run_usd`, `per_run_minutes` | `3`, `300` | Per-run caps, as for a replay |
 | `max_runs` | `2` | PRs to run at most |
 
+## Self-heal on a target's own PRs
+
+[`.github/workflows/pr-repair.yml`](../.github/workflows/pr-repair.yml) is the reusable workflow a target repo calls on its own PRs (DESIGN.md §9). Unlike `live.yml`, the run belongs to the target: its token, its `ANTHROPIC_API_KEY` secret, its caches and its artifacts. It is not running anywhere yet.
+
+**When it runs:** when the target's Lean workflow or its extraction workflow completes on a PR (`workflow_run` on both, because the Lean build fails in minutes while extraction takes longer: whichever finishes second sees both results), and on manual dispatch with a PR number. Every PR, no label. A new run for the same PR cancels the running one.
+
+**Whether a PR qualifies** (`shfv live-select --pr`, `select_pr` in `shfv/live.py`). All of these, else the run ends in about a minute, the reason goes into its summary and its `decisions-…` artifact, and **nothing is posted on the PR**:
+
+| Rule | Why |
+|---|---|
+| The PR's branch is in the calling repo | A fork's code never runs on a runner that holds the key |
+| Open, author `OWNER`/`MEMBER`/`COLLABORATOR` | As for `live.yml` |
+| Drafts qualify (unlike `live.yml`) | The repo opted in by adding the caller, and the bot only comments; a bump with broken proofs is what people open as a draft (decided 2026-11-02) |
+| No `no-self-heal` label | The maintainers' switch for one PR. For the whole repo: the repo variable `SELF_HEAL=off`, read by the caller. |
+| Lean check failed and extraction check passed on the head; neither still running | As for `live.yml`. Still running: "waiting for …", and the run after it decides. |
+| No unexpired artifact `live-<target>-<head8>` in the calling repo | One run per head SHA |
+| The PR changes a pin or the extracted code (its cause, by the mining rule, is not `proof-only`) | A PR that only edits proofs is proof work in progress, not a break. A Rust change counts through its extracted code: if that did not change, no proof broke because of it, and if the extraction was not redone, the extraction check fails. |
+
+**Jobs:**
+1. `select` (read-only; checks out this repo, never the PR): fetches the PR's commits without file contents to compute its cause, decides, uploads `decisions-<pr>-<run>`.
+2. `repair`: `replay.yml` on the PR (the live path above), with `record: reports` (only `report.json`, `report.md` and `repair.patch` are uploaded: the target's artifacts can be public, so prompts and transcripts stay out) and `save_store: false` (the target's 10 GB cache is its own, and its Lean CI uses it).
+3. `comment` (`pull-requests: write`, no model key, never checks out the PR): `shfv comment` writes the Repair section, the report cut to fit a comment, with links to the run and its artifact. The bot pushes nothing; a human applies `repair.patch`. The section opens by saying what the gate judged: only the bot's edits, against the PR as written (DESIGN.md §4.9); the PR's own changes follow, from the audit, as not judged by the gate.
+
+**Two comment modes, per target** (`[live] comment_header`):
+- **Into the target's own sticky comment** (SPQR: `sorry-delta`, from its `sorry-delta-comment.yml`). The section goes between `<!-- self-healing-fv:repair -->` markers before marocchino's marker, so both jobs keep updating one comment. marocchino only finds a comment that is its token user's, not minimized, and carries its marker (v2 `src/comment.ts`), so the bot creates the comment with that marker if there is none (the usual case: SPQR's job only writes after a green build) and un-hides a minimized one. When the target's job next writes (after a green build), it replaces the whole body, which drops the section with the state it described.
+- **The bot's own comment** (`self-healing-fv`, for a target without one, e.g. libsignal-verify): the same code under a header no other job writes. One comment per PR, updated on each run; it says which head it is about.
+
+**The caller** (the target's `.github/workflows/self-heal.yml`; `workflows:` names the target's Lean and extraction workflows, e.g. SPQR's `Lean Verification` and `Aeneas extraction`, libsignal-verify's `Lean Build` and `Aeneas extraction`):
+
+```yaml
+name: Self-heal
+on:
+  workflow_run:
+    workflows: ["Lean Verification", "Aeneas extraction"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      pr: {description: "PR number", required: true}
+concurrency:
+  group: self-heal-${{ github.event.workflow_run.pull_requests[0].number || inputs.pr }}
+  cancel-in-progress: true
+permissions:
+  contents: read
+  pull-requests: write
+  checks: read
+  actions: read
+jobs:
+  self-heal:
+    if: vars.SELF_HEAL != 'off' && (github.event_name == 'workflow_dispatch' || github.event.workflow_run.event == 'pull_request')
+    uses: Beneficial-AI-Foundation/self-healing-fv/.github/workflows/pr-repair.yml@<commit sha>
+    with:
+      target: spqr
+      pr: ${{ github.event.workflow_run.pull_requests[0].number || inputs.pr }}
+    secrets:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+```
+
+`workflow_run` fires only from the workflow file on the default branch, so it acts once merged. A public repo can call only a public reusable workflow, so this repo must be public first; a private copy of a target in the org can call it now, if this repo's Settings → Actions → General → Access allows repositories in the organization, with a `SHFV_TOKEN` secret that can read this repo (for the checkouts).
+
+**Telemetry:** `shfv collect --repo <owner/name> --target <target>` reads the caller's runs through the API and appends one row per run to `data/live/<target>.jsonl`: the decision (skips too), and for a run that repaired, verdict, outcomes, cost, time and versions. It flags runs that crashed (no decisions, or picked with no report) and `gate-unavailable`.
+- **The bot's patches are kept.** The artifacts expire after 90 days, and the main shadow-mode question is whether the bot's fix matched what the human merged. So each run's `repair.patch` is saved as `data/live/<target>/patches/<pr>-<head8>-<run id>.patch`. The row records `patch_path` and `patch_sha256`, and has what that comparison needs: target, PR, its head and base (`pr_head`, `base_commit`, `base_tip`), and every theorem with its outcome.
+- **No row without its patch.** A run whose report has a repair but whose artifact has no matching `repair.patch` stops the collection.
+- **Never rewritten.** Collecting again adds only new runs, and never rewrites a patch file.
+- **No prompts or transcripts.** Only the `decisions-…` and `live-…` artifacts are downloaded, and the target's artifacts hold neither.
+- **Artifact contents are untrusted** (they are the target repo's).
+  - Downloads are capped at 50 MB per artifact and 20 MB per file inside it; anything larger stops the collection.
+  - A patch over 1 MB keeps only its hash, since large files stay out of git.
+  - A patch is written only if the PR number is an integer and the head a full commit SHA, so a crafted name can't place a file outside `patches/`. Otherwise only the hash is kept, and the row is flagged.
+
+For the pilot, collection is manual: run it weekly (at the latest every 90 days, before artifacts expire) and commit `data/live/`.
+
 ## What a run produces
 
 - **Job summary** (the run's page): the runner (cores, memory, disk), resource use per pipeline stage, any OOM kills, disk use at the end, and `report.md`.
-- **Artifact `run-record-…`**: the run directory, `runs/<case>/<run id>/` (CLI.md section 5): `report.json`, `report.md`, and each attempt's prompt and transcript. Transcripts are model output; review them before sharing.
-- **Artifact `runner-stats-…`**: the pipeline's output (`shfv.log`), the resource samples every 5 seconds (`samples.csv`), the summary (`resources.md`), and the replay's build logs.
+- **Artifact `run-record-…`**: the run directory, `runs/<case>/<run id>/` (CLI.md section 5): `report.json`, `report.md`, and each attempt's prompt and the bot's `suggestion.patch`. **Raw model output is left out by default**: each attempt's `transcript.jsonl` and, for Codex, its `codex-home/` (session state). Dispatch with `upload_transcripts` on to include them; review them before sharing.
+- **Artifact `runner-stats-…`**: the pipeline's output (`shfv.log`, which shows the agent's tool calls one line each, not its messages), the resource samples every 5 seconds (`samples.csv`), the summary (`resources.md`), and the replay's build logs.
 
-Artifacts are kept for 90 days. The repo is private, so only people with access to it can see them.
+Artifacts are kept for 90 days. Anyone can download a public repo's artifacts, which is why transcripts are opt-in. A target repo's runs of `pr-repair.yml` never upload prompts or transcripts at all (`record: reports`).
 
 ## Replay store cache
 

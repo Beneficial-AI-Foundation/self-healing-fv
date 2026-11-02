@@ -186,6 +186,7 @@ def test_success_in_dependency_order(toy_case, monkeypatch):
     assert [c[0] for c in agent.calls] == ["double_spec", "double_even"]  # leaves first, from base `uses`
     assert agent.calls[1][1] == ["double_spec"] and agent.calls[1][2] == []  # prompt context is accurate
     assert rep["gate"]["verdict"] == "accepted", rep["gate"]
+    assert rep["gate"]["reference"] == "base"  # replay keeps the base as the reference (§4.9)
     assert outcomes(rep) == {"double_spec": "repaired", "double_even": "repaired"}
     assert rep["verdict"] == "accepted"
     assert rep["audit"]["outcome"] == "no-change", rep["audit"]  # only extracted code and proofs changed
@@ -521,8 +522,37 @@ def toy_live(tmp_path_factory):
         f.write("\ndef oops : Nat := missing_a\n\ndef oops2 : Nat := missing_b\n")
     git(repo, "commit", "-qam", "re-extract with a missing name")
     bad = git(repo, "rev-parse", "HEAD")
+    # branch `model`: the re-extraction plus the PR's own refresh of the trusted model (an axiom
+    # removed, another added) and a statement change of an unbroken theorem (DESIGN.md §4.9).
+    git(repo, "checkout", "-qb", "model", head)
+    (repo / "Toy/FunsExternal.lean").write_text("-- refreshed\naxiom ext_seed_v2 : Nat\n")
+    (repo / "Toy/Specs.lean").write_text((repo / "Toy/Specs.lean").read_text().replace(
+        "theorem triple_spec (x : Nat) : triple x = 3 * x", "theorem triple_spec (x : Nat) : triple x = x * 3"))
+    git(repo, "commit", "-qam", "re-extract and refresh the model")
+    model = git(repo, "rev-parse", "HEAD")
+    # branch `axiom`: the re-extraction plus an axiom the PR adds to the trusted model, which a repair can use.
+    git(repo, "checkout", "-qb", "axiom", head)
+    with open(repo / "Toy/FunsExternal.lean", "a") as f:
+        f.write("\naxiom sum_pair (x : Nat) : List.sum [x, x] = x + x\n")
+    (repo / "Toy/Specs.lean").write_text("import Toy.FunsExternal\n" + (repo / "Toy/Specs.lean").read_text()
+                                         + "\ntheorem pair_two : List.sum [2, 2] = 2 + 2 := sum_pair 2\n")
+    git(repo, "commit", "-qam", "re-extract, with a new model axiom the PR uses")
+    axiom = git(repo, "rev-parse", "HEAD")
+    # branch `cheat`: the re-extraction plus an axiom outside the trusted models that nothing uses.
+    git(repo, "checkout", "-qb", "cheat", head)
+    with open(repo / "Toy/Specs.lean", "a") as f:
+        f.write("\naxiom pr_cheat : False\n")
+    git(repo, "commit", "-qam", "re-extract, and an unused axiom")
+    cheat = git(repo, "rev-parse", "HEAD")
+    # branch `added`: the re-extraction plus a theorem the PR adds whose proof fails.
+    git(repo, "checkout", "-qb", "added", head)
+    with open(repo / "Toy/Specs.lean", "a") as f:
+        f.write("\ntheorem pr_new (x : Nat) : double x = x + x := by\n  unfold double\n  omega\n")
+    git(repo, "commit", "-qam", "re-extract, and a new theorem")
+    added = git(repo, "rev-parse", "HEAD")
     git(repo, "checkout", "-q", "main")
-    return {"root": root, "repo": repo, "base": base, "head": head, "ok": ok, "bad": bad}
+    return {"root": root, "repo": repo, "base": base, "head": head, "ok": ok, "bad": bad, "model": model,
+            "axiom": axiom, "cheat": cheat, "added": added}
 
 
 def run_live(toy_live, monkeypatch, head, script, label):
@@ -562,6 +592,75 @@ def test_live_change_is_repaired_like_a_replay(toy_live, monkeypatch):
     assert all(e.get("bot_diff") for e in rep["repairs"])
     assert f"[#12 \"Re-extract\"](https://github.com/example/toy/pull/12) at `{toy_live['head'][:8]}`" in md
     assert "Changes made by the PR itself" in md and "failing proofs stubbed" in md
+    assert rep["gate"]["reference"] == "head"
+    assert "The gate checked only the bot's edits, against this PR as written.** The PR itself changed no" in md
+
+
+def test_live_gate_judges_the_bots_edits_against_the_pr_as_written(toy_live, monkeypatch):
+    """The PR itself removes an axiom of the trusted model and changes a statement: against the base
+    the case would be ineligible; against the head (§4.9) the bot's proof repairs are accepted, and
+    the PR's own changes are the audit's, shown for a reviewer."""
+    rep, md, agent = run_live(toy_live, monkeypatch, toy_live["model"], GOOD, "model")
+    assert rep["gate"]["reference"] == "head" and rep["verdict"] == "accepted", rep["gate"]["failed_checks"]
+    assert outcomes(rep) == {"double_spec": "repaired", "double_even": "repaired"}
+    assert not rep["broken"]["missing_frozen"]  # what the PR removed is not frozen
+    a = rep["audit"]
+    assert [x["decl"] for x in a["statements_changed"]] == ["triple_spec"] and "ext_seed" in [x["decl"] for x in a["removed"]]
+    assert a["trusted_models_changed"] == ["Toy/FunsExternal.lean"]
+    head = md.split("| | |")[0]  # up front, before the table
+    assert "The gate checked only the bot's edits, against this PR as written." in head and "A reviewer should." in head
+    assert "the gate did not either" in md and "(against the PR as written)" in md
+
+
+def test_a_repair_resting_on_an_axiom_the_pr_added_is_flagged(toy_live, monkeypatch):
+    """Accepted against the PR as written (the head uses the axiom), and flagged per theorem in the
+    report, the PR comment (both modes) and the strict counts: an unsound PR axiom would otherwise let a
+    repair prove anything with only a JSON field to show for it (DESIGN.md §4.9)."""
+    from shfv import comment, human_compare
+    from tests.test_comment import THEIRS, FakeGraphQL, c
+    script = {"double_spec": ("done", ":= by\n  unfold double\n  rw [sum_pair]\n  omega", None),
+              "double_even": GOOD["double_even"]}
+    rep, md, _ = run_live(toy_live, monkeypatch, toy_live["axiom"], script, "axiom")
+    assert rep["verdict"] == "accepted" and rep["gate"]["reference"] == "head"  # the verdict is unchanged
+    assert rep["gate"]["axioms_beyond_base_version"]["double_spec"] == ["sum_pair"]
+    assert "this PR added or newly relies on.**" in md.split("| | |")[0]  # up front, with the other flags
+    assert "- `double_spec`: `sum_pair` (added by this PR)" in md
+    row = next(r for r in human_compare.rows(rep) if r["theorem"] == "double_spec")
+    assert row["new_axioms"] is True
+    s = human_compare.summarize([{**rep, "human_fix": [{"theorem": "double_spec"}]}],
+                                [{**r, "human_group": "kept the statement"} for r in human_compare.rows(rep)])
+    assert s["new_axioms"] >= 1 and s["strict"] == s["repaired"] - s["new_axioms"]
+    sec = comment.section(rep, "https://run", "live-toy-x", comment.LIMIT)
+    for header, existing in (("sorry-delta", [c("s", f"## Sorry delta\n{THEIRS}")]), (comment.OWN, [])):
+        api = FakeGraphQL(existing)
+        comment.post(api, "example/toy", 12, sec, header)
+        assert "`sum_pair` (added by this PR)" in api.comments[-1]["body"], header
+
+
+def test_an_axiom_the_pr_adds_outside_the_models_is_a_finding_and_unusable(toy_live, monkeypatch):
+    """Review findings 1 and 2: `axiom pr_cheat : False` in a spec file, used by nothing. The audit
+    reports it (the report must not say the PR changed no trust assumption), and a repair resting
+    on it is rejected."""
+    rep, md, _ = run_live(toy_live, monkeypatch, toy_live["cheat"], GOOD, "cheat")
+    assert rep["verdict"] == "accepted" and rep["reference"] == "head"
+    assert rep["audit"]["outcome"] == "changed" and rep["audit"]["axioms_added"] == ["pr_cheat"]
+    top = md.split("| | |")[0]
+    assert "The changes the PR itself made are listed below" in top and "The PR itself changed no" not in top
+    assert "**Axioms added** (1, wherever declared, used or not): `pr_cheat`" in md
+    script = {"double_spec": ("done", ":= pr_cheat.elim", None), "double_even": GOOD["double_even"]}
+    rep, md, _ = run_live(toy_live, monkeypatch, toy_live["cheat"], script, "cheat-used")
+    assert rep["verdict"] != "accepted" and "G2" in rep["gate"]["failed_checks"]
+
+
+def test_a_theorem_the_pr_added_whose_proof_fails_is_escalated(toy_live, monkeypatch):
+    """Review finding 3: it is stubbed but has no version before the PR, so it is not repaired, and
+    a result that still carries its stub is never accepted."""
+    rep, md, agent = run_live(toy_live, monkeypatch, toy_live["added"], GOOD, "added")
+    assert rep["verdict"] == "escalated" and not agent.calls and "gate" not in rep
+    [e] = [e for e in rep["escalations"] if e["outcome"] == "added-by-pr"]
+    assert e["theorem"] == "pr_new" and e["file"] == "Toy/Specs.lean" and e["errors"]
+    assert all(r["outcome"] == "blocked-on" and "this PR added" in r["reason"] for r in rep["repairs"])
+    assert "added by this PR, its proof fails" in md and rep["reference"] == "head"
 
 
 def test_live_head_that_builds_has_nothing_to_repair(toy_live, monkeypatch):
@@ -580,6 +679,17 @@ def test_live_head_whose_extracted_code_does_not_build_escalates(toy_live, monke
     assert e["outcome"] == "extraction-setup" and e["file"] == "Toy/Funs.lean" and len(e["errors"]) == 2
     assert all(x.startswith("line ") for x in e["errors"]) and rep["toolchain"]
     assert "the extracted code does not build" in md and "`Funs.lean`]" in md
+
+
+def test_repo_paths_become_project_paths_in_every_stub_list():
+    """A target whose Lake project sits inside the repo (SymCrypt: SymCRust/lean/): the analysis
+    names files from the repo root, the gate and the pipeline from the project's."""
+    rec = {"broken_proofs": ["SymCRust/lean/A.lean::t"], "stubbed": ["SymCRust/lean/A.lean::t", "SymCRust/lean/B.lean::u"],
+           "broken_proofs_detail": [{"file": "SymCRust/lean/A.lean"}]}
+    out = pipeline.repo_to_project(rec, "SymCRust/lean")
+    assert out["stubbed"] == ["A.lean::t", "B.lean::u"] and out["broken_proofs"] == ["A.lean::t"]
+    assert out["broken_proofs_detail"] == [{"file": "A.lean"}]
+    assert "stubbed" not in pipeline.repo_to_project({"broken_proofs": []}, "SymCRust/lean")  # older analyses
 
 
 def test_written_sorry_and_stub_discount(tmp_path):

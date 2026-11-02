@@ -10,12 +10,18 @@ snapshot with a snapshot of the change's head, model-free, and reports:
   - definitions whose body changed;
   - frozen declarations removed or renamed, and declarations added (information);
   - axiom-closure changes per declaration (new axioms, newly depending on `sorry`);
-  - trusted-model files whose text changed.
+  - trusted-model files whose text changed;
+  - axioms the change adds anywhere, and libraries it adds (findings, not information).
 
 Outcomes: `no-change` (both snapshots complete, no differences), `changed` (at least one
 difference), `incomplete` (some declaration could not be compared, e.g. the head does not build;
 an incomplete audit never reports "no changes"). Changes to extracted code are not findings:
 every extraction update makes them.
+
+With the head as the gate's reference (live runs, §4.9, decided 2026-10-30) the gate judges only
+the bot's edits, and this audit is where the change's own statement and trust changes appear: it
+reports them for a reviewer and decides nothing. Root modules the base snapshot left out (a library
+the change adds) are listed in `roots_added`.
 """
 from __future__ import annotations
 
@@ -81,7 +87,11 @@ def audit(cfg: dict, base: dict, head: dict) -> dict:
     paths = set(cfg["protected"].get("trusted_models", [])) | set(base.get("sources", {})) | set(head.get("sources", {}))
     trusted_changed = sorted(p for p in paths if protected(cfg, p) == "trusted_models"
                              and base.get("sources", {}).get(p) != head.get("sources", {}).get(p))
-    findings = bool(statements or bodies or removed or axioms or trusted_changed)
+    # An axiom the change adds is a trust change wherever it is declared, used or not (a PR can add
+    # `axiom pr_cheat : False` outside the trusted models); so is a library it adds (§4.9).
+    axioms_added = [n for n in added if h[n].get("kind") == "axiom"]
+    roots_added = base.get("absent_roots", [])
+    findings = bool(statements or bodies or removed or axioms or trusted_changed or axioms_added or roots_added)
     if findings:
         outcome = "changed"  # differences found are real even if coverage is incomplete
     elif problems or not_compared:
@@ -93,8 +103,10 @@ def audit(cfg: dict, base: dict, head: dict) -> dict:
             "not_compared": not_compared[:200], "not_compared_n": len(not_compared),
             "statements_changed": statements, "definitions_changed": bodies,
             "removed": removed, "axioms_changed": axioms, "added": added[:500], "added_n": len(added),
+            "roots_added": roots_added, "axioms_added": axioms_added[:500],
             "trusted_models_changed": trusted_changed,
             "summary": {"statements_changed": len(statements), "definitions_changed": len(bodies),
                         "removed": len(removed), "axioms_changed": len(axioms),
                         "new_sorry": sum("sorryAx" in a["added"] for a in axioms),
-                        "trusted_models_changed": len(trusted_changed), "added": len(added)}}
+                        "trusted_models_changed": len(trusted_changed), "added": len(added),
+                        "axioms_added": len(axioms_added), "roots_added": len(roots_added)}}

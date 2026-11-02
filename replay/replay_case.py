@@ -632,6 +632,10 @@ def analyze_broken(broken: Path, project: Path, cfg: dict, miner: Miner, logdir:
 
     # A declaration whose statement fails is statement-broken, not (also) a proof break.
     stmt_broken = {f"{e['file']}::{e['decl']}" for e in stmt_errors}
+    # Every proof the broken tree has as `:= by sorry` because of this analysis, whatever the reason:
+    # breaks, statement-broken theorems stubbed before their statement failed, and all proofs of a
+    # hung file. The gate's head reference needs all of them (`gate compare --stubs`, DESIGN.md §4.9).
+    stubbed = set(sorried) | {f"{t['file']}::{n}" for t in timeouts for n in t["sorried"]}
     sorried = {k: v for k, v in sorried.items() if k not in stmt_broken}
     failing_modules = {mod_of.get(e["file"], e["file"]) for e in stmt_errors + file_errors + header_errors}
     blocked = blocked_modules(project, mods, failing_modules)
@@ -643,6 +647,7 @@ def analyze_broken(broken: Path, project: Path, cfg: dict, miner: Miner, logdir:
         "broken_green_after_sorry": bool(rounds and rounds[-1]["ok"]),
         "broken_proofs": sorted(sorried),
         "broken_proofs_detail": list(sorried.values()),
+        "stubbed": sorted(stubbed),
         "statement_errors": stmt_errors,
         "cascades": cascades,  # kernel errors explained by an upstream failure, not breaks
         "header_errors": header_errors,  # attribute / set_option lines of a declaration

@@ -191,6 +191,8 @@ class Run:
         # Live input (§3.6, shfv/live.py): a case record from base and head, no human fix; the head's
         # analysis takes the place of the replay record once prepare() has built it.
         self.live = live is not None
+        # What the gate holds the bot to (§4.9): live, the PR as written; replay, the base, as before.
+        self.reference = "head" if self.live else "base"
         self.record, self.replay = (live, {}) if self.live else load_case(case_id, replay_path)
         self.generated = bool(self.record.get("generated"))
         # The Lake project inside a workspace tree, and inside the repo (records use repo paths).
@@ -283,11 +285,14 @@ class Run:
         # The head's own sources: the failing proofs as the PR wrote them (no stubs).
         self.orig = self.case_dir / "head" / self.wp
 
-    def snapshot(self, name: str, tree: Path) -> Path:
+    def snapshot(self, name: str, tree: Path, allow_absent_roots: bool = False) -> Path:
         """A gate snapshot of `tree`, reused only if it was made by this gate version, for this
-        target config, from exactly these inputs (toolchain, Lake files, every Lean source)."""
+        target config, from exactly these inputs (toolchain, Lake files, every Lean source).
+        `allow_absent_roots`: the live base, which is not the gate's reference there (§4.9) and may
+        lack a library the change adds."""
         out = self.case_dir / "snapshots" / f"{name}.json"
-        want = json.loads(gate("tree-hash", "--config", str(self.config), "--tree", str(tree)).stdout)
+        flag = ["--allow-absent-roots"] if allow_absent_roots else []
+        want = json.loads(gate("tree-hash", "--config", str(self.config), "--tree", str(tree), *flag).stdout)
         if out.exists():
             try:
                 head = json.loads(out.read_text())
@@ -297,7 +302,7 @@ class Run:
                 pass
         out.parent.mkdir(parents=True, exist_ok=True)
         gate("snapshot", "--config", str(self.config), "--tree", str(tree), "--out", str(out),
-             "--log", str(out.with_suffix(".build.log")))
+             "--log", str(out.with_suffix(".build.log")), *flag)
         return out
 
     # ------------------------------------------------------------------ S4
@@ -572,14 +577,27 @@ class Run:
         res = {"diff": d.read_text(), "scope": scope}
         if not scope["ok"] and not past_scope:
             res["verdict"] = {"verdict": "rejected", "failed_checks": ["G0"], "checks": {"G0": scope},
-                              "theorems": [], "built": False, "eligible": None}
+                              "theorems": [], "built": False, "eligible": None, "reference": self.reference}
             return res
         C = self.scratch / f"{label}.C.json"
         gate("snapshot", "--config", str(self.config), "--tree", str(self.broken_root), "--apply", str(d),
              "--workdir", str(self.scratch / f"{label}-gate-tree"), "--clean", "--out", str(C),
              "--log", str(self.scratch / f"{label}.build.log"))
         V = self.scratch / f"{label}.V.json"
-        gate("compare", *common, "--candidate", str(C), "--out", str(V), check=False)  # 2 = gate-unavailable
+        # Live, the gate holds the bot to the PR as written, not to the base (§4.9, decided 2026-10-30).
+        # In the stubbed state a stub looks like the head's own `sorry`, so the gate finds the stubs by
+        # comparing with the head as committed; S2's own list is a cross-check.
+        live = []
+        if self.reference == "head":
+            stubs = self.scratch / "stubs.json"
+            stubs.write_text(json.dumps(self.stubbed()))
+            live = ["--head-tree", str(self.case_dir / "head"), "--stubs", str(stubs)]
+        if getattr(self, "input_hashes", None):
+            hashes = self.scratch / f"{label}.input-hashes.json"
+            hashes.write_text(self.input_hashes)
+            live += ["--expect-hashes", str(hashes)]
+        gate("compare", *common, "--candidate", str(C), "--out", str(V), "--reference", self.reference, *live,
+             check=False)  # 2 = gate-unavailable
         if not V.exists():
             raise GateUnavailable("gate compare produced no verdict")
         res["verdict"] = json.loads(V.read_text())
@@ -588,6 +606,11 @@ class Run:
         if not self.keep:
             shutil.rmtree(self.scratch / f"{label}-gate-tree", ignore_errors=True)
         return res
+
+    def stubbed(self) -> list[str]:
+        """Every proof S2 stubbed (`file::declaration`): breaks, and all proofs of a hung file.
+        Analyses made before the record had `stubbed` list the breaks only."""
+        return self.replay.get("stubbed", self.replay.get("broken_proofs", []))
 
     def human_fix_tree(self) -> Path:
         """The human fix as a candidate: the stubbed broken state with the audited source files of
@@ -635,7 +658,10 @@ class Run:
                                   "auth": getattr(self.agent, "auth", None), "tool_profile": self.profile,
                                   "turns_unit": getattr(self.agent, "turns_unit", None),
                                   "unenforced_caps": self.unenforced_caps},
-                        "gate_version": gate_version, "repairs": [], "escalations": []}
+                        "gate_version": gate_version,
+                        # What the gate holds the bot to (§4.9), also when no gate verdict is recorded
+                        # (a G0 rejection, an ineligible case).
+                        "reference": self.reference, "repairs": [], "escalations": []}
         try:
             t0 = time.time()
             self.prepare()
@@ -667,9 +693,13 @@ class Run:
                 self.p.step("escalate: the extracted code does not build at the head → extraction-setup")
                 raise _Done
             t0 = time.time()
-            B = self.snapshot("B", self.base_root)
+            B = self.snapshot("B", self.base_root, allow_absent_roots=bool(self.live))
             K = self.snapshot("K", self.broken_root)
             self.snapshot_paths = (B, K)
+            # The gate's inputs as they are before any agent runs, kept in memory (not in a file the agent
+            # could reach) and checked by `compare --expect-hashes`: a cheap tamper check (§9.3).
+            self.input_hashes = gate("input-hashes", "--config", str(self.config), "--base", str(B), "--broken", str(K),
+                                     *(["--head-tree", str(self.case_dir / "head")] if self.live else [])).stdout
             self.timing["snapshots_s"] = time.time() - t0
             t0 = time.time()
             # Live, the head is the change itself; it does not build, so the audit reads its stubbed
@@ -687,8 +717,13 @@ class Run:
             broken = json.loads((self.scratch / "broken-set.json").read_text())["info"]["broken_set"]
             # Mirrors the gate's eligibility rule (gates/compare.py), which decides: tactic-added
             # declarations a stub removed are not frozen; any other missing one makes the case ineligible.
-            frozen = {n: r for n, r in Bj["records"].items() if "error" not in r
-                      and not (r.get("written") is False and n not in Kj["records"])}
+            # Live, the frozen set is the head's (§4.9): what the PR removed is not frozen, and only
+            # a declaration that does not elaborate in the stubbed head makes the case ineligible.
+            if self.live:
+                frozen = dict(Kj["records"])
+            else:
+                frozen = {n: r for n, r in Bj["records"].items() if "error" not in r
+                          and not (r.get("written") is False and n not in Kj["records"])}
             observed = sum(1 for n in frozen if n in Kj["records"] and "error" not in Kj["records"][n])
             missing_frozen = sorted(n for n in frozen if n not in Kj["records"] or "error" in Kj["records"][n])
             stmt_broken = []
@@ -706,6 +741,17 @@ class Run:
             # The replay may have stubbed a theorem before finding that its statement fails (round 2):
             # that theorem is statement-broken, never a proof-repair target.
             sb = {(x["file"], x["key"]) for x in stmt_broken}
+            # Live: a proof S2 stubbed that is not in the broken set (a theorem the PR added, with no base
+            # version) is not repaired, and its stub would stay in any candidate: the gate makes the case
+            # ineligible (§4.9, rule 6), so the report escalates it and nothing is spent.
+            in_set = {(b["file"], b["key"].split("#", 1)[0]) for b in broken} | sb
+            detail = {f"{d['file']}::{d['decl']}": d for d in self.replay.get("broken_proofs_detail", [])}
+            added_stubs = [s for s in self.stubbed() if self.live and tuple(s.split("::", 1)) not in in_set]
+            for s in added_stubs:
+                f, key = s.split("::", 1)
+                d = detail.get(s, {})
+                report["escalations"].append({"theorem": key, "file": f, "line": d.get("line"), "outcome": "added-by-pr",
+                                              "errors": [d["msg"]] if d.get("msg") else []})
             broken = [b for b in broken if (b["file"], b["key"]) not in sb]
             report["broken"] = {"proofs": [b["name"] for b in broken], "statements": [s["name"] for s in stmt_broken],
                                 "frozen_inventory": len(frozen), "observed_in_broken": observed,
@@ -731,14 +777,24 @@ class Run:
                         report["repairs"].append({"theorem": b["name"], "file": b["file"], "decl": b["key"],
                                                   "attempts": [], "outcome": "blocked-on",
                                                   "reason": "case is ineligible: a statement must change first"})
+            elif added_stubs and not self.attempt_anyway:
+                why = (f"{len(added_stubs)} theorem(s) this PR added have failing proofs, and the bot repairs only "
+                       f"theorems that have a version before the PR (e.g. {added_stubs[0].split('::', 1)[1]})")
+                self.p.step(f"ineligible: {why}; no repair attempted")
+                for b in ordered:
+                    report["repairs"].append({"theorem": b["name"], "file": b["file"], "decl": b["key"],
+                                              "attempts": [], "outcome": "blocked-on",
+                                              "reason": f"case is ineligible: {why}"})
+                targets = []
             elif (report["broken"]["unobserved_modules"] or missing_frozen) and not self.attempt_anyway:
                 # Ineligible (§3.3 S2): modules of the broken state cannot be checked (file-level errors,
                 # e.g. a removed import) or frozen declarations are missing from it, so under complete-case
                 # acceptance nothing could be accepted. Spend nothing on repairs; the report says why.
                 bad = report["broken"]["unobserved_modules"]
                 why = (f"{len(bad)} module(s) of the broken state cannot be checked (e.g. {bad[0]})" if bad else
-                       f"{len(missing_frozen)} frozen declaration(s) are missing from the broken state "
-                       f"(e.g. {missing_frozen[0]})")
+                       f"{len(missing_frozen)} frozen declaration(s) "
+                       + ("do not elaborate at the head" if self.live else "are missing from the broken state")
+                       + f" (e.g. {missing_frozen[0]})")
                 self.p.step(f"ineligible: {why}; no repair attempted")
                 for b in ordered:
                     report["repairs"].append({"theorem": b["name"], "file": b["file"], "decl": b["key"],
@@ -831,10 +887,15 @@ class Run:
         if stubbed_head:
             discount_stub_sorry(a, written_sorry(self.base, self.orig, self.cfg["protected"]["extracted"]))
         explain_hidden(a, B, H)
+        mark_now_extracted(a, self.broken_root, self.cfg["protected"]["extracted"])
         s = a["summary"]
         detail = (f"{s['statements_changed']} statement(s), {s['definitions_changed']} definition(s) changed, "
                   f"{s['removed']} removed; {s['new_sorry']} newly depend on sorry; "
-                  f"{s['trusted_models_changed']} trusted model(s) changed") if a["outcome"] == "changed" else \
+                  f"{s['trusted_models_changed']} trusted model(s) changed"
+                  + (f"; {s['axioms_added']} axiom(s) added" if s.get("axioms_added") else "")
+                  + (f"; {s['roots_added']} librar{'y' if s['roots_added'] == 1 else 'ies'} added"
+                     if s.get("roots_added") else "")) \
+            if a["outcome"] == "changed" else \
             "; ".join(a.get("coverage_problems", [])[:2])
         self.p.step(f"audit of the change itself: {a['outcome']}" + (f" · {detail}" if detail else ""))
         return a
@@ -969,8 +1030,9 @@ def repo_to_project(replay: dict, lean_root: str) -> dict:
     pre = lean_root.rstrip("/") + "/"
     fix = lambda p: p[len(pre):] if isinstance(p, str) and p.startswith(pre) else p
     out = dict(replay)
-    for k in ("broken_proofs", "statement_broken", "definition_broken"):
-        out[k] = [fix(x) for x in replay.get(k, [])]
+    for k in ("broken_proofs", "statement_broken", "definition_broken", "stubbed"):
+        if k in replay:  # an analysis from before `stubbed` existed keeps its fallback (Run.stubbed)
+            out[k] = [fix(x) for x in replay[k]]
     for k in ("broken_proofs_detail", "statement_errors"):
         out[k] = [{**d, "file": fix(d.get("file"))} for d in replay.get(k, [])]
     return out
@@ -1152,6 +1214,26 @@ def explain_hidden(audit: dict, B: Path, H: Path) -> None:
                                                    h.get(x["decl"], {}).get("canon", ""))
 
 
+def mark_now_extracted(audit: dict, head: Path, extracted: list[str]) -> None:
+    """Add `now_extracted` (the file) to the audit's removed declarations that the change's
+    extracted code now defines: a trusted model (often an axiom) replaced by extracted Rust, e.g.
+    libsignal-verify PR 17's `SignalMessage.compute_mac`. Matched by name in the source; display
+    only (the report's account of the change's trust changes), not used by any check."""
+    removed = audit.get("removed") or []
+    if not removed:
+        return
+    defined: dict[str, str] = {}
+    for rel in extracted:
+        if (head / rel).is_file():
+            for name in parse_decls((head / rel).read_text(errors="replace")):
+                defined.setdefault(name.split("#")[0], rel)
+    for x in removed:
+        d = x["decl"]
+        hit = defined.get(d) or next((f for n, f in defined.items() if "." in n and d.endswith("." + n)), None)
+        if hit:
+            x["now_extracted"] = hit
+
+
 def written_sorry(base: Path, head: Path, extracted: list[str]) -> list[str]:
     """`file::decl` of declarations whose source at `head` contains `sorry` and did not at `base`
     (new declarations included): the `sorry` a live change wrote itself, read from the text."""
@@ -1188,8 +1270,8 @@ def discount_stub_sorry(audit: dict, written: list[str]) -> None:
     audit["axioms_changed"], audit["sorry_from_stubs"], audit["sorry_written"] = kept, n, written
     s = audit.get("summary", {})
     s.update(axioms_changed=len(kept), new_sorry=0, sorry_written=len(written))
-    findings = any(audit.get(k) for k in ("statements_changed", "definitions_changed", "removed",
-                                           "axioms_changed", "trusted_models_changed", "sorry_written"))
+    findings = any(audit.get(k) for k in ("statements_changed", "definitions_changed", "removed", "axioms_changed",
+                                           "trusted_models_changed", "sorry_written", "axioms_added", "roots_added"))
     if findings:
         audit["outcome"] = "changed"
     elif audit.get("outcome") == "changed":
@@ -1203,9 +1285,14 @@ def summarize_gate(g: dict) -> dict:
         checks[cid] = {"ok": c.get("ok"), "status": c.get("status"), "required": c.get("required"),
                        "violations": c.get("violations", [])[:50],
                        "info": {k: x for k, x in c.get("info", {}).items() if k not in ("broken_set",)}}
-    return {"verdict": v.get("verdict"), "failed_checks": v.get("failed_checks", []), "eligible": v.get("eligible"),
+    return {"verdict": v.get("verdict"), "reference": v.get("reference"),
+            "failed_checks": v.get("failed_checks", []), "eligible": v.get("eligible"),
             "unavailable": v.get("unavailable", []), "inherited_sorry": v.get("inherited_sorry", {}),
             "kernel_replay_incomplete": v.get("kernel_replay_incomplete", []), "native_code": v.get("native_code", []),
+            # Flag (live, §4.9; report only): repaired theorems resting on axioms their version before
+            # the PR did not use. Lifted from G2's info like the gate's own flags: on `accepted` only.
+            "axioms_beyond_base_version": ((v.get("checks", {}).get("G2") or {}).get("info") or {}).get(
+                "axioms_beyond_base_version", {}) if v.get("verdict") == "accepted" else {},
             "built": v.get("built"), "theorems": v.get("theorems", []), "heartbeats": v.get("heartbeats", []),
             "checks": checks, "diff": g["diff"], "gate_version": v.get("gate_version"),
             "candidate_build_seconds": g.get("candidate_build_seconds")}

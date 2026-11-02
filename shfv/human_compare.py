@@ -29,7 +29,7 @@ CSV_FIELDS = ["case", "pr", "run_id", "theorem", "short", "file", "kind", "outco
               "human_changed_statement", "human_removed", "human_added_sorry", "human_edited_proof",
               "base_proof_lines", "human_proof_lines", "bot_proof_lines", "human_edit_lines", "bot_edit_lines",
               "similarity_to_human", "possible_memorization", "inherited_sorry", "kernel_replay_incomplete",
-              "native_code", "helpers_reported"]
+              "native_code", "new_axioms", "helpers_reported"]
 
 
 def find_reports(paths: list[Path]) -> list[Path]:
@@ -101,6 +101,7 @@ def rows(rep: dict) -> list[dict]:
     inherited = set(g.get("inherited_sorry") or {}) if accepted else set()
     replay_modules = {k["module"] for k in g.get("kernel_replay_incomplete") or []} if accepted else set()
     native = set(g.get("native_code") or []) if accepted else set()
+    new_axioms = set(g.get("axioms_beyond_base_version") or {}) if accepted else set()  # live (DESIGN.md §4.9)
     has_fix = "human_fix" in rep and not (rep.get("inputs") or {}).get("generated")
     items = rep["repairs"] + rep["escalations"]
     short = dict(zip((e["theorem"] for e in items), report_mod.distinct_short_names([e["theorem"] for e in items])))
@@ -136,6 +137,7 @@ def rows(rep: dict) -> list[dict]:
             "kernel_replay_incomplete": any(is_module_file(e["file"], m) for m in replay_modules)
             if outcome == "repaired" else None,
             "native_code": e["theorem"] in native if outcome == "repaired" else None,
+            "new_axioms": e["theorem"] in new_axioms if outcome == "repaired" else None,
             # Model output (§7.4): advisory, used only to explain proof sizes.
             "helpers_reported": len(helpers) if isinstance(helpers, list) else None,
         })
@@ -157,7 +159,8 @@ def summarize(reps: list[dict], table: list[dict]) -> dict:
     compared = [r for r in agent_diff if r["similarity_to_human"] is not None]
     sims = [r["similarity_to_human"] for r in compared]
     sized = [r for r in agent if r["bot_proof_lines"] is not None and r["human_proof_lines"] is not None]
-    flagged = [r for r in repaired if r["inherited_sorry"] or r["kernel_replay_incomplete"] or r.get("native_code")]
+    flagged = [r for r in repaired if r["inherited_sorry"] or r["kernel_replay_incomplete"] or r.get("native_code")
+               or r.get("new_axioms")]
     matrix = Counter((r["bot_group"], r["human_group"]) for r in t)
     with_fix = [r for r in reps if "human_fix" in r and not (r.get("inputs") or {}).get("generated")]
     return {
@@ -170,6 +173,7 @@ def summarize(reps: list[dict], table: list[dict]) -> dict:
         "inherited_sorry": sum(1 for r in repaired if r["inherited_sorry"]),
         "kernel_replay_incomplete": sum(1 for r in repaired if r["kernel_replay_incomplete"]),
         "native_code": sum(1 for r in repaired if r.get("native_code")),
+        "new_axioms": sum(1 for r in repaired if r.get("new_axioms")),
         "agent_with_diff": len(agent_diff), "compared": len(compared),
         "human_proof_unchanged": sum(1 for r in agent_diff if r["human_edited_proof"] is False),
         "identical": sum(1 for s in sims if s == 1.0),
@@ -232,7 +236,8 @@ def render(reps: list[dict], table: list[dict]) -> str:
             f"{s['by_agent']} by the agent, {s['by_sweep']} by the no-model sweep. "
             f"{of(s['strict'], s['repaired'], 'repairs carry no flag')} "
             f"(inherited `sorry`: {s['inherited_sorry']}; kernel replay incomplete: {s['kernel_replay_incomplete']}"
-            + (f"; native code: {s['native_code']}" if s["native_code"] else "") + ").",
+            + (f"; native code: {s['native_code']}" if s["native_code"] else "")
+            + (f"; axioms new to the theorem: {s['new_axioms']}" if s.get("new_axioms") else "") + ").",
             f"- **Agent edit vs human edit:** {of(s['agent_with_diff'], s['by_agent'], 'agent repairs')} have a proof "
             f"diff in the record. Of those, the human left the proof unchanged in {s['human_proof_unchanged']} "
             f"(the human fixed something else), so {s['compared']} can be compared: "
@@ -306,6 +311,7 @@ def render(reps: list[dict], table: list[dict]) -> str:
                                  ("inherited sorry", x["inherited_sorry"]),
                                  ("kernel replay incomplete", x["kernel_replay_incomplete"]),
                                  ("native code", x.get("native_code")),
+                                 ("axioms new to the theorem", x.get("new_axioms")),
                                  ("human left sorry", x["human_added_sorry"]),
                                  (f"{x['helpers_reported']} helpers (agent-reported)", x["helpers_reported"])) if on]
         human = x["human_group"] + (", proof unchanged" if x["human_edited_proof"] is False

@@ -20,7 +20,7 @@ BANNED = [
     (r"\bimplemented_by\b", "@[implemented_by]"), (r"\bcsimp\b", "@[csimp]"),
     (r"^\s*import\b|\bimport\s+[A-Z]", "import"), (r"\bdebug\.", "debug.* option"),
     (r"\bmaxHeartbeats\s+0\b", "maxHeartbeats 0"), (r"\bunsafe\b", "unsafe"),
-    (r"\baddDecl\b|\bskipKernelTC\b|\btrustCompiler\b|\bofReduceBool\b", "kernel bypass"),
+    (r"\baddDecl\b|\bskipKernelTC\b|\btrustCompiler\b|\bofReduce\w*", "kernel bypass"),
     (r"\brun_cmd\b|\brun_tac\b|\brun_elab\b|#eval\b", "metaprogram (run_cmd/run_tac/#eval)"),
 ]
 HEARTBEATS_RE = re.compile(r"\bmaxHeartbeats\s+(\d+)")
@@ -59,6 +59,36 @@ def broken_set(base: dict, broken: dict) -> list[dict]:
                 out.append({"file": file, "key": d["key"], "kind": d["kind"],
                             "name": full_name(broken, file, d["key"]) or full_name(base, file, d["key"])})
     return out
+
+
+def derived_stubs(head_sources: dict[str, str], broken: dict) -> tuple[list[dict], list[str]]:
+    """Head reference (§4.9): the proofs the stubbed broken state has as stubs, found by comparing
+    its sources with the head as committed, model-free: every declaration whose body is a stub
+    there and not in the head. (stubs, problems): anything else that differs means the stubbed
+    state is not the head plus stubs, and the gate cannot decide."""
+    stubs, problems = [], []
+    for file, ktext in sorted(broken["sources"].items()):
+        htext = head_sources.get(file)
+        if htext is None:
+            problems.append(f"{file} is in the stubbed broken state but not in the head")
+            continue
+        if htext == ktext:
+            continue
+        (kd, kg), (hd, hg) = leandecls.parse(ktext), leandecls.parse(htext)
+        kby, hby = {d["key"]: d for d in kd}, {d["key"]: d for d in hd}
+        if set(kby) != set(hby) or [g.strip() for g in kg if g.strip()] != [g.strip() for g in hg if g.strip()]:
+            problems.append(f"{file} differs from the head outside proof bodies")
+            continue
+        for key, k in kby.items():
+            h = hby[key]
+            if (k["kind"], k["statement"], k["prefix"]) != (h["kind"], h["statement"], h["prefix"]):
+                problems.append(f"{file}: `{key}` differs from the head outside its proof")
+            elif k["body"] != h["body"]:
+                if k["body"] == STUB and h["body"] != STUB:
+                    stubs.append({"file": file, "key": key, "name": full_name(broken, file, key)})
+                else:
+                    problems.append(f"{file}: the proof of `{key}` differs from the head and is not a stub")
+    return stubs, problems
 
 
 def banned(text: str) -> list[str]:

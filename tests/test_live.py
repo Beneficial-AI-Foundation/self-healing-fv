@@ -40,6 +40,8 @@ class FakeAPI:
         parts = u.path.strip("/").split("/")
         if u.path.endswith("/pulls"):
             return self.prs
+        if parts[-2] == "pulls":
+            return next(p for p in self.prs if p["number"] == int(parts[-1]))
         if "check-runs" in parts:
             return self.checks.get((parts[-2], q["check_name"]), {"check_runs": []})
         if u.path.endswith("/actions/artifacts"):
@@ -216,3 +218,84 @@ def test_cli_takes_a_case_or_base_and_head(capsys):
         with pytest.raises(SystemExit):
             cli.main(argv)
         assert "--case" in capsys.readouterr().err
+
+
+# ---------------------------------------------------------------- one PR, for pr-repair.yml
+
+def own_pr(number=7, head=HEAD, repo="example/toy", **kw):
+    p = {**pr(number, head, **{k: v for k, v in kw.items() if k in ("assoc", "draft", "title")}),
+         "state": kw.get("state", "open"), "labels": [{"name": n} for n in kw.get("labels", ())]}
+    p["head"]["repo"] = {"full_name": repo}
+    return p
+
+
+def select_pr(api, clone=None, repo="example/toy"):
+    return live.select_pr(api, "toy", CFG, repo, 7, repo, clone)
+
+
+def test_pr_repair_picks_a_qualifying_pr():
+    picked, rows = select_pr(FakeAPI([own_pr()], failing()))
+    assert picked[0]["head"] == HEAD and picked[0]["fetch_ref"] == "refs/pull/7/head" and rows[0]["run"]
+    assert rows[0]["head_sha"] == HEAD and rows[0]["repo"] == "example/toy"
+
+
+def test_pr_repair_runs_on_a_draft():
+    """Unlike the silent scan: a bump with broken proofs is what people open as a draft."""
+    picked, rows = select_pr(FakeAPI([own_pr(draft=True)], failing()))
+    assert picked and rows[0]["run"]
+
+
+def test_pr_repair_reads_the_calling_repo_not_the_configs():
+    """A private copy of the target calls it: its PRs and checks are the copy's."""
+    api = FakeAPI([own_pr(repo="me/copy")], failing())
+    picked, _ = select_pr(api, repo="me/copy")
+    assert picked and picked[0]["repo"] == "me/copy"
+    assert all("/repos/me/copy/" in c for c in api.calls) and not any("example/toy" in c for c in api.calls)
+
+
+@pytest.mark.parametrize("kw,why", [({"repo": "someone/fork"}, "a fork"),
+                                    ({"state": "closed"}, "closed"),
+                                    ({"assoc": "CONTRIBUTOR"}, "not a member"),
+                                    ({"labels":["no-self-heal"]}, "labelled no-self-heal")])
+def test_pr_repair_skips_silently(kw, why):
+    api = FakeAPI([own_pr(**kw)], failing())
+    picked, rows = select_pr(api)
+    assert not picked and why in rows[0]["skip"]
+    assert not any("check-runs" in c for c in api.calls)  # decided before the checks are read
+
+
+def test_pr_repair_waits_for_the_other_check():
+    """Both checks trigger the caller; whichever finishes second decides."""
+    checks = failing()
+    checks[(HEAD, "Check Aeneas Extraction")] = runs(None)
+    picked, rows = select_pr(FakeAPI([own_pr()], checks))
+    assert not picked and rows[0]["skip"].startswith("waiting for \"Check Aeneas Extraction\"")
+
+
+def test_pr_repair_once_per_head():
+    picked, rows = select_pr(FakeAPI([own_pr()], failing(), artifacts=[f"live-toy-{HEAD[:8]}"]))
+    assert not picked and rows[0]["skip"] == "already run on this head"
+
+
+def test_pr_repair_skips_proof_only_changes(toy_repo):
+    repo = toy_repo["repo"]
+    git(repo, "checkout", "-q", "pr")
+    head = commit(repo, {"Toy/Specs.lean": "theorem t : True := by trivial\n"}, "proofs")
+    p = own_pr(head=head)
+    p["base"]["sha"] = toy_repo["head"]  # the bump is in the base: this PR edits proofs only
+    picked, rows = select_pr(FakeAPI([p], failing(head)), clone=repo)
+    assert not picked and rows[0]["cause"] == "proof-only" and "proofs only" in rows[0]["skip"]
+    p["base"]["sha"] = toy_repo["base"]  # with the bump in the PR, it qualifies
+    picked, rows = select_pr(FakeAPI([p], failing(head)), clone=repo)
+    assert picked and rows[0]["cause"] == "lean-mathlib"
+
+
+def test_pr_repair_writes_its_decisions(tmp_path, monkeypatch):
+    import json
+    monkeypatch.setattr(live, "github_api", lambda token: FakeAPI([own_pr(labels=["no-self-heal"])], failing()))
+    out, dec = tmp_path / "out", tmp_path / "decisions.json"
+    assert cli.main(["live-select", "--target", "spqr", "--pr", "7", "--repo", "example/toy",
+                     "--github-output", str(out), "--decisions", str(dec)]) == 0
+    assert "count=0" in out.read_text()
+    d = json.loads(dec.read_text())
+    assert d["runs"] == [] and d["decisions"][0]["skip"] == "labelled no-self-heal"

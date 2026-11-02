@@ -31,6 +31,10 @@ on:
         description: "Runner label"
         required: true
         default: ubuntu-latest
+      upload_transcripts:
+        description: "Also upload the agent's raw transcripts (anyone can download a public repo's artifacts)"
+        type: boolean
+        default: false
   # Live input, from live.yml: one change of a target repo, picked there (shfv live-select).
   workflow_call:
     inputs:
@@ -46,8 +50,14 @@ on:
       per_run_usd: {type: string, default: "3"}
       per_run_minutes: {type: string, default: "300"}
       runner: {type: string, default: self-healing-fv}
+      # From pr-repair.yml, which a target repo calls on its own PRs (the run is then the target's):
+      repo: {type: string, default: "", description: "Clone this repo (owner/name) instead of the target config's, e.g. a private copy"}
+      record: {type: string, default: full, description: "full: the whole run record; reports: report.json, report.md and the patch, no prompts or transcripts (for a public target's artifacts)"}
+      save_store: {type: boolean, default: true, description: "Save the replay store cache (off in a target repo: its cache is the target's own)"}
+      upload_transcripts: {type: boolean, default: false, description: "With record: full, also upload the agent's raw transcripts"}
     secrets:
       ANTHROPIC_API_KEY: {required: false}
+      SHFV_TOKEN: {required: false, description: "Read access to this repo, for a caller while it is private"}
 
 # Read-only token for the checkout of this repo; nothing else (§3.1, §9.3).
 permissions:
@@ -72,6 +82,7 @@ jobs:
       FETCH_REF: ${{ inputs.fetch_ref }}
       PR: ${{ inputs.pr }}
       TITLE: ${{ inputs.title }}
+      REPO_OVERRIDE: ${{ inputs.repo }}
       AGENT: ${{ inputs.agent }}
       MODEL: ${{ inputs.model }}
       PER_RUN_USD: ${{ inputs.per_run_usd }}
@@ -83,7 +94,8 @@ jobs:
         run: |
           if [ -n "$TARGET" ]; then
             [[ "$TARGET" =~ ^[a-z0-9-]+$ && "$BASE_SHA" =~ ^[0-9a-f]{40}$ && "$HEAD_SHA" =~ ^[0-9a-f]{40}$ \
-               && "$PR" =~ ^[0-9]*$ && "$FETCH_REF" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]*$ ]] || {
+               && "$PR" =~ ^[0-9]*$ && "$FETCH_REF" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]*$ \
+               && ( -z "$REPO_OVERRIDE" || "$REPO_OVERRIDE" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ) ]] || {
               echo "::error::bad live input"; exit 1; }
             case_dir="$TARGET-live-${HEAD_SHA:0:8}"
           else
@@ -97,8 +109,13 @@ jobs:
           mkdir -p "$RUNNER_TEMP/stats"
           echo "STATS=$RUNNER_TEMP/stats" >> "$GITHUB_ENV"
 
+      # This repo at this workflow's commit, also when another repo's workflow calls it (where the
+      # default would be the caller's repo).
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
+          repository: ${{ job.workflow_repository || github.repository }}
+          ref: ${{ job.workflow_sha || github.sha }}
+          token: ${{ secrets.SHFV_TOKEN || github.token }}
           persist-credentials: false  # the token does not stay in .git/config, where the agent could read it
 
       - name: Runner before setup
@@ -162,15 +179,21 @@ jobs:
       # the base is its merge-base with `base`, as `shfv repair --base --head` computes it.
       - name: Clone the target repo
         id: clone
+        env:
+          # For a private copy (pr-repair.yml from it): passed per command, never written to .git/config.
+          GIT_TOKEN: ${{ inputs.repo != '' && github.token || '' }}
         run: |
           name="${TARGET:-${CASE%%/*}}"
           read -r repo root < <(python3 -c 'import sys, tomllib; c = tomllib.load(open(sys.argv[1], "rb"))
           print(c["github"], c["lean"].get("repo_lean_root", "") or ".")' "targets/$name.toml")
           clone="$HOME/baif/${repo##*/}"
-          git clone --quiet "https://github.com/$repo" "$clone"
+          repo="${REPO_OVERRIDE:-$repo}"
+          auth=()
+          [ -z "$GIT_TOKEN" ] || auth=(-c "http.https://github.com/.extraheader=AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GIT_TOKEN" | base64 -w0)")
+          git "${auth[@]}" clone --quiet "https://github.com/$repo" "$clone"
           git -C "$clone" log -1 --format='%h %cs %s'
           if [ -n "$TARGET" ]; then
-            git -C "$clone" fetch --quiet origin "$FETCH_REF"
+            git "${auth[@]}" -C "$clone" fetch --quiet origin "$FETCH_REF"
             git -C "$clone" cat-file -e "$HEAD_SHA^{commit}" || { echo "::error::$FETCH_REF did not bring $HEAD_SHA"; exit 1; }
             base=$(git -C "$clone" merge-base "$BASE_SHA" "$HEAD_SHA"); change="$HEAD_SHA"
             { echo "## Live input"; echo; echo "\`$repo\` ${PR:+PR $PR }head \`${HEAD_SHA:0:8}\`, merge-base \`${base:0:8}\`"; } \
@@ -218,9 +241,12 @@ jobs:
           { echo; echo "Replay store: $what ($(du -sh "$SHFV_WORK/_store" 2>/dev/null | cut -f1 || echo empty))"; } | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Doctor
+        env:
+          NAME: ${{ steps.clone.outputs.repo }}
+          CLONE: ${{ steps.clone.outputs.clone }}
         run: |
           uv sync --quiet
-          uv run shfv doctor
+          uv run shfv doctor --config "targets/$NAME.toml" --repo "$CLONE"
 
       - name: Start resource sampler
         run: |
@@ -305,14 +331,38 @@ jobs:
           fi
 
       - name: Save the replay store
-        if: ${{ !cancelled() && steps.trim.outputs.nonempty == 'true' }}
+        if: ${{ !cancelled() && steps.trim.outputs.nonempty == 'true' && inputs.save_store != false }}
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
         with:
           path: ${{ env.SHFV_WORK }}/_store
           key: ${{ steps.store.outputs.cache-primary-key }}
 
-      # The run record (§3.3 S7): report.json, report.md, and the agent's prompts and transcripts.
-      # Live, its name (live-<target>-<head8>) is how live.yml knows a head was already run.
+      # In a target repo (record: reports) only the reports and the patch leave the runner: its
+      # artifacts can be public, and the prompts and transcripts stay out of them.
+      - name: Reports only
+        if: always() && env.RUN_DIR != '' && inputs.record == 'reports'
+        run: |
+          out="$RUNNER_TEMP/record"
+          mkdir -p "$out"
+          cp "$RUN_DIR/report.json" "$RUN_DIR/report.md" "$out/" 2>/dev/null || true
+          python3 -c 'import json, sys; d = json.load(open(sys.argv[1])).get("delivery_diff")
+          d and open(sys.argv[2], "w").write(d)' "$out/report.json" "$out/repair.patch" 2>/dev/null || true
+          echo "RUN_DIR=$out" >> "$GITHUB_ENV"
+
+      # Raw model output stays on the runner unless asked for: anyone can download a public repo's
+      # artifacts. Dropped: each attempt's transcript.jsonl (Claude Code's or Codex's event stream) and
+      # Codex's CODEX_HOME (its session state). Kept: reports, prompts, the bot's suggestion.patch.
+      - name: Drop transcripts
+        if: always() && env.RUN_DIR != '' && inputs.record != 'reports' && !inputs.upload_transcripts
+        run: |
+          out="$RUNNER_TEMP/record-no-transcripts"
+          rm -rf "$out" && mkdir -p "$out"
+          cp -R "$RUN_DIR/." "$out/"
+          find "$out" -path '*/attempts/*' \( -name transcript.jsonl -o -name codex-home \) -prune -exec rm -rf {} +
+          echo "RUN_DIR=$out" >> "$GITHUB_ENV"
+
+      # The run record (§3.3 S7): report.json, report.md, the agent's prompts and, if asked for, its
+      # transcripts. Live, its name (live-<target>-<head8>) is how live.yml knows a head was already run.
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         if: always() && env.RUN_DIR != ''
         with:
