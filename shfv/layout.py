@@ -19,7 +19,9 @@ it never changes what the gate accepts. Modules are found where Lean finds them,
 """
 from __future__ import annotations
 
+import os
 import re
+import tomllib
 from pathlib import Path
 
 from . import modpaths
@@ -113,13 +115,40 @@ def classify(cfg: dict, files: list[str], dirs: list[str], read) -> dict:
             "modules": len(mods)}
 
 
+def lakefile_src_dirs(project: Path) -> list[str] | None:
+    """The libraries' source directories as a `lakefile.toml` declares them, in declaration order
+    ("" is the project root), or None without one (a `lakefile.lean` is code, not read here). Used
+    when Lake is not asked: on a fresh CI runner the dependencies are not fetched yet, and a library
+    under a `srcDir` (libsignal-verify: `rust/`) would otherwise look missing (fork smoke test)."""
+    f = project / "lakefile.toml"
+    if not f.is_file():
+        return None
+    try:
+        data = tomllib.loads(f.read_text())
+    except (tomllib.TOMLDecodeError, UnicodeDecodeError):
+        return None
+    libs = data.get("lean_lib") or []
+    if not isinstance(libs, list) or not libs:
+        return None
+    out: list[str] = []
+    for lib in libs:
+        d = os.path.normpath(os.path.join(str(data.get("srcDir", ".")), str(lib.get("srcDir", "."))))
+        d = "" if d == "." else d
+        if d not in out:
+            out.append(d)
+    return out
+
+
 def check(project: Path, cfg: dict, tracked: list[str]) -> dict:
     """classify() on a checkout. Lake is asked for the source directories only if the project's
-    dependencies are already fetched, so the check never downloads or writes anything."""
+    dependencies are already fetched, so the check never downloads or writes anything; otherwise
+    they are read from `lakefile.toml`, else the project root is assumed."""
     lake = (project / ".lake" / "packages").is_dir() or not (project / "lake-manifest.json").is_file()
-    dirs = list(modpaths.search_dirs(project.resolve())) if lake else [""]
+    toml_dirs = None if lake else lakefile_src_dirs(project)
+    dirs = list(modpaths.search_dirs(project.resolve())) if lake else toml_dirs or [""]
     res = classify(cfg, tracked, dirs, lambda f: (project / f).read_text(errors="replace"))
     res["lake"] = lake
+    res["dirs_from_lakefile"] = bool(toml_dirs)
     return res
 
 
@@ -127,7 +156,7 @@ def summary(res: dict, limit: int = 20) -> list[str]:
     c = {k: len(v) for k, v in res["classes"].items()}
     dirs = ", ".join(d + "/" if d else "." for d in res["dirs"])
     out = [f"{sum(c.values())} tracked .lean files ({res['modules']} modules imported by the roots; source dirs "
-           f"{dirs}{'' if res['lake'] else ', Lake not asked: dependencies not fetched'}): "
+           f"{dirs}{'' if res['lake'] else (' from lakefile.toml' if res.get('dirs_from_lakefile') else '') + ', Lake not asked: dependencies not fetched'}): "
            + ", ".join(f"{k.replace('_', ' ')} {v}" for k, v in c.items())]
     out += [f"✗ {p}" for p in res["problems"]]
     if res["warnings"]:

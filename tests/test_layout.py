@@ -3,6 +3,8 @@ ignored (outside the audited libraries) or unclassified, and likely gaps are war
 A small file tree with the source directories given, so no Lake is needed."""
 from __future__ import annotations
 
+import pytest
+
 from shfv import layout, modpaths
 
 CFG = {"lean": {"root_modules": ["Lib", "Other"], "source_roots": ["Lib/"]},
@@ -95,3 +97,24 @@ def test_check_asks_lake_only_when_dependencies_are_fetched(tmp_path, monkeypatc
     lines = layout.summary(res, limit=2)
     assert lines[0].startswith(f"{len(FILES)} tracked .lean files") and "unclassified 3" in lines[0]
     assert lines[-1] == f"    … and {len(res['warnings']) - 2} more"
+
+
+def test_without_fetched_dependencies_the_src_dirs_come_from_lakefile_toml(tmp_path, monkeypatch):
+    """A fresh CI runner (fork smoke test, libsignal-verify's `srcDir = "rust"`): Lake is not asked,
+    and the libraries' srcDirs are read from lakefile.toml instead of assuming the project root."""
+    files = {k: v for k, v in FILES.items() if k != "lakefile.lean"}
+    for f, t in files.items():
+        (tmp_path / f).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / f).write_text(t)
+    (tmp_path / "lake-manifest.json").write_text("{}")
+    (tmp_path / "lakefile.toml").write_text('name = "x"\n[[lean_lib]]\nname = "Lib"\n\n'
+                                            '[[lean_lib]]\nname = "Other"\nsrcDir = "./src/"\n')
+    cfg = {**CFG, "protected": {**CFG["protected"], "build_config": ["lakefile.toml"]}}
+    monkeypatch.setattr(modpaths, "search_dirs", lambda p: pytest.fail("Lake asked"))
+    res = layout.check(tmp_path, cfg, list(files))
+    assert not res["lake"] and res["dirs"] == ["", "src"] and not res["problems"]
+    assert "source dirs ., src/ from lakefile.toml, Lake not asked" in layout.summary(res)[0]
+    # The fallback is only a reading of the lakefile: a root module really missing is still a problem.
+    res = layout.check(tmp_path, {**cfg, "lean": {**cfg["lean"], "root_modules": ["Lib", "Gone"]}}, list(files))
+    assert any("root module Gone" in p for p in res["problems"])
+    assert layout.lakefile_src_dirs(tmp_path / "nowhere") is None
