@@ -19,6 +19,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shutil
 import sys
 import tomllib
@@ -227,6 +228,8 @@ def main(argv: list[str] | None = None) -> int:
     lv.add_argument("--target", help="target config name (default: the one whose GitHub repo is the clone's origin)")
     lv.add_argument("--pr", type=int, help="the pull request, for the report")
     lv.add_argument("--title", help="the pull request's title, or what the change is, for the report and the prompt")
+    lv.add_argument("--github", help="owner/name of the GitHub repo the change is in, for the report's links "
+                    "(default: the target config's; replay.yml passes the calling repo)")
     r.add_argument("--agent", choices=sorted(ADAPTERS), help="agent adapter (default: the target config's [agent].adapter)")
     r.add_argument("--model", help="override the target config's model")
     r.add_argument("--config", type=Path, help="target config (default: targets/<repo>.toml)")
@@ -345,7 +348,10 @@ def main(argv: list[str] | None = None) -> int:
         if not a.repo:
             with open(a.config or ROOT / "targets" / f"{repo_name}.toml", "rb") as f:
                 a.repo = Path.home() / "baif" / tomllib.load(f)["github"].split("/")[-1]
-        record = live.live_record(repo_name, a.repo.expanduser(), a.base, a.head, a.pr, a.title, ref=a.head)
+        if a.github and not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", a.github):
+            ap.error(f"--github must be owner/name, not {a.github!r}")
+        record = live.live_record(repo_name, a.repo.expanduser(), a.base, a.head, a.pr, a.title, ref=a.head,
+                                  github=a.github)
         case = record["case_id"]
     else:
         ap.error("give --case, or --base and --head")

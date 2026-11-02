@@ -264,6 +264,7 @@ jobs:
             args=(--target "$TARGET" --base "$BASE_SHA" --head "$HEAD_SHA")
             [ -z "$PR" ] || args+=(--pr "$PR")
             [ -z "$TITLE" ] || args+=(--title "$TITLE")
+            [ -z "$REPO_OVERRIDE" ] || args+=(--github "$REPO_OVERRIDE")  # links point at the calling repo
           else
             args=(--case "$CASE")
           fi

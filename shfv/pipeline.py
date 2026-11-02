@@ -647,7 +647,9 @@ class Run:
                         "started_at": self.started.isoformat(timespec="seconds"),
                         "provenance": provenance.collect(self.agent.model, self.agent.name, gate_version, self.config,
                                                           harness=self.agent.version()),
-                        "inputs": {"repo": self.cfg["github"], "base_commit": r.get("base_commit"),
+                        # Live: the repo the change is in (shfv/live.py live_record), for every link.
+                        "inputs": {"repo": (r.get("repo") if self.live else None) or self.cfg["github"],
+                                   "base_commit": r.get("base_commit"),
                                    "generated": self.generated,
                                    "repo_lean_root": self.cfg["lean"].get("repo_lean_root", ""),
                                    "change_commit": r["change_commit"], "change_pr": r.get("change_pr"),

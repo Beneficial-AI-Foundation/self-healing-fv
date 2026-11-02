@@ -572,7 +572,7 @@ def toy_live(tmp_path_factory):
             "axiom": axiom, "cheat": cheat, "added": added}
 
 
-def run_live(toy_live, monkeypatch, head, script, label):
+def run_live(toy_live, monkeypatch, head, script, label, github=None):
     import mine_history
     from shfv import live
     monkeypatch.setitem(mine_history.REPO_CONFIGS, "toy", {
@@ -581,7 +581,7 @@ def run_live(toy_live, monkeypatch, head, script, label):
         "toolchain": ["lean-toolchain", "lakefile.toml", "lake-manifest.json"]})
     cfg = toy_live["root"] / "toy.toml"
     cfg.write_text(CONFIG.format(per_run_usd=10.0))
-    record = live.live_record("toy", toy_live["repo"], "main", head, pr=12, title="Re-extract")
+    record = live.live_record("toy", toy_live["repo"], "main", head, pr=12, title="Re-extract", github=github)
     agent = FakeAgent(script)
     run = Run(record["case_id"], cfg, agent, toy_live["repo"], toy_live["root"] / "work", toy_live["root"] / "runs",
               label=label, live=record)
@@ -591,6 +591,15 @@ def run_live(toy_live, monkeypatch, head, script, label):
     assert "human" not in md.lower().replace("needs a human", ""), md  # a live run has no human fix to mention
     assert "None" not in md.split("<sub>Run")[0]
     return rep, md, agent
+
+
+def test_a_live_report_on_a_fork_links_only_to_the_fork(toy_live, monkeypatch):
+    """pr-repair.yml called from a fork (smoke test 2026-11-02): links to the target's own repo would
+    point at its PR of the same number, and GitHub shows those as cross-references there."""
+    rep, md, _ = run_live(toy_live, monkeypatch, toy_live["head"], GOOD, "fork", github="someone/toy-fork")
+    assert rep["inputs"]["repo"] == "someone/toy-fork"
+    assert "https://github.com/someone/toy-fork/pull/12" in md and "/someone/toy-fork/blob/" in md
+    assert "example/toy" not in md
 
 
 def test_live_change_is_repaired_like_a_replay(toy_live, monkeypatch):

@@ -64,7 +64,7 @@ def merge_base(clone: Path, base: str, head: str) -> str:
 
 
 def live_record(target: str, clone: Path, base: str, head: str, pr: int | None = None,
-                title: str | None = None, ref: str | None = None) -> dict:
+                title: str | None = None, ref: str | None = None, github: str | None = None) -> dict:
     """The case record of the change base → head. The base is the merge-base: a PR is broken by
     what it changed since it branched, not by what its base branch did since. Fields follow the
     mined records (data/README.md) where they mean the same; `fix` is empty, as there is none."""
@@ -76,10 +76,14 @@ def live_record(target: str, clone: Path, base: str, head: str, pr: int | None =
     git = Git(clone)
     pins, _, causes = change_causes(git, Miner(git, cfg), cfg, mb, head)
     subject = title or (f"PR {pr}" if pr else ref or head[:8])
-    return {"case_id": case_id(target, head), "live": True, "repo": cfg["github"],
+    # `github`: the repo the change is in, when it is not the target's own (pr-repair.yml called from a
+    # private copy or a fork). Every link in the report points there; the fork smoke test's links went
+    # to the target's PR of the same number, which GitHub then showed as a cross-reference.
+    github = github or cfg["github"]
+    return {"case_id": case_id(target, head), "live": True, "repo": github,
             "base_commit": mb, "base_tip": base_tip, "change_commit": head, "head_ref": ref,
             "change_subject": subject, "change_pr": pr,
-            "change_pr_url": f"https://github.com/{cfg['github']}/pull/{pr}" if pr else None,
+            "change_pr_url": f"https://github.com/{github}/pull/{pr}" if pr else None,
             "cause": causes[0] if causes else "proof-only", "causes": causes or ["proof-only"],
             "pin_changes": pins, "fix": {}, "proofs_in_change_commit": {}}
 

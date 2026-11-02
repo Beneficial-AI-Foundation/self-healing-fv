@@ -141,6 +141,7 @@ uv run shfv repair --target dalek-lean-verify --base origin/master --head FETCH_
 - **Two more verdicts**: `no-break` when the head builds, and the escalation `extraction-setup` when the extracted code itself does not build at the head.
 - The case id is `<target>/live-<head8>`. Workspaces and runs are named after it, and a second run on the same base and head reuses the analysis.
 - `--target` defaults to the target config whose GitHub repo is the clone's origin, and `--repo` to `~/baif/<repo name>`. Both commits must be in the clone.
+- `--github owner/name`: the GitHub repo the change is in, when it is not the target config's (a private copy or a fork calling `pr-repair.yml`; `replay.yml` passes the calling repo). Every link in the report points there; otherwise they would point at the target's PR of the same number, which GitHub shows as a cross-reference on it.
 
 `.github/workflows/live.yml` runs this silently on open PRs ([ACTIONS.md](ACTIONS.md)). Its PR selection is `shfv live-select`.
 
