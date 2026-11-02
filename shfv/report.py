@@ -24,7 +24,7 @@ CHECK_ROWS = [
     ("G5", "Kernel replay", "`lean4checker`"),
 ]
 OUTCOME_TEXT = {
-    "statement-must-change": "the statement no longer type-checks against the new extracted code",
+    "statement-must-change": "the statement no longer type-checks after the change (new extracted code or dependencies)",
     "proof-hard": "no accepted repair within the budget",
     "blocked-on": "waits for another theorem to be fixed first",
     "infrastructure-failure": "the run failed before it could say anything about this theorem",
@@ -479,7 +479,7 @@ def render(r: dict) -> str:
         out.append(f"### ⚠️ Needs a human: {head}")
         out.append("")
         if n_stmts:
-            out.append(f"The change {pr} changed the extracted code so that the statement of "
+            out.append(f"The change {pr} changed the extracted code or its dependencies so that the statement of "
                        f"{'a theorem' if n_stmts == 1 else f'{n_stmts} theorems'} no longer type-checks. Fixing "
                        f"{'it' if n_stmts == 1 else 'them'} needs a new statement, and the bot never changes statements: "
                        "someone who owns the spec has to decide what the theorem should now promise.")
@@ -523,7 +523,7 @@ def render(r: dict) -> str:
         label = e["file"].rsplit("/", 1)[-1] if e["outcome"] == "extraction-setup" else short_name(e["theorem"])
         out.append(f"#### Escalated: {link(r, e['file'], e.get('line'), label)} · `{e['outcome']}`")
         out.append("")
-        why = ("the body of this definition no longer type-checks against the new extracted code; definitions "
+        why = ("the body of this definition no longer type-checks after the change (new extracted code or dependencies); definitions "
                "are frozen like statements, so changing it is a spec decision" if e.get("definition")
                else OUTCOME_TEXT.get(e["outcome"], e["outcome"]))
         out.append(f"**Why:** {why}. Lean reports:")
