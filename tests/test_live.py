@@ -200,6 +200,12 @@ def test_record_uses_the_merge_base_and_has_no_human_fix(toy_repo):
     assert r["fix"] == {} and r["live"]
 
 
+def test_record_links_to_the_repo_the_change_is_in(toy_repo):
+    """pr-repair.yml called from a fork or a private copy: the PR is there, not in the target's repo."""
+    r = live.live_record("toy", toy_repo["repo"], "main", "pr", pr=12, title="Bump Lean", github="someone/toy-fork")
+    assert r["repo"] == "someone/toy-fork" and r["change_pr_url"] == "https://github.com/someone/toy-fork/pull/12"
+
+
 def test_record_of_a_proof_only_change(toy_repo):
     git(toy_repo["repo"], "checkout", "-q", "pr")
     head = commit(toy_repo["repo"], {"Toy/Specs.lean": "theorem t : True := by trivial\n"}, "proofs")

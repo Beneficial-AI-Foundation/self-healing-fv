@@ -292,7 +292,11 @@ class Run:
         lack a library the change adds."""
         out = self.case_dir / "snapshots" / f"{name}.json"
         flag = ["--allow-absent-roots"] if allow_absent_roots else []
-        want = json.loads(gate("tree-hash", "--config", str(self.config), "--tree", str(tree), *flag).stdout)
+        th = gate("tree-hash", "--config", str(self.config), "--tree", str(tree), *flag)
+        if th.returncode != 0:  # e.g. a root module with no source file at this tree: the gate refuses it
+            lines = th.stderr.strip().splitlines()
+            raise GateUnavailable(f"gate tree-hash on {name}: {lines[-1][-500:] if lines else f'exit {th.returncode}'}")
+        want = json.loads(th.stdout)
         if out.exists():
             try:
                 head = json.loads(out.read_text())
@@ -643,7 +647,9 @@ class Run:
                         "started_at": self.started.isoformat(timespec="seconds"),
                         "provenance": provenance.collect(self.agent.model, self.agent.name, gate_version, self.config,
                                                           harness=self.agent.version()),
-                        "inputs": {"repo": self.cfg["github"], "base_commit": r.get("base_commit"),
+                        # Live: the repo the change is in (shfv/live.py live_record), for every link.
+                        "inputs": {"repo": (r.get("repo") if self.live else None) or self.cfg["github"],
+                                   "base_commit": r.get("base_commit"),
                                    "generated": self.generated,
                                    "repo_lean_root": self.cfg["lean"].get("repo_lean_root", ""),
                                    "change_commit": r["change_commit"], "change_pr": r.get("change_pr"),

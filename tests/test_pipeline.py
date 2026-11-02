@@ -380,6 +380,23 @@ def test_gate_unavailable_never_becomes_a_repair_outcome(toy_case, monkeypatch):
     assert set(outcomes(rep).values()) == {"gate-unavailable"}  # no `candidate` left behind
 
 
+def test_a_tree_the_gate_refuses_to_hash_is_gate_unavailable_with_the_gates_reason(toy_case, monkeypatch):
+    """`gate tree-hash` exits 1 with a traceback when a root module has no source file (libsignal PR 17's
+    tree has no ProtocolsTest, found by the fork smoke test): the run says why, not `JSONDecodeError`."""
+    real = pipeline.gate
+    why = "FileNotFoundError: root module ProtocolsTest: no source file (is its library under a srcDir …?)"
+
+    def refusing_gate(*args, check=True):
+        if args[0] == "tree-hash":
+            return pipeline.proc.Result(1, "", f"Traceback (most recent call last):\n  ...\n{why}\n", False)
+        return real(*args, check=check)
+    monkeypatch.setattr(pipeline, "gate", refusing_gate)
+    rep, _, _ = run_case(toy_case, monkeypatch, GOOD, "nohash", expect_error=True)
+    assert rep["verdict"] == "failed" and rep["error"]["outcome"] == "gate-unavailable"
+    assert "root module ProtocolsTest: no source file" in rep["error"]["detail"]
+    assert "JSONDecodeError" not in rep["error"]["detail"]
+
+
 def test_a_run_that_called_no_model_is_renamed(tmp_path):
     from types import SimpleNamespace
     from shfv import provenance
@@ -555,7 +572,7 @@ def toy_live(tmp_path_factory):
             "axiom": axiom, "cheat": cheat, "added": added}
 
 
-def run_live(toy_live, monkeypatch, head, script, label):
+def run_live(toy_live, monkeypatch, head, script, label, github=None):
     import mine_history
     from shfv import live
     monkeypatch.setitem(mine_history.REPO_CONFIGS, "toy", {
@@ -564,7 +581,7 @@ def run_live(toy_live, monkeypatch, head, script, label):
         "toolchain": ["lean-toolchain", "lakefile.toml", "lake-manifest.json"]})
     cfg = toy_live["root"] / "toy.toml"
     cfg.write_text(CONFIG.format(per_run_usd=10.0))
-    record = live.live_record("toy", toy_live["repo"], "main", head, pr=12, title="Re-extract")
+    record = live.live_record("toy", toy_live["repo"], "main", head, pr=12, title="Re-extract", github=github)
     agent = FakeAgent(script)
     run = Run(record["case_id"], cfg, agent, toy_live["repo"], toy_live["root"] / "work", toy_live["root"] / "runs",
               label=label, live=record)
@@ -574,6 +591,15 @@ def run_live(toy_live, monkeypatch, head, script, label):
     assert "human" not in md.lower().replace("needs a human", ""), md  # a live run has no human fix to mention
     assert "None" not in md.split("<sub>Run")[0]
     return rep, md, agent
+
+
+def test_a_live_report_on_a_fork_links_only_to_the_fork(toy_live, monkeypatch):
+    """pr-repair.yml called from a fork (smoke test 2026-11-02): links to the target's own repo would
+    point at its PR of the same number, and GitHub shows those as cross-references there."""
+    rep, md, _ = run_live(toy_live, monkeypatch, toy_live["head"], GOOD, "fork", github="someone/toy-fork")
+    assert rep["inputs"]["repo"] == "someone/toy-fork"
+    assert "https://github.com/someone/toy-fork/pull/12" in md and "/someone/toy-fork/blob/" in md
+    assert "example/toy" not in md
 
 
 def test_live_change_is_repaired_like_a_replay(toy_live, monkeypatch):
