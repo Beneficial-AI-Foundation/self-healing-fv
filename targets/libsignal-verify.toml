@@ -5,7 +5,8 @@
 #
 # Three Lake libraries: Libsignal (srcDir "rust": the Aeneas translations under
 # rust/Libsignal/Translated/ and the hand-written proofs under rust/Libsignal/Spec/), Protocols
-# (the PQXDH model on VCVio) and ProtocolsTest (its fixtures). Protocols does not import Libsignal.
+# (the PQXDH model on VCVio) and ProtocolsTest (its fixtures). Since PR 45,
+# Protocols.PQXDH.Realization imports Libsignal.Spec.
 
 name = "libsignal-verify"
 github = "Beneficial-AI-Foundation/libsignal-verify"

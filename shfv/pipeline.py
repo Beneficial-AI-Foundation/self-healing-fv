@@ -1192,8 +1192,11 @@ def hidden_difference(before: str, after: str) -> str | None:
     gone, new = b - a, a - b
     levels = sorted({(n, x, y) for n, x in gone for m, y in new if m == n})
     if levels:
+        # Constants on one side only are named too: the report sorts universe-only changes last.
+        unmatched = {n for n, _ in gone} ^ {n for n, _ in new}
         return "universe levels, which the printer hides: " + "; ".join(
-            f"`{n}.{{{x}}}` → `{n}.{{{y}}}`" for n, x, y in levels[:5])
+            f"`{n}.{{{x}}}` → `{n}.{{{y}}}`" for n, x, y in levels[:5]) + (
+            "; and constants: " + ", ".join(f"`{n}`" for n in sorted(unmatched)[:5]) if unmatched else "")
     if gone or new:
         return "constants: " + ", ".join([f"`{n}` removed" for n, _ in sorted(gone)][:5]
                                          + [f"`{n}` added" for n, _ in sorted(new)][:5])

@@ -38,7 +38,7 @@ python3 replay/evaluate.py --cases data/mined/dalek-lean-verify.jsonl --results 
 
 The `outcome` column tells you what to expect:
 - **`proof repair`**: only proofs broke, so the agent will try to repair them. The small ones are PR 782 (`e65b46d0`, 1 proof) and PR 41 (`9d82afb9`, 2 proofs). Larger ones: PR 278 (6), PR 734 (8), PR 720 (13).
-- **`ESCALATE (statement broken)`**: a theorem statement no longer type-checks against the new extracted code, so the bot escalates to a human. The smallest is PR 74 (`9c411c6b`).
+- **`ESCALATE (statement broken)`**: a theorem statement no longer type-checks against the new extracted code or dependencies, so the bot escalates to a human. The smallest is PR 74 (`9c411c6b`).
 - **`NO BREAK`**: nothing to repair.
 
 ## 3. Run a repair

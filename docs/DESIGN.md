@@ -366,7 +366,7 @@ Every run that does not end with all broken theorems repaired escalates. Per the
 
 | Outcome | Meaning | Main evidence |
 |---|---|---|
-| `statement-must-change` | The old statement no longer elaborates against the new extracted code. The `rename-only` flag is set when the only difference is a name. | The old statement, the elaboration error, the rename |
+| `statement-must-change` | The old statement no longer elaborates against the new extracted code or dependencies (e.g. a Mathlib or VCVio API change). The `rename-only` flag is set when the only difference is a name. | The old statement, the elaboration error, the rename |
 | `spec-suspect` (V1) | The repair failed, and the agent proved in Lean that the frozen statement is **false**: a proof of its negation (for example, concrete inputs that satisfy its hypotheses but not its conclusion), accepted by the gate like any other proof, with the negated statement matching the frozen fingerprint. Without such a proof the outcome stays `proof-hard`, and the agent's suspicion is shown only as advisory text. | The checked refutation |
 | `extraction-setup` (V1, live) | The extracted code could not be trusted or built (live: the extraction-consistency check did not pass on this SHA). | The failing check |
 | `proof-hard` | The budget ran out with no evidence against the statement. | The last goal state, an attempt summary |

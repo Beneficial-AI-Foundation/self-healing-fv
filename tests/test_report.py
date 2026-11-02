@@ -112,6 +112,28 @@ def test_audit_explains_a_statement_change_that_prints_identically():
     assert "details the printer hides" in render(minimal_report(audit=audit))
 
 
+def test_audit_lists_universe_only_changes_last_and_says_when_coverage_is_incomplete():
+    from shfv.pipeline import hidden_difference
+    # libsignal-verify on Lean 4.35 + Aeneas de16f3c: 83 of 84 changes were universe levels only, and 28 modules
+    # of a head that does not build were never compared.
+    uni = hidden_difference("(c Std.Clone [])", "(c Std.Clone [0])")
+    mixed = hidden_difference("(a (c Std.Clone []) (c Std.Old []))", "(a (c Std.Clone [0]) (c Std.New []))")
+    assert "constants:" not in uni and "constants: `Std.New`, `Std.Old`" in mixed
+    stmts = [{"decl": "A.uni", "module": "M", "before": "s", "after": "s", "hidden_difference": uni},
+             {"decl": "B.mixed", "module": "M", "before": "s", "after": "s", "hidden_difference": mixed},
+             {"decl": "C.real", "module": "M", "before": "T Global", "after": "T alloc.Global"}]
+    audit = {"outcome": "changed", "complete": False, "not_compared_n": 356,
+             "coverage_problems": ["head: did not build", "head: 28 module(s) not observed, e.g. Protocols"],
+             "summary": {"statements_changed": 3, "definitions_changed": 0, "removed": 0},
+             "axioms_changed": [], "statements_changed": stmts}
+    md = render(minimal_report(audit=audit))
+    assert "Statements changed (3; 1 differ only in universe levels, listed last)" in md
+    assert md.index("B.mixed") < md.index("C.real") < md.index("A.uni")
+    assert "**Coverage incomplete:** 356 declaration(s) could not be compared" in md and "28 module(s)" in md
+    audit["complete"] = True
+    assert "Coverage incomplete" not in render(minimal_report(audit=audit))
+
+
 def test_a_multi_line_agent_command_stays_on_the_live_line():
     import io
     from shfv.progress import Progress
