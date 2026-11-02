@@ -85,7 +85,9 @@ gh workflow run live.yml -R Beneficial-AI-Foundation/self-healing-fv -f agent=fa
 
 [`.github/workflows/pr-repair.yml`](../.github/workflows/pr-repair.yml) is the reusable workflow a target repo calls on its own PRs (DESIGN.md §9). Unlike `live.yml`, the run belongs to the target: its token, its `ANTHROPIC_API_KEY` secret, its caches and its artifacts. It is not running anywhere yet.
 
-**When it runs:** when the target's Lean workflow or its extraction workflow completes on a PR (`workflow_run` on both, because the Lean build fails in minutes while extraction takes longer: whichever finishes second sees both results), and on manual dispatch with a PR number. Every PR, no label. A new run for the same PR cancels the running one.
+**When it runs:** when the target's Lean workflow or its extraction workflow completes on a PR's head (`workflow_run` on both: either may finish last, and the run after the last one sees both results), and on manual dispatch with a PR number. Every PR, no label. A new run for the same PR cancels the running one.
+
+**Push and pull_request runs both count.** A target whose checks run on `push` and on `pull_request` (libsignal-verify, SPQR) runs each check twice on a PR's head, and either run may finish last. The caller must act on both: `workflow_run.pull_requests` names the PR for a push to its branch too. A caller that acts only on `pull_request` completions does nothing when a push run finishes last, and its skipped run still cancels the running one through `concurrency` (seen in the fork smoke test, 2026-11-02).
 
 **Whether a PR qualifies** (`shfv live-select --pr`, `select_pr` in `shfv/live.py`). All of these, else the run ends in about a minute, the reason goes into its summary and its `decisions-…` artifact, and **nothing is posted on the PR**:
 
@@ -129,7 +131,7 @@ permissions:
   actions: read
 jobs:
   self-heal:
-    if: vars.SELF_HEAL != 'off' && (github.event_name == 'workflow_dispatch' || github.event.workflow_run.event == 'pull_request')
+    if: vars.SELF_HEAL != 'off' && (github.event_name == 'workflow_dispatch' || github.event.workflow_run.pull_requests[0].number)
     uses: Beneficial-AI-Foundation/self-healing-fv/.github/workflows/pr-repair.yml@<commit sha>
     with:
       target: spqr
