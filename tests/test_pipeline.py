@@ -397,6 +397,28 @@ def test_a_tree_the_gate_refuses_to_hash_is_gate_unavailable_with_the_gates_reas
     assert "JSONDecodeError" not in rep["error"]["detail"]
 
 
+def test_a_broken_state_that_could_not_be_fingerprinted_stops_before_any_attempt(toy_case, monkeypatch, tmp_path):
+    """libsignal-verify 4.35 rerun (2026-11-04): StmtCanon failed on the head's toolchain, so K had no
+    records and the broken set no names; the run crashed ordering nameless theorems (IndexError)."""
+    real = Run.snapshot
+
+    def unfingerprinted(self, name, tree, allow_absent_roots=False):
+        p = real(self, name, tree, allow_absent_roots)
+        if name != "K":
+            return p
+        s = json.loads(p.read_text())
+        s["stmtcanon"], s["records"] = {"ok": False, "stderr": "StmtCanon.lean:1:1: error: Unknown constant"}, {}
+        out = tmp_path / "K.json"  # a copy: the cached snapshot stays as it was
+        out.write_text(json.dumps(s))
+        return out
+    monkeypatch.setattr(Run, "snapshot", unfingerprinted)
+    rep, agent, _ = run_case(toy_case, monkeypatch, GOOD, "nofp", expect_error=True)
+    assert rep["error"]["outcome"] == "gate-unavailable", rep["error"]
+    assert "fingerprinting the broken state failed: StmtCanon.lean:1:1" in rep["error"]["detail"]
+    assert not agent.calls
+    assert rep["totals"]["attempts"] == 0
+
+
 def test_a_run_that_called_no_model_is_renamed(tmp_path):
     from types import SimpleNamespace
     from shfv import provenance
