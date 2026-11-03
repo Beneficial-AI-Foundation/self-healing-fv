@@ -106,6 +106,7 @@ When the gate accepts a repair, these checks passed:
 Three more rules:
 
 - **Inherited `sorry` is accepted, but flagged.** The target repos still have unproved lemmas at the base. A repair may depend on them only if it adds no `sorry` of its own and reaches the same unproved lemmas its old proof reached. Such acceptances carry a flag, so results can be counted with and without them. The same goes for modules where the kernel replay stops early at a proof by native code (`native_decide`, `bv_decide`) that was already there at the base.
+- **A partial acceptance covers what it names.** When some theorems escalate, the repairs the gate accepts each rest on nothing still broken; modules that cannot be built yet are listed as not covered, and the patch never carries a `sorry`.
 - **The gate fails closed.** If an input is missing or incomplete (the base did not build, a snapshot is from another gate version, no kernel checker exists for the toolchain), the verdict is `gate-unavailable`. Nothing is accepted.
 - **It is tested against cheating.** Planted-violation tests try statement edits, added hypotheses, deleted theorems, `sorry`, new axioms, `native_decide`, edits to protected files, and an unchecked theorem added from inside a proof. Each must be rejected. They run with `uv run pytest`.
 
@@ -189,7 +190,7 @@ Every number with its denominator, tool commit and source is in [RESULTS.md](RES
 - **Replays only.** It runs historical cases on a laptop, or one at a time on a GitHub-hosted runner by manual dispatch. It opens no PRs.
 - **Three target repos configured:** curve25519-dalek-lean-verify, SparsePostQuantumRatchet-verify (SPQR) and SymCrypt.
 - **Two agents:** Claude Code and Codex CLI. Codex's cost is an upper bound ("at most"), because its usage reports cannot show which requests were long enough to cost more. Codex cannot enforce a turn or dollar cap itself, so the target configs cap it by time (and by the run's dollar cap, checked between attempts).
-- **All or nothing.** A case is accepted only if every broken proof is repaired.
+- **Partial acceptance, whole candidate.** Since 2026-11-03 each repaired proof is accepted on its own when it does not rest on anything still broken, so a PR that also needs a human (say, a statement that no longer type-checks) still gets the repairs the bot can make; CI stays red until the human part is done. But the gate judges the bot's candidate as a whole, so one bad repair costs the others.
 - **Build and import breaks** are not handled.
 - **Cost caps are accounting, not enforcement.** A metering proxy that holds the API key and enforces a hard cap is planned with the GitHub Actions version.
 - **Kernel replay is incomplete** in modules that use native-code proofs; such acceptances are flagged.
