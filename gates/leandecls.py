@@ -124,6 +124,9 @@ def parse(src: str) -> tuple[list[dict], list[str]]:
                       "statement": norm(stmt), "body": norm(body),
                       "line": cur["idx"][0] + 1,  # 1-based, where the keyword and name are (scope.resolve)
                       "end_line": cur["idx"][-1] + 1,
+                      # First line of the prefix (attributes, `set_option … in`), which G0 freezes; the
+                      # declaration's own line if it has none (inventory.missing).
+                      "pre_line": (cur["pre"][0] if cur["pre"] else cur["idx"][0]) + 1,
                       # Raw offsets of the body in `src` (from its `:=`/`|`/`where` to the declaration's
                       # last line), for byte-exact comparisons (scope.raw_stub_problem).
                       "body_span": (start + len(stmt), offs[cur["idx"][-1]] + len(lines[cur["idx"][-1]]))})

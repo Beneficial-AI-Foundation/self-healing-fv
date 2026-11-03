@@ -94,9 +94,11 @@ def missing(snapshot: dict, skip_modules: set[str] | frozenset = frozenset()) ->
     the messages come from a namespace tracker over the text (`qualified_names`); they decide nothing.
 
     Record → text: every theorem or axiom Lean records with a line is a declaration the parse sees,
-    at that line, or a dotted child of the declaration whose lines it lies in (a `where` helper).
-    Otherwise the parse did not see it (a macro-made or swallowed declaration), and G0 could not
-    scope it: coverage fails, so the gate cannot decide."""
+    at that line; or a dotted child of the declaration whose lines it lies in (a `where` helper); or
+    on text G0 freezes, a declaration's attribute prefix or a gap between declarations (attribute-made
+    theorems, custom commands; Phase 1 reruns, 2026-11-04). Otherwise it lies inside a declaration's
+    statement or body, where the parse did not see it (a macro-made or swallowed declaration), and
+    G0 could not scope it: coverage fails, so the gate cannot decide."""
     records = snapshot.get("records", {})
     dirs = snapshot.get("src_dirs")
     by_line: dict[tuple[str, int], list[str]] = {}
@@ -132,6 +134,13 @@ def missing(snapshot: dict, skip_modules: set[str] | frozenset = frozenset()) ->
             if records[n].get("kind") not in SEEN_KINDS:
                 continue
             if any(d["line"] == line for d in ds):
+                continue
+            # On text G0 freezes: a declaration's attribute or option prefix (`@[step]` makes
+            # `T.mvcgen_spec`, `@[ext]` makes `S.ext`, `@[mk_iff]` makes `P_iff`, each with the
+            # attribute's range), or a gap between declarations (a custom command such as SPQR's
+            # `#decompose`). G0 rejects any change there, and G1 freezes the record.
+            if any(d["pre_line"] <= line < d["line"] for d in ds) or \
+                    not any(d["pre_line"] <= line <= d["end_line"] for d in ds):
                 continue
             around = [d for d in ds if d["line"] <= line <= d["end_line"]]
             parents = [p for d in around for p in by_line.get((mod, d["line"]), [])]
