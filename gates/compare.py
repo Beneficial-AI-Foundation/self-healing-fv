@@ -43,18 +43,35 @@ Verdicts:
                                  non-empty `native_code`: accepted, flagged; some repaired theorem
                                  rests on native code, as its base version did)
   passed-without-kernel-replay  every check that ran passed, but G5 did not run: not accepted
+  partially-accepted             component acceptance only: as `accepted` (same checks, same
+                                 flags), for the theorems in `accepted_theorems`; the case is not
+                                 complete (broken theorems still stubbed, or an excluded region)
   rejected                       a check failed, the case is ineligible, or a theorem is unrepaired
+                                 (complete-case acceptance; component: nothing was accepted)
   gate-unavailable               the gate could not decide (see `unavailable`); a check that
                                  failed outright while only G5 could not run is `rejected`
 
-Complete-case acceptance (the prototype): every broken theorem must be repaired (§4.3).
+`--acceptance` (§4.3). "complete" (the default): every broken theorem must be repaired and the
+candidate must build with no stubs. "component" (decided 2026-11-03, Dana; the pipeline's choice):
+  - the excluded region X is every audited module that fails or is blocked in the stubbed broken
+    state (a statement that no longer elaborates, a file-level error, or importing such a module).
+    Its declarations leave the frozen set and are listed (`excluded`); nothing in X is certified,
+    and the diff may not touch it (G3). Anything that imports X is in X, so no accepted proof can
+    use it. Every check above holds on the rest (the component), its coverage rules included;
+  - the candidate may keep the stubs of broken theorems it did not repair (and, head reference,
+    stubs outside the broken set): their `sorry` is allowed as a source; any other is not;
+  - a repaired theorem whose closure, its helpers' included, reaches a stub is a G2 violation, as
+    before; an existing declaration that reaches one is listed as `blocked`, not a violation;
+  - the candidate may fail to build only in modules that failed in the stubbed broken state (G3),
+    and every module observed there must be observed in the candidate.
+  The candidate as a whole must pass; then each repaired theorem is accepted (`accepted_theorems`).
 """
 from __future__ import annotations
 
 import hashlib
 import re
 
-from . import inventory, patch, scope, version
+from . import inventory, leandecls, patch, scope, version
 from .snapshot import config_hash, module_file, module_of, protected
 
 BASE3 = {"propext", "Classical.choice", "Quot.sound"}
@@ -84,8 +101,25 @@ def _fp(r: dict) -> tuple:
     return (r.get("kind"), r.get("canon"), r.get("body_canon"))
 
 
-def preconditions(cfg: dict, base: dict, broken: dict, cand: dict, reference: str = "base") -> list[str]:
-    """Reasons the gate cannot decide. Empty means the snapshots can be trusted as inputs."""
+def excluded_modules(broken: dict) -> set[str]:
+    """Component acceptance (§4.3): the audited modules that fail or are blocked in the stubbed
+    broken state. Not `unknown` (a build that failed outside the project says nothing)."""
+    return {m for m, s in broken.get("modules", {}).items() if s in ("failed", "blocked")}
+
+
+def body_is_stub(sources: dict[str, str], file: str, key: str) -> bool:
+    """The declaration's proof in these sources is exactly the gate's stub, `:= by sorry`."""
+    text = sources.get(file)
+    if text is None:
+        return False
+    d = next((d for d in leandecls.parse(text)[0] if d["key"] == key), None)
+    return d is not None and d["body"] == scope.STUB
+
+
+def preconditions(cfg: dict, base: dict, broken: dict, cand: dict, reference: str = "base",
+                  excluded: set[str] | frozenset = frozenset()) -> list[str]:
+    """Reasons the gate cannot decide. Empty means the snapshots can be trusted as inputs.
+    `excluded`: component acceptance's excluded region, left out of the head's coverage check."""
     out = []
     want_cfg, want_gate = config_hash(cfg), version()
     for name, s in (("base", base), ("broken", broken), ("candidate", cand)):
@@ -101,7 +135,7 @@ def preconditions(cfg: dict, base: dict, broken: dict, cand: dict, reference: st
         # The head is the reference: it must be as complete as a base reference would have to be.
         if not broken.get("stmtcanon", {}).get("ok", False):
             out.append("broken snapshot (the reference): fingerprinting failed")
-        n, missing = inventory.missing(broken)
+        n, missing = inventory.missing(broken, excluded)
         if missing:
             out.append(f"broken snapshot (the reference): {len(missing)} of {n} theorems written in the sources "
                        f"have no record, e.g. {missing[0]}")
@@ -141,7 +175,8 @@ def preconditions(cfg: dict, base: dict, broken: dict, cand: dict, reference: st
         out.append("candidate build timed out")
     elif not c.get("ok") and not c.get("failed_modules"):
         out.append("candidate build failed outside the project (no project module has an error)")
-    elif c.get("ok") and not cand.get("stmtcanon", {}).get("ok", False):
+    elif (c.get("ok") or excluded) and not cand.get("stmtcanon", {}).get("ok", False):
+        # Component acceptance: the candidate fails in X by construction, and its records still decide.
         out.append("fingerprinting the candidate failed" + (" (timed out)" if cand.get("stmtcanon", {}).get("timeout")
                                                             else ""))
     return out
@@ -149,7 +184,7 @@ def preconditions(cfg: dict, base: dict, broken: dict, cand: dict, reference: st
 
 def compare(cfg: dict, base: dict, broken: dict, cand: dict, diff: str, reference: str = "base",
             stubs: list[str] | None = None, head_sources: dict[str, str] | None = None,
-            tampered: list[str] | None = None) -> dict:
+            tampered: list[str] | None = None, acceptance: str = "complete") -> dict:
     """`reference` (§4.9) is what the bot is held to. "base" (replay): the frozen set and the
     trust baseline are the base's, so the change's own statement and trust changes count against
     the candidate too. "head" (live, decided 2026-10-30): they are the change's as written, i.e.
@@ -167,18 +202,28 @@ def compare(cfg: dict, base: dict, broken: dict, cand: dict, diff: str, referenc
     `tampered`: inputs whose hashes differ from those the pipeline recorded before any agent ran
     (cli.py `--expect-hashes`); any makes the gate unable to decide. A cheap check only: the
     pipeline is not trusted, and full protection of the gate's inputs needs the agent sandbox
-    (DESIGN.md §9.3)."""
+    (DESIGN.md §9.3).
+
+    `acceptance` (§4.3): "complete" (default) or "component" (see the module docstring)."""
     if reference not in ("base", "head"):
         raise ValueError(f"unknown reference {reference!r}")
+    if acceptance not in ("complete", "component"):
+        raise ValueError(f"unknown acceptance {acceptance!r}")
     head = reference == "head"
+    component = acceptance == "component"
+    dirs = broken.get("src_dirs")
+    xmods = excluded_modules(broken) if component else set()
+    in_x = lambda file: module_of(file, dirs) in xmods
     checks: dict[str, dict] = {}
-    unavailable = preconditions(cfg, base, broken, cand, reference)
+    unavailable = preconditions(cfg, base, broken, cand, reference, xmods)
     unavailable += [f"an input changed after the pipeline recorded it, before any agent ran: {t}" for t in tampered or []]
     g0 = scope.check(cfg, base, broken, diff)
     checks["G0"] = g0
     bset = g0["info"]["broken_set"]
     repaired = {b["name"] for b in bset if b["name"]}
     for b in bset:
+        if in_x(b["file"]):
+            continue  # component: in the excluded region, never accepted, so its record is not needed
         if not b["name"] or b["name"] not in (broken if head else base)["records"]:
             unavailable.append(f"broken theorem {b['key']} ({b['file']}) has no {'head' if head else 'base'} record")
     outside: list[dict] = []  # stubs the candidate cannot repair (head reference)
@@ -210,18 +255,26 @@ def compare(cfg: dict, base: dict, broken: dict, cand: dict, diff: str, referenc
     # Head reference: the frozen set is the stubbed broken state's own records, so a declaration
     # the change removed is not frozen and one it added is; one that does not elaborate there, or
     # a module not observed, still makes the case ineligible.
+    # Component acceptance (§4.3): the excluded region X is not frozen here and not certified; it is
+    # listed instead. Stubs outside the broken set (head reference) stay stubs, like unrepaired ones.
+    excluded_decls: list[str] = []
     if head:
         generated = []
         inventory_ = {n: r for n, r in broken["records"].items() if "error" not in r}
         unobserved = [{"decl": n, "module": r.get("module"), "status": "error"}
                       for n, r in broken["records"].items() if "error" in r]
-        unobserved += [{"decl": m, "module": m, "status": s} for m, s in broken["modules"].items() if s != "observed"]
-        unobserved += [{"decl": o["name"] or o["key"], "module": module_of(o["file"], broken.get("src_dirs")),
-                        "status": "stubbed outside the broken set"} for o in outside]
+        unobserved += [{"decl": m, "module": m, "status": s} for m, s in broken["modules"].items()
+                       if s != "observed" and m not in xmods]
+        if not component:
+            unobserved += [{"decl": o["name"] or o["key"], "module": module_of(o["file"], dirs),
+                            "status": "stubbed outside the broken set"} for o in outside]
+        excluded_decls = sorted(n for n, r in base["records"].items() if r.get("module") in xmods)
     else:
         generated = sorted(n for n, r in base["records"].items()
                            if r.get("written") is False and n not in broken["records"])
         inventory_ = {n: r for n, r in base["records"].items() if "error" not in r and n not in generated}
+        excluded_decls = sorted(n for n, r in inventory_.items() if r["module"] in xmods)
+        inventory_ = {n: r for n, r in inventory_.items() if r["module"] not in xmods}
         unobserved = []
         for name, r in inventory_.items():
             status = broken["modules"].get(r["module"], "missing")
@@ -229,6 +282,14 @@ def compare(cfg: dict, base: dict, broken: dict, cand: dict, diff: str, referenc
                 unobserved.append({"decl": name, "module": r["module"],
                                    "status": status if status != "observed" else "missing"})
     eligible = not unobserved and broken.get("stmtcanon", {}).get("ok", False) and bool(inventory_)
+    # The stubs the candidate still carries (component): broken theorems (and, head reference, stubs
+    # outside the broken set) outside X whose proof in the candidate is still exactly the stub. Their
+    # `sorry` is allowed as a source; reaching it still bars acceptance (G2).
+    kept_stubs: set[str] = set()
+    if component:
+        for s in [*bset, *outside]:
+            if s["name"] and not in_x(s["file"]) and body_is_stub(cand.get("sources", {}), s["file"], s["key"]):
+                kept_stubs.add(s["name"])
 
     # --- G1 statement identity, against the stubbed broken state.
     v1 = []
@@ -253,7 +314,8 @@ def compare(cfg: dict, base: dict, broken: dict, cand: dict, diff: str, referenc
     checks["G1"] = {"id": "G1", "ok": not v1 and eligible, "violations": v1,
                     "info": {"inventory": len(inventory_), "unobserved": unobserved[:200],
                              "unobserved_n": len(unobserved), "generated_not_frozen": generated[:200],
-                             "stubbed_outside_broken_set": outside[:200]}}
+                             "stubbed_outside_broken_set": outside[:200],
+                             "excluded_modules": sorted(xmods), "excluded_n": len(excluded_decls)}}
 
     # --- G2 trust base.
     # The reference closure of each frozen declaration: (axioms, sorry sources). Base reference:
@@ -283,14 +345,24 @@ def compare(cfg: dict, base: dict, broken: dict, cand: dict, diff: str, referenc
             sources |= set(b.get("sorry_sources", [])) & head_sorry
         return axioms | ({SORRY} if sources else set()), sources
 
-    v2, inherited = [], {}
+    v2, inherited, blocked = [], {}, {}
     for name, r in inventory_.items():
         c = cand["records"].get(name)
         if c is None or "error" in c:
             continue
+        if name in kept_stubs:
+            continue  # component: still the stub, not repaired; nothing about it is accepted
         ref_axioms, ref_sources = ref_closure(name)
         allowed = BASE3 | ref_axioms
         extra = sorted(set(c.get("axioms", [])) - allowed)
+        srcs = set(c.get("sorry_sources", []))
+        if component and name not in repaired and srcs & kept_stubs:
+            # An existing declaration (its proof unchanged, G0) that reaches a stub the candidate
+            # keeps: blocked on that theorem, not a violation, as long as every other sorry it
+            # reaches is one its reference closure already had.
+            if SORRY not in extra or srcs <= ref_sources | kept_stubs:
+                blocked[name] = sorted(srcs & kept_stubs)
+                extra = [x for x in extra if x != SORRY]
         if name in repaired and SORRY in c.get("axioms", []):
             # Sorry only where the base version already reached it, through the same unproved
             # lemmas, and flagged (owner decision 2026-10-26). A stub of a still-broken theorem
@@ -310,7 +382,7 @@ def compare(cfg: dict, base: dict, broken: dict, cand: dict, diff: str, referenc
             v2.append({"check": "G2", "decl": name, "msg": f"new axioms in its closure: {', '.join(extra)}"})
     ref_sorry = head_sorry if head else {s for r in base["records"].values() for s in r.get("sorry_sources", [])}
     cand_sorry = {s for r in cand["records"].values() for s in r.get("sorry_sources", [])}
-    for s in sorted(cand_sorry - ref_sorry):
+    for s in sorted(cand_sorry - ref_sorry - kept_stubs):
         v2.append({"check": "G2", "decl": s, "msg": f"carries a sorry that the {reference} did not have"})
     # Head reference: a declaration the change removed is added if the candidate brings it back;
     # only the base's tactic-generated ones (a stub removed them, the repair regenerates them) are not.
@@ -332,10 +404,11 @@ def compare(cfg: dict, base: dict, broken: dict, cand: dict, diff: str, referenc
     # (allowed above because the head uses them, e.g. a model the change rewrote).
     beyond = {t: sorted(set(cand["records"][t].get("axioms", [])) - BASE3 - {SORRY}
                         - set(base["records"].get(t, {}).get("axioms", [])))
-              for t in sorted(repaired) if head and t in cand["records"]}
+              for t in sorted(repaired - kept_stubs) if head and t in cand["records"]}
     checks["G2"] = {"id": "G2", "ok": not v2, "violations": v2,
                     "info": {"added": added, "inherited_sorry": inherited, "native_code": native,
-                             "axioms_beyond_base_version": {t: a for t, a in beyond.items() if a}}}
+                             "axioms_beyond_base_version": {t: a for t, a in beyond.items() if a},
+                             "kept_stubs": sorted(kept_stubs), "blocked": blocked}}
 
     # --- G3 clean build of exactly (stubbed broken state + diff).
     v3 = []
@@ -355,7 +428,27 @@ def compare(cfg: dict, base: dict, broken: dict, cand: dict, diff: str, referenc
     if not cand.get("clean"):
         v3.append({"check": "G3", "msg": "candidate was not built clean (project build output reused)"})
     b = cand.get("build", {})
-    if not b.get("ok") and b.get("failed_modules"):  # failures elsewhere are preconditions above
+    if component:
+        # Component (§4.3): the diff stays out of X, the build fails only where the stubbed broken
+        # state failed, and everything observed there is observed in the candidate.
+        try:
+            touched = sorted({p for f in patch.parse(diff) for p in (f["old"], f["new"]) if p and in_x(p)})
+        except patch.PatchError:
+            touched = []  # a malformed diff is G0's (and the apply above) to reject
+        for p in touched:
+            v3.append({"check": "G3", "file": p, "msg": f"changes {p}, in a module the stubbed broken state "
+                       f"cannot build ({module_of(p, dirs)}): nothing there can be checked"})
+        new_failed = sorted(set(b.get("failed_modules", [])) - set(broken.get("build", {}).get("failed_modules", [])))
+        if not b.get("ok") and new_failed:
+            errs = [e for e in b.get("errors", []) if module_of(e["file"], dirs) in new_failed]
+            v3.append({"check": "G3", "msg": f"build failed: {len(errs)} new error(s), in {', '.join(new_failed[:5])}",
+                       "errors": errs[:10]})
+        lost = sorted(m for m, s in broken.get("modules", {}).items()
+                      if s == "observed" and cand.get("modules", {}).get(m) != "observed")
+        if lost:
+            v3.append({"check": "G3", "msg": f"{len(lost)} module(s) observed in the stubbed broken state are not "
+                       f"observed in the candidate, e.g. {lost[0]}"})
+    elif not b.get("ok") and b.get("failed_modules"):  # failures elsewhere are preconditions above
         errs = b.get("errors", [])
         v3.append({"check": "G3", "msg": f"build failed: {len(errs)} error(s), in "
                    f"{', '.join(b['failed_modules'][:5])}", "errors": errs[:10]})
@@ -367,7 +460,8 @@ def compare(cfg: dict, base: dict, broken: dict, cand: dict, diff: str, referenc
 
     kr = cand.get("kernel_replay") or {}
     v5, incomplete = [], []
-    if cand.get("build", {}).get("ok") and not kr.get("ran"):
+    # Component: the build fails in X by construction, so G5 must have run whenever G3 holds.
+    if (cand.get("build", {}).get("ok") or component and not v3) and not kr.get("ran"):
         unavailable.append(f"kernel replay (G5) could not run: {kr.get('error', 'no record of it')}")
     elif kr.get("ran"):
         missing = sorted(set(kr.get("required_modules", [])) - set(kr.get("modules", {})))
@@ -408,24 +502,36 @@ def compare(cfg: dict, base: dict, broken: dict, cand: dict, diff: str, referenc
         n = bt["name"] or bt["key"]
         fails = sorted({x["check"] for c in checks.values() for x in c["violations"]
                         if x.get("decl") in (bt["name"], bt["key"]) or x.get("file") == bt["file"] and "decl" not in x})
-        theorems.append({"name": n, "file": bt["file"], "failed_checks": fails,
-                         "repaired": not fails and not unavailable and n not in still_stubbed})
+        # Component: X is never accepted; a kept stub is not repaired. Complete: as before.
+        status = ("excluded" if in_x(bt["file"]) else "rejected" if fails else "undecided" if unavailable else
+                  "still-stubbed" if (n in kept_stubs if component else n in still_stubbed) else "accepted")
+        theorems.append({"name": n, "file": bt["file"], "failed_checks": fails, "status": status,
+                         "repaired": status == "accepted"})
     failed = [cid for cid, c in checks.items() if c["ok"] is False]
     g5_only = all(u.startswith("kernel replay (G5)") for u in unavailable)
+    accepted_theorems = [t["name"] for t in theorems if t["status"] == "accepted"]
     if unavailable and not (failed and g5_only):
         verdict = "gate-unavailable"
     elif failed and unavailable:  # a definite G0-G3 failure stands without G5 (owner decision 2026-10-26)
         verdict = "rejected"
-    elif failed or not eligible or not bset or still_stubbed:
+    elif failed or not eligible or not bset or (still_stubbed and not component) or not accepted_theorems:
         verdict = "rejected"
     elif checks["G5"]["ok"] is not True:  # defensive: G5 must have run and passed to accept
         verdict = "passed-without-kernel-replay"
+    elif component and (kept_stubs or xmods or len(accepted_theorems) < len(bset)):
+        verdict = "partially-accepted"  # the same checks passed; the case is not complete (§4.3)
     else:
         verdict = "accepted"
+    ok = verdict in ("accepted", "partially-accepted")
     return {"format": 2, "gate_version": version(), "reference": reference, "verdict": verdict, "failed_checks": failed,
             "unavailable": unavailable, "eligible": eligible, "theorems": theorems,
-            "inherited_sorry": inherited if verdict == "accepted" else {},
-            "kernel_replay_incomplete": incomplete if verdict == "accepted" else [],
-            "native_code": native if verdict == "accepted" else [],
+            "accepted_theorems": accepted_theorems if ok else [],
+            "inherited_sorry": inherited if ok else {},
+            "kernel_replay_incomplete": incomplete if ok else [],
+            "native_code": native if ok else [],
             "heartbeats": g0["info"]["heartbeats"], "checks": checks,
-            "acceptance": "complete-case (prototype, §4.3); G5 required"}
+            "acceptance": acceptance,
+            # Component acceptance (§4.3): what the verdict does not cover, and what waits on a stub.
+            "excluded": {"modules": sorted(xmods), "declarations": excluded_decls[:500],
+                         "declarations_n": len(excluded_decls)},
+            "kept_stubs": sorted(kept_stubs), "blocked": blocked}

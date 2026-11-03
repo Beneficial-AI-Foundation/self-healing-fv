@@ -5,6 +5,7 @@
   gate compare  --config T.toml --base B.json --broken K.json --candidate C.json --diff D.patch --out V.json
                 [--reference base|head --head-tree DIR [--stubs S.json]]   (head: live, the change as written is the reference, §4.9)
                 [--expect-hashes H.json]   (from `gate input-hashes`, recorded before any agent ran)
+                [--acceptance complete|component]   (component: per theorem, still-broken ones stubbed, §4.3)
   gate input-hashes --config T.toml --base B.json --broken K.json [--head-tree DIR]
   gate diff     --config T.toml --before DIR --after DIR --out D.patch
   gate audit    --config T.toml --base B.json --head H.json [--out A.json]   (exit 0 no-change, 1 changed, 2 incomplete)
@@ -12,7 +13,8 @@
   gate tree-hash --config T.toml --tree DIR       (hash of a tree's snapshot inputs, for caching)
 
 Exit status of `scope`/`compare`: 0 pass/accepted, 1 not accepted (rejected, or passed without the
-kernel replay), 2 the gate could not run or could not decide (gate-unavailable).
+kernel replay), 2 the gate could not run or could not decide (gate-unavailable), 3 (compare,
+component acceptance) partially accepted: some repaired theorems accepted, the case not complete.
 """
 from __future__ import annotations
 
@@ -108,6 +110,9 @@ def main(argv: list[str] | None = None) -> int:
                            "the proofs it stubbed (file::declaration), cross-checked against the gate's own")
             c.add_argument("--expect-hashes", type=Path, help="JSON from `gate input-hashes`, recorded before any agent "
                            "ran: the gate cannot decide if an input no longer matches")
+            c.add_argument("--acceptance", choices=("complete", "component"), default="complete",
+                           help="complete (default): every broken theorem repaired, no stubs left; component "
+                                "(§4.3): each repaired theorem accepted on its own, still-broken ones stay stubbed")
     ih = sub.add_parser("input-hashes", help="hashes of compare's inputs, to record before any agent runs")
     ih.add_argument("--config", type=Path, required=True)
     ih.add_argument("--base", type=Path, required=True)
@@ -186,9 +191,9 @@ def main(argv: list[str] | None = None) -> int:
             tampered = sorted(k for k in want.keys() | have.keys() if want.get(k) != have.get(k))
         res = compare.compare(cfg, base, broken, read_json(a.candidate), diff, reference=a.reference,
                               stubs=json.loads(a.stubs.read_text()) if a.stubs else None, head_sources=head_sources,
-                              tampered=tampered)
+                              tampered=tampered, acceptance=a.acceptance)
         write_json(res, a.out)
-        return {"accepted": 0, "gate-unavailable": 2}.get(res["verdict"], 1)
+        return {"accepted": 0, "gate-unavailable": 2, "partially-accepted": 3}.get(res["verdict"], 1)
     except Exception as e:  # the gate never "passes" on its own failure
         print(f"gate: {type(e).__name__}: {e}", file=sys.stderr)
         return 2
