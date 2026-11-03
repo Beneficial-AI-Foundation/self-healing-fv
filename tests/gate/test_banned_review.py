@@ -32,7 +32,6 @@ def test_opaque_and_extern_are_banned(text, label):
 # `raises=AssertionError`: only the gate's wrong verdict may satisfy the xfail. An import or setup
 # error must fail the test (re-check of b2e981a: the first version imported its helpers from a test
 # file that is not on this branch, so a ModuleNotFoundError satisfied the strict xfail forever).
-@pytest.mark.xfail(strict=True, raises=AssertionError, reason="Phase 1: record coverage of additions")
 def test_an_added_theorem_without_a_record_is_checked_even_without_stop(tmp_path):
     """The `stop` ban makes re-check #4's added-without-record tests fail closed in G0, but the hole
     (an added declaration StmtCanon drops is never seen by G2) remains with a repo macro that expands

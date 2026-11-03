@@ -2,11 +2,11 @@
 lines; the namespace text parse only drives the coverage check, inventory.missing). Variants that
 try to make a theorem go unchecked or a statement change go unnoticed.
 
-The premises do not depend on which names StmtCanon drops (fix (c), in progress, keeps every
-declaration with a source range). Where a test needs a declaration without a record, it either
-removes the record from the snapshot (any StmtCanon omission, which coverage exists to catch) or
-uses a `_native` name component, which StmtCanon drops with and without (c) (per-use native axioms
-carry a source range, so (c) keeps that rule).
+The premises do not depend on which names StmtCanon drops (it changes with Phase 1, which keeps
+every written declaration and drops only hygienic names, `_aux_<Mod>___` helpers and genuine native
+auxiliaries). Where a test needs a declaration without a record, it removes the record from the
+snapshots: any StmtCanon omission, which coverage exists to catch. (An earlier version used a
+`_native` name component instead; Phase 1 records such a written theorem.)
 """
 from __future__ import annotations
 
@@ -41,8 +41,6 @@ def test_coverage_reports_a_theorem_without_a_record():
     assert "Toy.Specs: N.t" in missing, missing
 
 
-@pytest.mark.xfail(strict=True, raises=AssertionError, reason="DESIGN §11 q24 (deferred, owner decision 2026-11-03): the coverage "
-                   "parse misreads a closed `public section`; a line-based coverage check would fix it")
 def test_coverage_reports_a_theorem_without_a_record_after_public_section():
     """Expected: the same report. At f85e09d coverage passes, so N.t would be neither frozen (G1)
     nor in G2's per-declaration checks, and nothing says so."""
@@ -55,15 +53,17 @@ def test_coverage_reports_a_theorem_without_a_record_after_public_section():
 # both text parsers (leandecls.DECL_RE and inventory.THEOREM_RE know no `public` modifier; fix (a),
 # in progress, adds it). Placed right after a theorem, leandecls folds it into that theorem's body,
 # so the stub of that theorem swallows it and the repair, an edit of that body for G0, can bring it
-# back with any statement. Two names:
-#   - `pub_lemma` has a record in the base. Base reference: missing from the stubbed state, so the
-#     case is ineligible (holds). Head reference: the frozen set is the stubbed state's records, so
-#     it is not frozen; re-added it is an added declaration, allowed when the repair uses it.
-#   - `Q._native.hidden` has no record anywhere (StmtCanon drops `_native` components), so nothing
-#     freezes it in either reference.
+# back with any statement. Two variants of `pub_lemma`:
+#   - recorded: it has a record in the base. Base reference: missing from the stubbed state, so the
+#     case is ineligible. Head reference: the frozen set is the stubbed state's records, so it is not
+#     frozen; re-added it is an added declaration, allowed when the repair uses it.
+#   - record-dropped: its record is removed from every snapshot (any StmtCanon omission), so nothing
+#     would freeze it in either reference; coverage must report it.
+# Since fix (a) (public/meta) and (b) (base plus stubs, byte-exact) both variants fail closed.
 SPEC_OLD = "theorem double_spec (x : Nat) : double x = 2 * x := by\n  unfold double\n  omega\n"
 SPEC_STUB = "theorem double_spec (x : Nat) : double x = 2 * x := by sorry\n"
-NAMES = ["pub_lemma", "Q._native.hidden"]
+VARIANTS = ["recorded", "record-dropped"]
+NAME = "pub_lemma"
 
 
 def pub(name: str, weak: bool) -> str:
@@ -105,16 +105,38 @@ def make_env(root, name: str, head_ref: bool) -> dict:
     b, k = (json.loads((root / f"{label}.json").read_text()) for label in ("B", "K"))
     assert b["build"]["ok"] and k["build"]["ok"]
     assert name not in k["records"]                       # swallowed by the stub
-    assert (name in b["records"]) == (name == "pub_lemma")  # premise, with and without fix (c)
     return {"root": root, "cfg": cfg, "broken": broken, "head": head, "head_ref": head_ref}
 
 
-@pytest.fixture(scope="module", params=[(n, h) for n in NAMES for h in (False, True)],
-                ids=[f"{n}-{'head' if h else 'base'}" for n in NAMES for h in (False, True)])
+def drop_records(path, names) -> None:
+    """Remove records from a snapshot file, as if StmtCanon had missed those declarations."""
+    s = json.loads(path.read_text())
+    for n in names:
+        s["records"].pop(n, None)
+    path.write_text(json.dumps(s))
+
+
+def run_dropping(env, label, edit, names, acceptance="complete"):
+    """`run`, with `names` removed from the base, stubbed and candidate snapshots when the env asks
+    for it: the candidate is snapshotted by a first `run`, then gated again on the edited records."""
+    if not env.get("drop"):
+        return run(env, label, edit, acceptance=acceptance)
+    for x in ("B", "K"):
+        drop_records(env["root"] / f"{x}.json", names)
+    rc, v = run(env, label, edit, acceptance=acceptance)
+    c = env["root"] / f"{label}.C.json"
+    if not c.exists():
+        return rc, v
+    drop_records(c, names)
+    return run(env, label, edit, acceptance=acceptance)
+
+
+@pytest.fixture(scope="module", params=[(d, h) for d in VARIANTS for h in (False, True)],
+                ids=[f"{d}-{'head' if h else 'base'}" for d in VARIANTS for h in (False, True)])
 def pub_env(tmp_path_factory, request):
-    name, head_ref = request.param
-    e = make_env(tmp_path_factory.mktemp("lines-public-theorem"), name, head_ref)
-    e["name"] = name
+    variant, head_ref = request.param
+    e = make_env(tmp_path_factory.mktemp("lines-public-theorem"), NAME, head_ref)
+    e["name"], e["drop"] = NAME, variant == "record-dropped"
     return e
 
 
@@ -123,24 +145,25 @@ def test_a_hidden_public_theorem_cannot_be_weakened(pub_env, acceptance):
     """Expected (§4.2: the bot may not change a statement): rejected or gate-unavailable. The repair
     of double_spec re-adds the public theorem with its conclusion weakened to `True` (and the repair
     of double_three uses it); G0 sees only an edit of double_spec's body, G1 has nothing frozen to compare, and coverage does not count
-    `public theorem`. Predates 2b21643 (the text parsers are unchanged). At f85e09d: accepted for
-    `Q._native.hidden` in both references, and for `pub_lemma` with the head reference."""
+    `public theorem`. Predates 2b21643. At f85e09d: accepted for the record-less theorem in both
+    references, and for the recorded one with the head reference. Passes since fixes (a) and (b)."""
     name = pub_env["name"]
     edit = {SPECS: lambda t: t.replace(SPEC_STUB, SPEC_VALID + pub(name, weak=True)).replace(THREE_STUB, three_valid(name))}
-    rc, v = run(pub_env, f"pub-weak-{acceptance}", edit, acceptance=acceptance)
+    rc, v = run_dropping(pub_env, f"pub-weak-{acceptance}", edit, [name], acceptance=acceptance)
     assert v is not None
     cand = json.loads((pub_env["root"] / f"pub-weak-{acceptance}.C.json").read_text())
     assert cand["build"]["ok"], cand["build"].get("errors")
     assert v["verdict"] in ("rejected", "gate-unavailable"), (v["verdict"], v["accepted_theorems"], v["unavailable"])
 
 
-# Codex's shape (base reference): a hidden `public theorem` with no record, left stubbed between
-# declarations. The `_native` component keeps it without a record with and without fix (c).
-AUX_OLD = "public theorem Q._native.aux : True := by\n  trivial\n"
-AUX_STUB = "public theorem Q._native.aux : True := by sorry\n"
+# Codex's shape (base reference): a hidden `public theorem`, left stubbed between declarations, with
+# its record and with the record removed (any StmtCanon omission).
+AUX_OLD = "public theorem aux_lemma : True := by\n  trivial\n"
+AUX_STUB = "public theorem aux_lemma : True := by sorry\n"
 
 
-def test_a_hidden_stub_is_not_accepted_as_complete(tmp_path):
+@pytest.mark.parametrize("drop", [False, True], ids=["recorded", "record-dropped"])
+def test_a_hidden_stub_is_not_accepted_as_complete(tmp_path, drop):
     """Found by Codex (synthetic snapshots), confirmed here with Lean. Expected: a candidate whose
     source still has a `sorry` stub is never `accepted`. Base reference only: in the head reference
     derived_stubs sees the changed text and fails closed. The base reference does not check that the
@@ -160,9 +183,8 @@ def test_a_hidden_stub_is_not_accepted_as_complete(tmp_path):
     for label, tree in (("B", base), ("K", broken)):
         r = gate("snapshot", "--config", str(cfg), "--tree", str(tree), "--out", str(tmp_path / f"{label}.json"))
         assert r.returncode == 0, r.stderr
-    assert "Q._native.aux" not in json.loads((tmp_path / "B.json").read_text())["records"]  # premise
-    env = {"root": tmp_path, "cfg": cfg, "broken": broken, "head": None, "head_ref": False}
-    rc, v = run(env, "aux", {SPECS: lambda t: t.replace(SPEC_STUB, SPEC_VALID)}, acceptance="complete")
+    env = {"root": tmp_path, "cfg": cfg, "broken": broken, "head": None, "head_ref": False, "drop": drop}
+    rc, v = run_dropping(env, "aux", {SPECS: lambda t: t.replace(SPEC_STUB, SPEC_VALID)}, ["aux_lemma"])
     assert v is not None
     assert AUX_STUB in json.loads((tmp_path / "aux.C.json").read_text())["sources"][SPECS]
     assert v["verdict"] != "accepted" and rc != 0, (v["verdict"], v["unavailable"])
