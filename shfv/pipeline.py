@@ -382,7 +382,8 @@ class Run:
                 self.p.step(f"[{i}/{len(broken)}] {b['key']} → automation sweep ({det.get('kind')})")
                 ok, tries = self.sweep(cand, b)
                 entry["sweep"] = tries
-                if ok and not self.pregate_violations(cand, b) and not self.reaches_sorry(cand, b, base_records):
+                if ok and not self.pregate_violations(cand, b) and \
+                        not self.reaches_sorry(cand, b, base_records, task.still_stubbed):
                     self.p.result(f"repaired by the sweep, no model call ({', '.join(t['action'] for t in tries)})")
                     entry.update(outcome="candidate", repaired_by="sweep")
                     repaired.append(b["name"])
@@ -425,7 +426,7 @@ class Run:
                 # Pre-gate (feedback only; the gate alone decides): the file builds, and G0 holds.
                 builds, errors = self.build_module(cand, b)
                 violations = self.pregate_violations(cand, b) if builds else []
-                if builds and not violations and (why := self.reaches_sorry(cand, b, base_records)):
+                if builds and not violations and (why := self.reaches_sorry(cand, b, base_records, task.still_stubbed)):
                     violations = [why]  # it rests on a stub: the gate would reject the whole candidate
                 entry["prebuild_ok"] = builds
                 self.p.result(f"{att.stop}, {att.turns} turns, {costs.describe(att.cost_status, att.cost_usd, att.model)}, "
@@ -543,14 +544,23 @@ class Run:
         except (OSError, json.JSONDecodeError, KeyError):
             return []
 
-    def reaches_sorry(self, cand: Path, b: dict, base_records: dict) -> str | None:
+    def reaches_sorry(self, cand: Path, b: dict, base_records: dict, still_stubbed: list[str] = ()) -> str | None:
         """Pre-gate (feedback only, §3.3 S4; component acceptance, §4.3): after the file builds, does
-        the repaired theorem's closure reach `sorryAx` where its base version's did not? Then it uses a
-        theorem that is still stubbed, and the gate would reject the whole candidate (G2). Asked with
-        `#print axioms` on the built module; inconclusive (private name, error) means no finding."""
+        the repaired theorem rest on a theorem that is still stubbed? The gate would then reject the
+        whole candidate (G2). If its base version reached no `sorry`, asked with `#print axioms` on the
+        built module (inconclusive, e.g. a private name or an error, means no finding). If it did
+        (inherited `sorry`), `#print axioms` cannot tell the stub from the inherited source (gate review,
+        2026-11-03), so the new proof and the declarations the attempt added are searched for the names
+        of `still_stubbed` instead: a textual heuristic that misses indirect use, which the gate catches."""
         name = b.get("name")
-        if not name or name.startswith("_private") or "sorryAx" in base_records.get(name, {}).get("axioms", []):
+        if not name or name.startswith("_private"):
             return None
+        base = base_records.get(name, {})
+        if "sorryAx" in base.get("axioms", []):
+            hit = mentions_stub((cand / b["file"]).read_text(), (self.broken / b["file"]).read_text(), b["key"],
+                                list(still_stubbed), base.get("sorry_sources", []))
+            return (f"the proof of {short(name)} uses {', '.join(hit[:3])}, which is still unproved here (stubbed), so "
+                    "it cannot be accepted; prove it without that theorem") if hit else None
         mod = self.modules(cand).module(b["file"])
         q = self.scratch / "pregate-axioms.lean"  # outside the candidate tree, so never in its diff
         q.write_text(f"import {mod}\n#print axioms {name}\n")
@@ -1142,6 +1152,23 @@ SWEEPABLE = {"no-goals", "heartbeats", "unsolved-goals"}
 SWEEP_BUILDS = 3
 SWEEP_HEARTBEATS = 1000000  # 5x Lean's default; raising it is allowed (G0) and shown in the report
 SWEEP_CLOSER = "all_goals first | omega | simp_all | decide | rfl"
+
+
+def scope_short(key: str) -> str:
+    """A declaration key as written in proofs: without the parser's `#n` suffix and the namespace."""
+    return key.split("#", 1)[0].rsplit(".", 1)[-1]
+
+
+def mentions_stub(text: str, before: str, key: str, still_stubbed: list[str], inherited: list[str]) -> list[str]:
+    """The still-stubbed theorems named in `key`'s proof or in a declaration the attempt added (in
+    `text`, not in `before`). Names that are also a short name of one of the theorem's own inherited
+    `sorry` sources are left out: the text cannot tell them apart, and a false finding would roll
+    back a valid attempt (pre-gate feedback only; the gate decides)."""
+    now, was = parse_decls(text), parse_decls(before)
+    scanned = [text[d["body_start"]:d["end"]] for k, d in now.items() if k == key or k not in was]
+    own = {scope_short(s) for s in inherited}
+    return sorted({s for s in still_stubbed if s != key and scope_short(s) not in own and any(
+        re.search(rf"(?<![\w']){re.escape(scope_short(s))}(?![\w'])", t) for t in scanned)})
 
 
 def stub_lines(diff: str) -> list[str]:

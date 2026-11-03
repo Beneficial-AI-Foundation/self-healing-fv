@@ -799,3 +799,20 @@ def test_written_sorry_and_stub_discount(tmp_path):
     a["axioms_changed"] = []
     pipeline.discount_stub_sorry(a, [])
     assert a["outcome"] == "no-change"
+
+
+def test_pregate_names_a_kept_stub_where_axioms_cannot_tell():
+    """Gate review 2026-11-03, finding 1: with an inherited `sorry`, `#print axioms` cannot tell a stub
+    from the inherited source, so the pre-gate looks for the names of still-stubbed theorems in the new
+    proof and in what the attempt added (feedback only; the gate decides)."""
+    before = ("theorem part (x : Nat) : True := by sorry\n\ntheorem uses_part (x : Nat) : True := by sorry\n")
+    via = before.replace("theorem uses_part (x : Nat) : True := by sorry",
+                         "theorem uses_part (x : Nat) : True := by\n  have h := (part x)\n  trivial")
+    assert pipeline.mentions_stub(via, before, "uses_part", ["part"], ["base_gap"]) == ["part"]
+    helper = before.replace("theorem uses_part", "theorem h1 : True := Foo.part 0\n\ntheorem uses_part")
+    assert pipeline.mentions_stub(helper, before, "uses_part", ["part"], []) == ["part"]
+    # Not a mention: another name that contains it, or the theorem's own inherited source of the same short name.
+    other = before.replace("by sorry\n\ntheorem uses_part (x : Nat) : True := by sorry",
+                           "by sorry\n\ntheorem uses_part (x : Nat) : True := by\n  exact (part_two x).1")
+    assert pipeline.mentions_stub(other, before, "uses_part", ["part"], []) == []
+    assert pipeline.mentions_stub(via, before, "uses_part", ["Sub.part"], ["Scalar.part"]) == []

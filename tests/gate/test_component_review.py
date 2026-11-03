@@ -1,6 +1,7 @@
 """Adversarial review of component acceptance (e260baf, DESIGN.md §4.3): planted candidates that the
-gate should reject and, at the time of the review (2026-11-03), does not. Each test states the rule
-it expects and what e260baf does; a test that passes records an attack that held.
+gate should reject and, at the time of the review (2026-11-03), did not. Each test states the rule
+it expects and what e260baf did; a test that passed then records an attack that held. All pass since
+the fixes (owner decision 2026-11-03, DESIGN.md §4.3 "Reaching a stub").
 
 The change rewrites the "extracted" `double`, which breaks `double_spec` (a `@[simp]` lemma) and
 `double_three`. The stubbed broken state has both as `:= by sorry`. `g_le` is NOT broken: its
