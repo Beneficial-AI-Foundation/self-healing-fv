@@ -16,7 +16,8 @@ from .snapshot import module_of, protected
 STUB = ":= by sorry"
 BANNED = [
     (r"\bsorry\b", "sorry"), (r"\bsorryAx\b", "sorryAx"), (r"\badmit\b", "admit"), (r"\baxiom\b", "axiom"),
-    (r"\bstop\b", "stop"),  # core tactic `stop` is `repeat sorry` (gate re-check #4, 2026-11-03)    (r"\bopaque\b", "opaque"), (r"@\[[^\]]*\bextern\b", "@[extern]"),
+    (r"\bstop\b", "stop"),  # core tactic `stop` is `repeat sorry` (gate re-check #4, 2026-11-03)
+    (r"\bopaque\b", "opaque"), (r"@\[[^\]]*\bextern\b", "@[extern]"),
     (r"\bimplemented_by\b", "@[implemented_by]"), (r"\bcsimp\b", "@[csimp]"),
     (r"^\s*import\b|\bimport\s+[A-Z]", "import"), (r"\bdebug\.", "debug.* option"),
     (r"\bmaxHeartbeats\s+0\b", "maxHeartbeats 0"), (r"\bunsafe\b", "unsafe"),
