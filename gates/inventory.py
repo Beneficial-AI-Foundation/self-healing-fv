@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import re
 
-from .leandecls import MODIFIERS, parse, strip_comments
+from .leandecls import MODIFIERS, is_record_of, parse, strip_comments
 from .snapshot import module_of
 
 # Every declaration modifier Lean accepts (leandecls.MODIFIERS): a `public theorem` that this parse
@@ -87,8 +87,10 @@ def missing(snapshot: dict, skip_modules: set[str] | frozenset = frozenset()) ->
     by Lean's source lines (DESIGN.md §4.5, §11 q24; 2026-11-03). `skip_modules`: modules left out
     (component acceptance, §4.3: the excluded region).
 
-    Text → record: every theorem and definition the source parse finds has a record of its module at
-    its line; one whose name is on a later line counts if a record lies within its lines. Nothing
+    Text → record: every theorem and definition the source parse finds has its own record (the
+    name ends with the written name, `leandecls.is_record_of`) in its module at its line; a record of
+    another declaration on the same line does not count (Lean allows two on one line; re-check #5).
+    One whose name is on a later line counts if a record lies within its lines. Nothing
     else counts: a record without a line, or a name written in two source files whose one constant
     carries the other module (dalek PR 535), is uncovered, so the gate cannot decide. The names in
     the messages come from a namespace tracker over the text (`qualified_names`); they decide nothing.
@@ -120,7 +122,9 @@ def missing(snapshot: dict, skip_modules: set[str] | frozenset = frozenset()) ->
         # Only Lean's lines decide (plan review, 2026-11-03): a record without a line, or one only a
         # text-derived name could match (the same name written in two files, dalek PR 535), does
         # not cover; the gate then cannot decide. `full` (the tracker's name) is for the message only.
-        if (mod, d["line"]) in by_line:
+        # The record must be this declaration's own (re-check #5, 2026-11-04): Lean allows two
+        # declarations on one line, and a neighbour's record must not cover one StmtCanon dropped.
+        if any(is_record_of(n, d["name"]) for n in by_line.get((mod, d["line"]), [])):
             continue
         if not d["name"] or d["name"].startswith("<"):  # the name is on a later line
             if any((mod, ln) in by_line for ln in range(d["line"], d["end_line"] + 1)):

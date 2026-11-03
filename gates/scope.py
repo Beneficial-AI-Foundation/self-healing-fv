@@ -60,9 +60,8 @@ def resolve(snapshot: dict, file: str, key: str) -> tuple[str | None, str | None
     if len(at) > 1:
         return None, f"`{key}` ({file}:{d['line']}): several records at that line ({', '.join(at[:3])})"
     name = at[0]
-    user = name.split(".0.", 1)[1] if name.startswith("_private.") and ".0." in name else name
-    written = d["name"].removeprefix("_root_.")
-    if not (user == written or user.endswith("." + written)):
+    if not leandecls.is_record_of(name, d["name"]):
+        written = d["name"].removeprefix("_root_.")
         return None, f"`{key}` ({file}:{d['line']}): the record at that line is `{name}`, not a `{written}`"
     return name, None
 

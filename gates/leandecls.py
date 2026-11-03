@@ -95,6 +95,16 @@ def norm(s: str) -> str:
     return " ".join(s.split())
 
 
+def is_record_of(record: str, written: str) -> bool:
+    """Is `record` (a full name, as StmtCanon writes it) the record of a declaration written as
+    `written`? Its name, without a `_private.<Mod>.0.` prefix, is the written name or ends with it
+    after a dot (namespaces). Scope naming (`scope.resolve`) and line coverage (`inventory.missing`)
+    both ask this, so a record on a line never stands for another declaration on that line."""
+    user = record.split(".0.", 1)[1] if record.startswith("_private.") and ".0." in record else record
+    written = written.removeprefix("_root_.")
+    return bool(written) and (user == written or user.endswith("." + written))
+
+
 def parse(src: str) -> tuple[list[dict], list[str]]:
     """Split comment-stripped `src` into top-level declarations and the gaps between them.
 
