@@ -22,7 +22,7 @@ on:
       per_run_usd:
         description: "Per-run cost cap, USD (API-equivalent, from token counts)"
         required: true
-        default: "3"
+        default: "15"
       per_run_minutes:
         description: "Per-run deadline, minutes (preparation, attempts, builds, gate)"
         required: true
@@ -47,7 +47,7 @@ on:
       artifact: {type: string, required: true, description: "Name of the run-record artifact"}
       agent: {type: boolean, default: true}
       model: {type: string, default: ""}
-      per_run_usd: {type: string, default: "3"}
+      per_run_usd: {type: string, default: "15"}
       per_run_minutes: {type: string, default: "300"}
       runner: {type: string, default: self-healing-fv}
       # From pr-repair.yml, which a target repo calls on its own PRs (the run is then the target's):

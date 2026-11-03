@@ -16,7 +16,7 @@ on:
       pr: {type: string, required: true, description: "The PR number (empty: nothing to do, e.g. a fork's PR)"}
       runner: {type: string, default: ubuntu-latest}
       agent: {type: boolean, default: true}
-      per_run_usd: {type: string, default: "3"}
+      per_run_usd: {type: string, default: "15"}
       per_run_minutes: {type: string, default: "120"}
     secrets:
       ANTHROPIC_API_KEY: {required: false}

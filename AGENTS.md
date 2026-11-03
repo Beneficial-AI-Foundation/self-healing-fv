@@ -6,7 +6,7 @@ Guidance for coding agents working in this repo (Claude Code, Codex CLI, Factory
 
 A CI bot for verified Rust (Rust → Charon/Aeneas → Lean). After a Rust, Aeneas, or Lean/Mathlib change breaks proofs, the bot first tries fixed edits without a model (the sweep), then an AI agent repairs the remaining proofs. A repair is accepted only if the model-free gate passes: no theorem statement changed, no new `axiom` or `sorry`, a clean rebuild, and a kernel re-check. Otherwise the bot escalates to a human with evidence. It never decides on its own whether a changed spec is acceptable. On a live PR the gate holds the bot's edits to the PR as written; the PR's own spec and trust changes are listed by the audit and not judged (`docs/DESIGN.md` §4.9).
 
-The prototype replays historical cases locally and writes a report; it opens no PRs. It can also run on a live change (base and head commits, e.g. an open PR), and `.github/workflows/live.yml` does so silently on the targets' failing PRs, posting nothing. `.github/workflows/pr-repair.yml` is the reusable workflow a target repo can call on its own PRs; it writes a Repair section into the PR's comment (not deployed yet).
+The prototype replays historical cases locally and writes a report; it opens no PRs. It can also run on a live change (base and head commits, e.g. an open PR), and `.github/workflows/live.yml` does so silently on the targets' failing PRs, posting nothing. `.github/workflows/pr-repair.yml` is the reusable workflow a target repo can call on its own PRs; it writes a Repair section into the PR's comment (in shadow mode on libsignal-verify since 2026-11-03).
 
 ## Docs
 
