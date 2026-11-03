@@ -24,7 +24,7 @@ gh run download <run id> -R Beneficial-AI-Foundation/self-healing-fv     # fetch
 | `case` | `dalek-lean-verify/e65b46d0` | `<repo>/<sha8>`, as in `data/replay/` |
 | `agent` | off | Off: the no-model sweep only (`--no-agent`), and the job never sees the key. On: the agent runs on the `ANTHROPIC_API_KEY` secret. |
 | `model` | the target config's | e.g. `claude-sonnet-5-5` |
-| `per_run_usd` | `3` | Per-run cost cap (`--per-run-usd`), API-equivalent from token counts. Until the metering proxy exists (§9.5), it is Claude Code's own enforcement plus the pipeline's accounting, not a hard limit. |
+| `per_run_usd` | `15` | Per-run cost cap (`--per-run-usd`), API-equivalent from token counts. Until the metering proxy exists (§9.5), it is Claude Code's own enforcement plus the pipeline's accounting, not a hard limit. |
 | `per_run_minutes` | `300` | Per-run deadline (`--per-run-minutes`), from the start of preparation |
 | `runner` | `ubuntu-latest` | Runner label. A dalek replay needs the larger runner `self-healing-fv` (8 cores, 32 GB, 300 GB SSD; see Pilot results) |
 | `upload_transcripts` | off | Also upload the agent's raw transcripts in the run record. Off by default because anyone can download a public repo's artifacts (see "What a run produces"). |
@@ -56,7 +56,7 @@ Give the key its own spend limit with the provider (§9.3): that is the only lim
 
 The `select` job's summary lists every open PR it looked at and the reason it was or was not run.
 
-**How each picked PR runs:** `live.yml` calls `replay.yml` with the target, the PR's base and head SHAs, and `refs/pull/<n>/head` to fetch (which also serves PRs from forks). One at a time (`max-parallel: 1`), and one `live` workflow at a time. Everything else is the replay job above: the same runner setup, bubblewrap, key handling, resource sampler and replay store cache (keyed on the head). By default the agent is on, with a $3 per-run cap and 300 minutes; the runner is the target's `[live] runner` (`self-healing-fv`, the 8-core runner).
+**How each picked PR runs:** `live.yml` calls `replay.yml` with the target, the PR's base and head SHAs, and `refs/pull/<n>/head` to fetch (which also serves PRs from forks). One at a time (`max-parallel: 1`), and one `live` workflow at a time. Everything else is the replay job above: the same runner setup, bubblewrap, key handling, resource sampler and replay store cache (keyed on the head). By default the agent is on, with a $15 per-run cap and 300 minutes; the runner is the target's `[live] runner` (`self-healing-fv`, the 8-core runner).
 
 **What it uploads:**
 - **`live-<target>-<head8>`**: the run record (`report.json`, `report.md`, each attempt's prompt; transcripts only with the `upload_transcripts` input). `report.md` is what shadow mode would post. The name is also the "already run" marker.
@@ -78,7 +78,7 @@ gh workflow run live.yml -R Beneficial-AI-Foundation/self-healing-fv -f agent=fa
 | `ref` | – | A branch, tag or SHA of the target to run on, instead of picking PRs. It need not be a PR, and the author, draft, Lean-check and already-run rules do not apply. The base is the default branch, or the PR's base if the ref is an open PR's head. |
 | `skip_checks` | off | With `ref`: run even if the extraction check did not pass on it |
 | `agent` | on | Off: the no-model sweep only |
-| `per_run_usd`, `per_run_minutes` | `3`, `300` | Per-run caps, as for a replay |
+| `per_run_usd`, `per_run_minutes` | `15`, `300` | Per-run caps, as for a replay |
 | `max_runs` | `2` | PRs to run at most |
 
 ## Self-heal on a target's own PRs
@@ -136,6 +136,7 @@ jobs:
     with:
       target: spqr
       pr: ${{ github.event.workflow_run.pull_requests[0].number || inputs.pr }}
+      per_run_usd: "15"   # optional: the per-run cost cap, USD (the default); per_run_minutes: "120"
     secrets:
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
 ```

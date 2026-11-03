@@ -28,7 +28,7 @@ on:
       per_run_usd:
         description: "Per-run cost cap, USD (API-equivalent, from token counts)"
         required: true
-        default: "3"
+        default: "15"
       per_run_minutes:
         description: "Per-run deadline, minutes"
         required: true
