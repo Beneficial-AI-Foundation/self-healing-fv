@@ -202,25 +202,34 @@ def coreNative (env : Environment) (sysroot : System.FilePath) (audited : Std.Ha
       core := core.insert n
   return core
 
+/-- Types of Lean's metaprogram helpers: what `macro`/`macro_rules`/`notation`/`infix`, `elab`,
+    `syntax`/`declare_syntax_cat`, `app_unexpander` and `delab` define (probe on Lean 4.24 and 4.35,
+    2026-11-04, `tests/gate/test_lean_helpers.py`). Named unchecked (single backtick). -/
+def metaprogramTypes : List Name :=
+  [`Lean.Macro, `Lean.Elab.Term.TermElab, `Lean.Elab.Command.CommandElab, `Lean.Elab.Tactic.Tactic,
+   `Lean.PrettyPrinter.Unexpander, `Lean.PrettyPrinter.Delaborator.Delab, `Lean.ParserDescr,
+   `Lean.TrailingParserDescr, `Lean.Parser.Parser, `Lean.Parser.TrailingParser, `Lean.Parser.Category]
+
 /-- Is `n` an auxiliary, not a user-facing declaration? With the environment (self-healing-fv,
-    2026-11-03; probe on Lean 4.21–4.35 in DESIGN.md §4.5): a constant with a declaration range is
-    written in source, and user-facing whatever its name components (`Foo.inj`, `induct.t`,
-    `a.proof_1`, `_aux_hidden`), except: an inaccessible name (`isInaccessibleUserName`: a `✝`
-    component or `_inaccessible`); a notation/macro/elab helper (`_aux_<Module>___macroRules_…`,
-    `___elabRules_…`, `___unexpand_…`), the implementation of a syntax command; and a per-use native
-    axiom by provenance (`isNativeAux`). A macro-scoped name with a range is kept: `initialize` makes
-    `initFn._@.<Mod>.<hash>._hygCtx._hyg.<n>` (dalek PR 734: 1, SPQR PR 679: 8), frozen like any
-    other definition; leaving those out is DESIGN.md §11 question 26. Constants without a range, and
-    calls without an environment, use the name rules above. -/
+    2026-11-03; probe on Lean 4.21–4.35 in DESIGN.md §4.5), a constant with a declaration range is
+    decided by what it is, never by its name (re-check #5, 2026-11-04: dropping by name let a written
+    `_aux_<Mod>___h` or `✝` theorem, or a `where` helper so named, go unchecked). It is auxiliary only
+    if it is a definition whose type is a metaprogram type (`metaprogramTypes`: the macro, elab,
+    unexpander, delaborator and syntax helpers Lean generates, and such definitions written by hand),
+    or a per-use native axiom by provenance (`isNativeAux`). A theorem or another axiom with a range
+    always keeps its record, whatever its name. A macro-scoped definition (`initialize`'s
+    `initFn._@.<Mod>.<hash>._hygCtx._hyg.<n>`, dalek PR 734: 1, SPQR PR 679: 8) is kept and frozen;
+    leaving those out is DESIGN.md §11 question 26. Constants without a range, and calls without an
+    environment, use the name rules above. -/
 def isAuxiliary (n : Name) (env? : Option Environment := none) : Bool :=
   let user := (privateToUserName? n).getD n
   match env? with
   | some env =>
     if (declRangeExt.find? env n).isSome then
-      user.isInaccessibleUserName ||
-      user.components.any (fun c => let s := c.toString (escape := false)
-                                    s.startsWith "_aux_" && (s.splitOn "___").length > 1) ||
-      isNativeAux env n
+      match env.find? n with
+      | some (.defnInfo v) => metaprogramTypes.contains (v.type.getAppFn.constName?.getD .anonymous)
+      | some (.axiomInfo _) => isNativeAux env n
+      | _ => false
     else nameAuxiliary user false
   | none => nameAuxiliary user false
 

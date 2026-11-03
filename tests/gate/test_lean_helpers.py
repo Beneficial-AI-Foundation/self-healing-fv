@@ -73,6 +73,33 @@ theorem uses_private : True := by
 end
 """
 MODULE_FROM = (4, 30)
+# Metaprogram helpers (re-check #5, delta 2): a ranged definition is dropped only by its type (a macro,
+# elab, unexpander, delaborator or syntax helper), and a theorem never, whatever its name.
+META = """\
+import Lean
+open Lean Elab Term PrettyPrinter Delaborator
+
+syntax "mysyn" term : term
+macro_rules | `(mysyn $t) => `($t)
+macro "mymac" t:term : term => `($t + 0)
+notation "⟪" a "⟫" => (a, a)
+infixl:65 " +++ " => Nat.add
+elab "myelab" : term => return mkNatLit 1
+elab "mycmd" : command => pure ()
+elab "mytac" : tactic => pure ()
+syntax (name := mySynKind) "mysyn2" : term
+@[term_elab mySynKind] def elabMysyn2 : TermElab := fun _ _ => return mkNatLit 2
+@[app_unexpander Nat.succ] def unexpSucc : Unexpander := fun _ => throw ()
+@[delab app.Nat.pred] def delabPred : Delab := failure
+declare_syntax_cat mycat
+macro "mk_thm " n:ident : command => `(theorem $n : True := trivial)
+mk_thm madeByMacro
+theorem _aux_Meta___h : True := trivial
+theorem plain : True := _aux_Meta___w
+where _aux_Meta___w : True := trivial
+def plainDef : Nat := 1
+"""
+META_RECORDS = {"_aux_Meta___h", "madeByMacro", "plain", "plain._aux_Meta___w", "plainDef"}
 
 
 def version(toolchain: str) -> tuple[int, int]:
@@ -87,13 +114,14 @@ def check(toolchain: str) -> dict:
         root = Path(d)
         (root / "lean-toolchain").write_text(f"leanprover/lean4:{toolchain}\n")
         mod = version(toolchain) >= MODULE_FROM
-        libs = ["Probe", "Top"] + (["MProbe"] if mod else [])
+        libs = ["Probe", "Top", "Meta"] + (["MProbe"] if mod else [])
         (root / "lakefile.toml").write_text(f'name = "probe"\ndefaultTargets = {json.dumps(libs)}\n'
                                             + "".join(f'\n[[lean_lib]]\nname = "{n}"\n' for n in libs))
         (root / "Probe.lean").write_text(PROBE)
         if mod:
             (root / "MProbe.lean").write_text(MPROBE)
         (root / "Top.lean").write_text(TOP)
+        (root / "Meta.lean").write_text(META)
         (root / "Bad.lean").write_text(BAD)
         b = subprocess.run(["lake", "build"], cwd=root, capture_output=True, text=True)
         if b.returncode != 0:
@@ -119,6 +147,11 @@ def check(toolchain: str) -> dict:
             mrecs = {r["name"]: r for r in map(json.loads, (x for x in m.stdout.splitlines() if x.startswith("{")))}
             row["module"] = {n: {"axioms": mrecs.get(n, {}).get("axioms"), "native": mrecs.get(n, {}).get("native_axioms")}
                              for n in ("mnd", "mbvd", "uses_private")}
+        x = subprocess.run(["lake", "env", "lean", "--run", str(STMTCANON), "--import", "Meta", "--module", "Meta"],
+                           cwd=root, capture_output=True, text=True)
+        if x.returncode != 0:
+            row["error"] = row.get("error") or f"StmtCanon (Meta): {(x.stderr or x.stdout).strip()[-400:]}"
+        row["meta_records"] = sorted(json.loads(l)["name"] for l in x.stdout.splitlines() if l.startswith("{"))
         (root / "files.txt").write_text(f"{root / 'Top.lean'}\n{root / 'Bad.lean'}\n")
         p = subprocess.run(["lake", "env", "lean", "--run", str(DEPS), str(root / "files.txt")],
                            cwd=root, capture_output=True, text=True)
@@ -157,6 +190,8 @@ def problems(row: dict) -> list[str]:
         r = row["module"]["uses_private"]
         if "_private.MProbe.0.mnd2._native.native_decide.ax_9" not in (r["axioms"] or []) or r["native"]:
             out.append(f"module crafted: axioms {r['axioms']}, native {r['native']}")
+    if set(row.get("meta_records") or []) != META_RECORDS:
+        out.append(f"metaprogram helpers: records {row.get('meta_records')}, want {sorted(META_RECORDS)}")
     if "Probe" not in (row["deps_top"] or []) or not row["deps_bad_error"]:
         out.append(f"Deps: Top {row['deps_top']}, Bad rejected {row['deps_bad_error']}")
     return out

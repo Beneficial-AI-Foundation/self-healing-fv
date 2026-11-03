@@ -74,6 +74,18 @@ def test_a_dropped_declaration_named_on_the_next_line_is_still_checked(tmp_path)
     assert_not_accepted(v)
 
 
+def test_an_unused_where_helper_with_a_dropped_name_is_still_checked(tmp_path):
+    """Delta check of 6abed28. A `where` helper of the repaired theorem is a child of its record, so
+    record → text accepts it; one with a dropped name (`_aux_<Mod>___…`) has no record at all, and
+    text → record does not ask for `where` helpers. Unused, its admission is never seen. Expected:
+    rejected or gate-unavailable. Needs a repo tactic macro for the admission, like the cases above."""
+    e = make_env(tmp_path, lambda t: t.replace("/-- A spec predicate", CLOSE_GOAL + "/-- A spec predicate"),
+                 [(SPEC_OLD, SPEC_STUB)], False)
+    repair = SPEC_VALID + "where\n  _aux_Toy_Specs___h : False := by close_goal\n"
+    rc, v = run(e, "where-child", edit_specs((SPEC_STUB, repair)))
+    assert_not_accepted(v)
+
+
 # Codex (re-check #5), a relaxation against ade19f1: a base theorem StmtCanon drops (macro-helper
 # shaped name) that shares its line with another declaration. At ade19f1 the base fails coverage
 # (gate-unavailable); at b045013 the neighbour's record covers it, so the case is eligible, and a
