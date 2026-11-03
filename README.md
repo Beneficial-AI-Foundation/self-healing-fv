@@ -13,9 +13,9 @@ When Rust code, the Aeneas extractor, or the Lean toolchain changes, Lean proofs
 
 LLMs propose, scripts enforce: the bot never edits a statement and never decides whether a spec change is acceptable.
 
-**Status:** early prototype. It replays historical breaks on your machine and writes the report it would post on the PR. It does not open PRs; one case at a time can be replayed on GitHub Actions by manual dispatch (docs/ACTIONS.md). Each target repo is described by one config file (`targets/<repo>.toml`: build targets, protected files, agent, model, budgets, prices). Tracked in Linear as SCI-1706 (sub-issues SCI-1714 data, SCI-1715 repair loop, SCI-1717 GitHub Actions).
+**Status:** early prototype, in shadow mode on libsignal-verify since 2026-11-03. A target repo calls `pr-repair.yml` on its own PRs, and the bot posts one comment per PR with its repair or its escalation; it never pushes (docs/ACTIONS.md). Locally it replays historical breaks and writes the report it would post. Each target repo is described by one config file (`targets/<repo>.toml`: build targets, protected files, agent, model, budgets, prices). Tracked in Linear as SCI-1706 (sub-issues SCI-1714 data, SCI-1715 repair loop, SCI-1717 GitHub Actions).
 
-**Which doc?** Visitors: [docs/OVERVIEW.md](docs/OVERVIEW.md). Results so far: [docs/RESULTS.md](docs/RESULTS.md). Users: [docs/CLI.md](docs/CLI.md). Contributors: [docs/DESIGN.md](docs/DESIGN.md). Tools and agents reading the output: [docs/REPORT.md](docs/REPORT.md). Coding agents: [AGENTS.md](AGENTS.md).
+**Which doc?** Visitors: [docs/OVERVIEW.md](docs/OVERVIEW.md), or the [slide deck](docs/slides/self-healing-ci-2026-11.pdf) (Nov 2026 snapshot). Results so far: [docs/RESULTS.md](docs/RESULTS.md). Users: [docs/CLI.md](docs/CLI.md). Contributors: [docs/DESIGN.md](docs/DESIGN.md). Tools and agents reading the output: [docs/REPORT.md](docs/REPORT.md). Coding agents: [AGENTS.md](AGENTS.md).
 
 ## Quick start
 
