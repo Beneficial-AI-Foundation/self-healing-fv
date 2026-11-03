@@ -36,12 +36,40 @@ def short(key: str) -> str:
     return key.split("#", 1)[0]
 
 
+def resolve(snapshot: dict, file: str, key: str) -> tuple[str | None, str | None]:
+    """(fully qualified name, problem) of declaration `key` of `file`, from the snapshot's records.
+
+    Named from Lean, not from text (owner decision 2026-11-03, Dana, after two gate re-checks: a
+    short-name suffix took `Foo.part` for `Bar.part`, then a namespace-aware text parse was fooled
+    by a `public section`). The key's declaration line in the snapshot's own source is matched with
+    the records' `line` (StmtCanon: where the name is written) in that module. Fail closed, never
+    guess: no record on that line, several, or one whose name does not end with the written name,
+    and `problem` says why; the gate then cannot decide."""
+    mod = module_of(file, snapshot.get("src_dirs"))
+    text = snapshot.get("sources", {}).get(file)
+    if text is None:
+        return None, f"{file} is not among the snapshot's sources"
+    d = next((d for d in leandecls.parse(text)[0] if d["key"] == key), None)
+    if d is None:
+        return None, f"`{key}` is not declared in {file}"
+    at = sorted(n for n, r in snapshot.get("records", {}).items()
+                if r.get("module") == mod and r.get("line") == d["line"])
+    if not at:
+        return None, f"`{key}` ({file}:{d['line']}) has no record at that line"
+    if len(at) > 1:
+        return None, f"`{key}` ({file}:{d['line']}): several records at that line ({', '.join(at[:3])})"
+    name = at[0]
+    user = name.split(".0.", 1)[1] if name.startswith("_private.") and ".0." in name else name
+    written = d["name"].removeprefix("_root_.")
+    if not (user == written or user.endswith("." + written)):
+        return None, f"`{key}` ({file}:{d['line']}): the record at that line is `{name}`, not a `{written}`"
+    return name, None
+
+
 def full_name(snapshot: dict, file: str, key: str) -> str | None:
-    """Fully qualified name of declaration `key` of `file`, from the snapshot's records."""
-    mod, s = module_of(file, snapshot.get("src_dirs")), short(key)
-    names = [n for n, r in snapshot.get("records", {}).items()
-             if r.get("module") == mod and (n == s or n.endswith("." + s))]
-    return min(names, key=len) if names else None
+    """Fully qualified name of declaration `key` of `file`, or None if it cannot be named for certain
+    (`resolve` says why)."""
+    return resolve(snapshot, file, key)[0]
 
 
 def broken_set(base: dict, broken: dict) -> list[dict]:
@@ -56,8 +84,12 @@ def broken_set(base: dict, broken: dict) -> list[dict]:
         b = {d["key"]: d for d in leandecls.parse(before)[0]}
         for d in leandecls.parse(text)[0]:
             if d["body"] == STUB and d["key"] in b and b[d["key"]]["body"] != STUB:
-                out.append({"file": file, "key": d["key"], "kind": d["kind"],
-                            "name": full_name(broken, file, d["key"]) or full_name(base, file, d["key"])})
+                observed = broken.get("modules", {}).get(module_of(file, broken.get("src_dirs"))) == "observed"
+                name, problem = resolve(broken, file, d["key"]) if observed else (None, None)
+                if name is None and problem is None:  # no records there (a module that failed): the base's
+                    name, problem = resolve(base, file, d["key"])
+                out.append({"file": file, "key": d["key"], "kind": d["kind"], "name": name,
+                            **({"problem": problem} if problem else {})})
     return out
 
 
@@ -85,7 +117,8 @@ def derived_stubs(head_sources: dict[str, str], broken: dict) -> tuple[list[dict
                 problems.append(f"{file}: `{key}` differs from the head outside its proof")
             elif k["body"] != h["body"]:
                 if k["body"] == STUB and h["body"] != STUB:
-                    stubs.append({"file": file, "key": key, "name": full_name(broken, file, key)})
+                    name, problem = resolve(broken, file, key)
+                    stubs.append({"file": file, "key": key, "name": name, **({"problem": problem} if problem else {})})
                 else:
                     problems.append(f"{file}: the proof of `{key}` differs from the head and is not a stub")
     return stubs, problems

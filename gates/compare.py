@@ -73,6 +73,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+from collections import Counter
 
 from . import inventory, leandecls, patch, scope, version
 from .snapshot import config_hash, module_file, module_of, protected
@@ -227,8 +228,14 @@ def compare(cfg: dict, base: dict, broken: dict, cand: dict, diff: str, referenc
     for b in bset:
         if in_x(b["file"]):
             continue  # component: in the excluded region, never accepted, so its record is not needed
-        if not b["name"] or b["name"] not in (broken if head else base)["records"]:
+        if b.get("problem"):  # it could not be named for certain from Lean's source positions (scope.resolve)
+            unavailable.append(f"broken theorem {b['key']} ({b['file']}): {b['problem']}")
+        elif not b["name"] or b["name"] not in (broken if head else base)["records"]:
             unavailable.append(f"broken theorem {b['key']} ({b['file']}) has no {'head' if head else 'base'} record")
+    # Distinct declarations must have distinct names: two keys named alike means one was misnamed.
+    dup = sorted(n for n, k in Counter(b["name"] for b in bset if b["name"]).items() if k > 1)
+    if dup:
+        unavailable.append(f"two broken theorems resolve to the same declaration ({', '.join(dup[:3])})")
     outside: list[dict] = []  # stubs the candidate cannot repair (head reference)
     if head:
         if head_sources is None:
@@ -239,6 +246,10 @@ def compare(cfg: dict, base: dict, broken: dict, cand: dict, diff: str, referenc
             unavailable += [f"the stubbed broken state is not the head plus stubs: {p}" for p in problems[:5]]
         in_set = {(b["file"], b["key"]) for b in bset}
         outside = [s for s in found if (s["file"], s["key"]) not in in_set]
+        # Component acceptance keeps these stubs, so their names count (kept_stubs). Under complete-case
+        # acceptance any of them makes the case ineligible, whatever its name.
+        unavailable += [f"stub {s['key']} ({s['file']}): {s['problem']}" for s in outside
+                        if component and s.get("problem") and not in_x(s["file"])]
         # Every broken theorem is a stub by construction, so the head must show it unstubbed: a "head"
         # that is the stubbed tree itself (or was tampered into it) shows no stubs at all.
         unfound = sorted(f"{f}::{k}" for f, k in in_set - {(s["file"], s["key"]) for s in found})

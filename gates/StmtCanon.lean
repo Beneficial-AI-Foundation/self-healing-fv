@@ -30,6 +30,8 @@
      declaration, which took 8 minutes for the ~1350 declarations of one dalek commit.
    - Sorry sources and uses are reported as user-facing names (`foo._unary` → `foo`).
    - No hard-coded import root: `--import` and `--module` come from the target config.
+   - Each record carries the source line of the declaration's name (`line`), so the gate names a
+     declaration exactly from where it is written (2026-11-03). Fingerprints are unchanged.
    - The single-declaration mode and the `consts` field were dropped (unused here). -/
 /- StmtCanon: per-declaration statement fingerprints and trust facts for the gate.
 
@@ -43,6 +45,7 @@ instance helpers are dropped; `_private` names are kept). Emits one JSON line pe
 
   { "name", "kind", "module",
     "written":    whether the declaration has a source range (false: added by a tactic),
+    "line":       the line of its name in its module's source (null if none); not fingerprinted,
     "canon":     canonical α-invariant dump of the elaborated type (authoritative),
     "body_canon": definitions only: canonical dump of the value and of its auxiliary definitions,
     "pp", "pp_body": pretty-printed type / value (display only),
@@ -322,6 +325,11 @@ def auditDecl (audited : Std.HashSet Name) (declName : Name) (reference := false
       -- false for declarations a tactic adds while a proof elaborates (e.g. `bv_decide`'s
       -- `PUnit.enumToBitVec`): they have no source range, and vanish when that proof is stubbed
       ("written", Json.bool (declRangeExt.find? env declName).isSome),
+      -- The line of the declaration's name in its module's source (self-healing-fv: the gate names a
+      -- broken theorem by file and line, not by its short name; DESIGN.md §4.5). Not fingerprinted.
+      ("line", match declRangeExt.find? env declName with
+        | some r => toJson r.selectionRange.pos.line
+        | none => Json.null),
       ("canon", canonDump ci.type), ("pp", truncate (toString pp)),
       ("axioms", namesJson info.axioms),
       ("sorry_sources", namesJson (roots info.sorries)),

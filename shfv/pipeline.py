@@ -368,12 +368,13 @@ class Run:
                 (cand / b["file"]).write_text(replace_body(src, b["key"], orig["proof"]))
             checkpoint = tree_sources(cand)
             det = details.get(key, {})
+            # Later ones, and earlier ones left unrepaired (restubbed): all still `sorry`.
+            stubbed_now = [(o["key"], o["name"]) for o in broken if o is not b and o["name"] not in repaired]
             task = RepairTask(case_id=self.case_id, theorem=b["name"], decl=b["key"], file=b["file"],
                               line=det.get("line", 0), errors=[det.get("msg", "")],
                               cause=", ".join(self.record.get("causes") or [self.record["cause"]]) + pin_summary(self.record),
                               trigger=trigger, toolchain=toolchain,
-                              # Later ones, and earlier ones left unrepaired (restubbed): all still `sorry`.
-                              still_stubbed=[o["key"] for o in broken if o is not b and o["name"] not in repaired],
+                              still_stubbed=[k for k, _ in stubbed_now],
                               repaired_before=[short(r) for r in repaired], context_dir=ctx, lsp_tools=lsp,
                               structured=structured, module=self.modules(cand).module(b["file"]))
             log_root = self.out / "attempts" / f"{i:02d}-{b['key'][:60]}"
@@ -383,7 +384,7 @@ class Run:
                 ok, tries = self.sweep(cand, b)
                 entry["sweep"] = tries
                 if ok and not self.pregate_violations(cand, b) and \
-                        not self.reaches_sorry(cand, b, base_records, task.still_stubbed):
+                        not self.reaches_sorry(cand, b, base_records, stubbed_now):
                     self.p.result(f"repaired by the sweep, no model call ({', '.join(t['action'] for t in tries)})")
                     entry.update(outcome="candidate", repaired_by="sweep")
                     repaired.append(b["name"])
@@ -426,7 +427,7 @@ class Run:
                 # Pre-gate (feedback only; the gate alone decides): the file builds, and G0 holds.
                 builds, errors = self.build_module(cand, b)
                 violations = self.pregate_violations(cand, b) if builds else []
-                if builds and not violations and (why := self.reaches_sorry(cand, b, base_records, task.still_stubbed)):
+                if builds and not violations and (why := self.reaches_sorry(cand, b, base_records, stubbed_now)):
                     violations = [why]  # it rests on a stub: the gate would reject the whole candidate
                 entry["prebuild_ok"] = builds
                 self.p.result(f"{att.stop}, {att.turns} turns, {costs.describe(att.cost_status, att.cost_usd, att.model)}, "
@@ -544,7 +545,8 @@ class Run:
         except (OSError, json.JSONDecodeError, KeyError):
             return []
 
-    def reaches_sorry(self, cand: Path, b: dict, base_records: dict, still_stubbed: list[str] = ()) -> str | None:
+    def reaches_sorry(self, cand: Path, b: dict, base_records: dict,
+                      still_stubbed: list[tuple[str, str | None]] = ()) -> str | None:
         """Pre-gate (feedback only, §3.3 S4; component acceptance, §4.3): after the file builds, does
         the repaired theorem rest on a theorem that is still stubbed? The gate would then reject the
         whole candidate (G2). If its base version reached no `sorry`, asked with `#print axioms` on the
@@ -1159,16 +1161,19 @@ def scope_short(key: str) -> str:
     return key.split("#", 1)[0].rsplit(".", 1)[-1]
 
 
-def mentions_stub(text: str, before: str, key: str, still_stubbed: list[str], inherited: list[str]) -> list[str]:
-    """The still-stubbed theorems named in `key`'s proof or in a declaration the attempt added (in
-    `text`, not in `before`). Names that are also a short name of one of the theorem's own inherited
-    `sorry` sources are left out: the text cannot tell them apart, and a false finding would roll
-    back a valid attempt (pre-gate feedback only; the gate decides)."""
+def mentions_stub(text: str, before: str, key: str, still_stubbed: list[tuple[str, str | None]],
+                  inherited: list[str]) -> list[str]:
+    """The still-stubbed theorems (`(key, full name)`) named in `key`'s proof or in a declaration the
+    attempt added (in `text`, not in `before`). A stub that is itself one of the theorem's inherited
+    `sorry` sources counts (the gate review's finding 1: resting on it is rejected). Left out is only a
+    stub whose short name is shared by a *different* inherited source: the text cannot tell the two
+    apart, and a false finding would roll back a valid attempt (feedback only; the gate decides)."""
     now, was = parse_decls(text), parse_decls(before)
     scanned = [text[d["body_start"]:d["end"]] for k, d in now.items() if k == key or k not in was]
-    own = {scope_short(s) for s in inherited}
-    return sorted({s for s in still_stubbed if s != key and scope_short(s) not in own and any(
-        re.search(rf"(?<![\w']){re.escape(scope_short(s))}(?![\w'])", t) for t in scanned)})
+    own = set(inherited)
+    clash = {scope_short(s) for s in own}
+    return sorted({k for k, name in still_stubbed if k != key and not (name not in own and scope_short(k) in clash)
+                   and any(re.search(rf"(?<![\w']){re.escape(scope_short(k))}(?![\w'])", t) for t in scanned)})
 
 
 def stub_lines(diff: str) -> list[str]:

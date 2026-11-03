@@ -24,7 +24,18 @@ def snap(sources: dict, records: dict, **kw) -> dict:
          "build": {"ok": True, "failed_modules": [], "errors": []}, "stmtcanon": {"ok": True},
          "modules": {"M": "observed"}, "sources": sources, "records": records}
     s.update(kw)
+    with_lines(s)
     return s
+
+
+def with_lines(s: dict) -> None:
+    """Give each record the line its declaration is written on, as StmtCanon does (`line`, since
+    2026-11-03: the gate names a declaration by file and line). Records here are top-level names."""
+    from gates import leandecls
+    where = {d["name"]: d["line"] for text in s["sources"].values() for d in leandecls.parse(text)[0]}
+    for name, r in s["records"].items():
+        if "line" not in r and name in where:
+            r["line"] = where[name]
 
 
 def rec(axioms, sorry=(), uses=()):

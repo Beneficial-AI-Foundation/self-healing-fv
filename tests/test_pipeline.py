@@ -808,11 +808,14 @@ def test_pregate_names_a_kept_stub_where_axioms_cannot_tell():
     before = ("theorem part (x : Nat) : True := by sorry\n\ntheorem uses_part (x : Nat) : True := by sorry\n")
     via = before.replace("theorem uses_part (x : Nat) : True := by sorry",
                          "theorem uses_part (x : Nat) : True := by\n  have h := (part x)\n  trivial")
-    assert pipeline.mentions_stub(via, before, "uses_part", ["part"], ["base_gap"]) == ["part"]
+    part = [("part", "part")]
+    assert pipeline.mentions_stub(via, before, "uses_part", part, ["base_gap"]) == ["part"]
+    # The finding-1 shape: the stub is itself the theorem's inherited source. It still counts.
+    assert pipeline.mentions_stub(via, before, "uses_part", part, ["part"]) == ["part"]
     helper = before.replace("theorem uses_part", "theorem h1 : True := Foo.part 0\n\ntheorem uses_part")
-    assert pipeline.mentions_stub(helper, before, "uses_part", ["part"], []) == ["part"]
-    # Not a mention: another name that contains it, or the theorem's own inherited source of the same short name.
+    assert pipeline.mentions_stub(helper, before, "uses_part", part, []) == ["part"]
+    # Not a mention: another name that contains it; or a *different* inherited source of the same short name.
     other = before.replace("by sorry\n\ntheorem uses_part (x : Nat) : True := by sorry",
                            "by sorry\n\ntheorem uses_part (x : Nat) : True := by\n  exact (part_two x).1")
-    assert pipeline.mentions_stub(other, before, "uses_part", ["part"], []) == []
-    assert pipeline.mentions_stub(via, before, "uses_part", ["Sub.part"], ["Scalar.part"]) == []
+    assert pipeline.mentions_stub(other, before, "uses_part", part, []) == []
+    assert pipeline.mentions_stub(via, before, "uses_part", [("part", "Sub.part")], ["Scalar.part"]) == []
