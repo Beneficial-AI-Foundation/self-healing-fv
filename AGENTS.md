@@ -47,6 +47,8 @@ uv run pytest tests/test_report.py
 
 Gate tests on a real dalek tree run only when `SHFV_DALEK_TREE` points at a built checkout (see `tests/gate/conftest.py`). Run the tests before every commit that touches `shfv/` or `gates/`.
 
+The gate's Lean helpers (`gates/StmtCanon.lean`, `gates/Deps.lean`) must compile on every toolchain the targets use. Check them with `SHFV_LEAN_TOOLCHAINS=all uv run pytest tests/gate/test_lean_helpers.py` (or `uv run python -m tests.gate.test_lean_helpers` for a table) after changing a helper, and add a toolchain to its list when a target bumps Lean.
+
 ## The gate is the trusted core
 
 The agent, the pipeline and the report do not need to be trusted, because only the gate decides acceptance. So a bug in `gates/` is the one kind of bug that could let a weakened statement through. Rules for changes there:
