@@ -82,6 +82,23 @@ def qualified_names(text: str) -> dict[int, tuple[str, bool]]:
     return out
 
 
+def written_name(d: dict) -> str | None:
+    """The name a declaration is written with: the parse's own, or, for one whose name is on a later
+    line (`theorem\n  name`, as in SPQR's FunsExternal.lean), the first token after its keyword in its
+    statement (delta check of re-check #5, 2026-11-04). None if there is none to read."""
+    if d["name"] and not d["name"].startswith("<"):
+        return d["name"]
+    m = re.search(r"(?:^|\s)" + re.escape(d["kind"]) + r"\s+([^\s:({\[⦃]+)", d.get("statement") or "")
+    return m.group(1) if m else None
+
+
+def owned_by(n: str, written: str | None) -> bool:
+    """Is record `n` the record of the declaration written as `written`, or a dotted child of it (a
+    `where` helper, `Foo.bar.go`)?"""
+    parts = n.split(".")
+    return bool(written) and any(is_record_of(".".join(parts[:k]), written) for k in range(len(parts), 0, -1))
+
+
 def missing(snapshot: dict, skip_modules: set[str] | frozenset = frozenset()) -> tuple[int, list[str]]:
     """(number of declarations written in the sources, what coverage fails on), in both directions,
     by Lean's source lines (DESIGN.md §4.5, §11 q24; 2026-11-03). `skip_modules`: modules left out
@@ -90,13 +107,15 @@ def missing(snapshot: dict, skip_modules: set[str] | frozenset = frozenset()) ->
     Text → record: every theorem and definition the source parse finds has its own record (the
     name ends with the written name, `leandecls.is_record_of`) in its module at its line; a record of
     another declaration on the same line does not count (Lean allows two on one line; re-check #5).
-    One whose name is on a later line counts if a record lies within its lines. Nothing
+    One whose name is on a later line counts if its own record (by the name read after its keyword,
+    `written_name`) lies within its lines. Nothing
     else counts: a record without a line, or a name written in two source files whose one constant
     carries the other module (dalek PR 535), is uncovered, so the gate cannot decide. The names in
     the messages come from a namespace tracker over the text (`qualified_names`); they decide nothing.
 
     Record → text: every theorem or axiom Lean records with a line is a declaration the parse sees,
-    at that line; or a dotted child of the declaration whose lines it lies in (a `where` helper); or
+    at that line; or a dotted child of the declaration whose lines it lies in (a `where` helper); or,
+    inside a declaration whose name is on a later line, that declaration's own record or its child; or
     on text G0 freezes, a declaration's attribute prefix or a gap between declarations (attribute-made
     theorems, custom commands; Phase 1 reruns, 2026-11-04). Otherwise it lies inside a declaration's
     statement or body, where the parse did not see it (a macro-made or swallowed declaration), and
@@ -126,8 +145,10 @@ def missing(snapshot: dict, skip_modules: set[str] | frozenset = frozenset()) ->
         # declarations on one line, and a neighbour's record must not cover one StmtCanon dropped.
         if any(is_record_of(n, d["name"]) for n in by_line.get((mod, d["line"]), [])):
             continue
-        if not d["name"] or d["name"].startswith("<"):  # the name is on a later line
-            if any((mod, ln) in by_line for ln in range(d["line"], d["end_line"] + 1)):
+        if not d["name"] or d["name"].startswith("<"):  # the name is on a later line: its own record there
+            w = written_name(d)
+            if w and any(is_record_of(n, w) for ln in range(d["line"], d["end_line"] + 1)
+                         for n in by_line.get((mod, ln), [])):
                 continue
         out.append(f"{mod}: {full}")
     for (mod, line), ns in sorted(by_line.items(), key=lambda x: (str(x[0][0]), x[0][1])):
@@ -150,7 +171,7 @@ def missing(snapshot: dict, skip_modules: set[str] | frozenset = frozenset()) ->
             parents = [p for d in around for p in by_line.get((mod, d["line"]), [])]
             if any(n.startswith(p + ".") for p in parents):
                 continue
-            if any((not d["name"] or d["name"].startswith("<")) and not by_line.get((mod, d["line"])) for d in around):
-                continue  # the record of a declaration whose name is on a later line
+            if any(owned_by(n, written_name(d)) for d in around if not d["name"] or d["name"].startswith("<")):
+                continue  # the own record (or a child) of a declaration whose name is on a later line
             out.append(f"{mod}: {n} (Lean records it at line {line}; the source parse sees no declaration there)")
     return len(found), out

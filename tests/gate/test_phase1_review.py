@@ -61,6 +61,19 @@ def test_a_dropped_declaration_beside_another_on_its_line_is_still_checked(tmp_p
     assert_not_accepted(v)
 
 
+def test_a_dropped_declaration_named_on_the_next_line_is_still_checked(tmp_path):
+    """Delta check of 6683e82 (own-record coverage). A declaration whose name is on the line after
+    its keyword has no written name for the parse (`<theorem>`), and coverage then accepts any record
+    within its lines, without the own-record check. The same admission as above, with the name moved
+    to the next line, is covered again by t2. Expected: rejected or gate-unavailable."""
+    e = make_env(tmp_path, lambda t: t.replace("/-- A spec predicate", CLOSE_GOAL + "/-- A spec predicate"),
+                 [(SPEC_OLD, SPEC_STUB)], False)
+    line = "theorem\n  _aux_Toy_Specs___h : False := by close_goal theorem t2 : True := trivial\n\n"
+    repair = SPEC_VALID.replace(":= by\n", ":= by\n  have _h := t2\n", 1)
+    rc, v = run(e, "next-line", edit_specs((SPEC_STUB, line + repair)))
+    assert_not_accepted(v)
+
+
 # Codex (re-check #5), a relaxation against ade19f1: a base theorem StmtCanon drops (macro-helper
 # shaped name) that shares its line with another declaration. At ade19f1 the base fails coverage
 # (gate-unavailable); at b045013 the neighbour's record covers it, so the case is eligible, and a
