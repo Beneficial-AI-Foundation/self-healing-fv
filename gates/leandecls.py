@@ -8,15 +8,20 @@ from __future__ import annotations
 
 import re
 
+# Declaration modifiers as Lean's grammar has them (`declModifiers`, Lean 4.35: visibility `private` or
+# `public`, `protected`, `meta` or `noncomputable`, `unsafe`, `partial` or `nonrec`). Missing `public`
+# let a `public theorem` fold into the previous declaration's body (gate re-check #3, 2026-11-03).
+MODIFIERS = r"(?:private|public|protected|meta|noncomputable|partial|unsafe|nonrec)"
 DECL_RE = re.compile(
     r"^[ \t]*(?:@\[[^\]]*\][ \t]*)*"
-    r"(?:(?:private|protected|noncomputable|partial|unsafe|nonrec)[ \t]+)*"
+    rf"(?:{MODIFIERS}[ \t]+)*"
     r"(theorem|lemma|def|abbrev|instance|axiom|opaque|structure|inductive|class|example)\b[ \t]*"
     r"([^\s:({\[⦃]*)"
 )
 # Lines that end the previous declaration even though they are not declarations.
 BOUNDARY_RE = re.compile(
-    r"^(@\[|set_option\b|namespace\b|end\b|section\b|noncomputable section|open\b|variable\b|"
+    # `public section`, `public import`, `meta import`, `public meta import` (the module system) too.
+    r"^(@\[|set_option\b|namespace\b|end\b|section\b|noncomputable section|public\b|private\b|meta\b|open\b|variable\b|"
     r"attribute\b|#|universe\b|mutual\b|import\b|local\b|scoped\b|notation\b|infix|prefix|postfix|"
     r"macro|syntax\b|elab|run_cmd\b|deriving\b|export\b|omit\b|include\b)"
 )

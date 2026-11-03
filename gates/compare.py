@@ -237,6 +237,14 @@ def compare(cfg: dict, base: dict, broken: dict, cand: dict, diff: str, referenc
     if dup:
         unavailable.append(f"two broken theorems resolve to the same declaration ({', '.join(dup[:3])})")
     outside: list[dict] = []  # stubs the candidate cannot repair (head reference)
+    if not head:
+        # Base reference: the stubbed broken state must be the base plus stubs, as the head reference
+        # checks against the head (gate re-check #3, 2026-11-03: a stub the parse could not see, or a
+        # declaration a stub swallowed, went unnoticed). Trusted models may differ: a replay overlays the
+        # change's own (§3.3 S1); they are protected, so the candidate cannot touch them.
+        mine = {**broken, "sources": {f: t for f, t in broken.get("sources", {}).items() if not protected(cfg, f)}}
+        _, problems = scope.derived_stubs(base.get("sources", {}), mine)
+        unavailable += [f"the stubbed broken state is not the base plus stubs: {p}" for p in problems[:5]]
     if head:
         if head_sources is None:
             unavailable.append("the head reference needs the head's own sources (--head-tree)")
