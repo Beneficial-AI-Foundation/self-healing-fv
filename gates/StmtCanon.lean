@@ -177,14 +177,30 @@ def isNativeAux (env : Environment) (n : Name) : Bool := Id.run do
       if (depExprs ci).any (fun e => e.getUsedConstants.contains n) then return false
   return true
 
-/-- Native code by provenance: the core `Lean.ofReduceBool`/`Lean.ofReduceNat` (declared in a core
-    module), or a per-use axiom of `native_decide`/`bv_decide` (`isNativeAux`). -/
-def isNativeAxiom (env : Environment) (n : Name) : Bool :=
-  let core := match env.getModuleIdxFor? n with
-    | some idx => let m := env.header.moduleNames[idx.toNat]!
-                  (`Init).isPrefixOf m || (`Lean).isPrefixOf m
-    | none => false
-  ((n == `Lean.ofReduceBool || n == `Lean.ofReduceNat) && core) || isNativeAux env n
+/-- Native code by provenance: the core `Lean.ofReduceBool`/`Lean.ofReduceNat`, if Lean itself
+    declares them (`core`, from `coreNative`), or a per-use axiom of `native_decide`/`bv_decide`
+    (`isNativeAux`). -/
+def isNativeAxiom (env : Environment) (core : Std.HashSet Name) (n : Name) : Bool :=
+  core.contains n || isNativeAux env n
+
+/-- Which of `Lean.ofReduceBool`/`Lean.ofReduceNat` Lean itself declares: in an `Init.*`/`Lean.*`
+    module whose `.olean` is in the toolchain's own library, and that is not an audited (project)
+    module. A module name alone is not enough (re-check #5, 2026-11-04, Codex): Lean 4.35 has neither
+    constant, so a project module `Lean.Evil` could declare `axiom Lean.ofReduceBool : False` and
+    get the native allowance. Names unchecked (single backtick), so this compiles where they are
+    missing. -/
+def coreNative (env : Environment) (sysroot : System.FilePath) (audited : Std.HashSet Name) :
+    IO (Std.HashSet Name) := do
+  let lib := (← getLibDir sysroot).toString
+  let mut core : Std.HashSet Name := {}
+  for n in [`Lean.ofReduceBool, `Lean.ofReduceNat] do
+    let some idx := env.getModuleIdxFor? n | continue
+    let m := env.header.moduleNames[idx.toNat]!
+    unless ((`Init).isPrefixOf m || (`Lean).isPrefixOf m) && !audited.contains m do continue
+    let some ol ← (try some <$> findOLean m catch _ => pure none) | continue
+    if ol.toString.startsWith (lib ++ System.FilePath.pathSeparator.toString) then
+      core := core.insert n
+  return core
 
 /-- Is `n` an auxiliary, not a user-facing declaration? With the environment (self-healing-fv,
     2026-11-03; probe on Lean 4.21–4.35 in DESIGN.md §4.5): a constant with a declaration range is
@@ -372,7 +388,7 @@ def naiveClosure (audited : Std.HashSet Name) (root : Name) : MetaM Info := do
 def truncate (s : String) (n : Nat := 4000) : String :=
   if s.length ≤ n then s else (s.toList.take n).foldl String.push "" ++ " …"
 
-def auditDecl (audited : Std.HashSet Name) (declName : Name) (reference := false) :
+def auditDecl (audited : Std.HashSet Name) (core : Std.HashSet Name) (declName : Name) (reference := false) :
     StateRefT Tarjan MetaM Json := do
   let env ← getEnv
   match env.find? declName with
@@ -399,7 +415,7 @@ def auditDecl (audited : Std.HashSet Name) (declName : Name) (reference := false
       -- Which of them are native code, by provenance (`isNativeAxiom`); the gate maps only these
       -- to `Lean.ofReduceBool` (snapshot.normalize_axioms), never by name.
       ("native_axioms", namesJson (info.axioms.fold (init := {}) fun s a =>
-        if isNativeAxiom env a then s.insert a else s)),
+        if isNativeAxiom env core a then s.insert a else s)),
       ("sorry_sources", namesJson (roots info.sorries)),
       ("uses", namesJson ((roots info.uses).erase declName))]
     if let some b := bodyCanon env audited declName then
@@ -414,7 +430,8 @@ def splitNames (s : String) : Array Name :=
   ((s.splitOn ",").filter (· ≠ "")).toArray.map String.toName
 
 unsafe def main (args : List String) : IO Unit := do
-  initSearchPath (← findSysroot)
+  let sysroot ← findSysroot
+  initSearchPath sysroot
   let mut imports : Array Name := #[]
   let mut modules : Array Name := #[]
   let mut rest := args
@@ -437,11 +454,12 @@ unsafe def main (args : List String) : IO Unit := do
       throw <| IO.userError s!"--module {m}: not in the imported environment"
     decls := decls ++ moduleDecls env m
   let audited : Std.HashSet Name := modules.foldl (init := {}) fun s m => s.insert m
+  let core ← coreNative env sysroot audited
   let act : CoreM Unit := do
     let tarjan ← IO.mkRef ({} : Tarjan)
     for d in decls do
       let j ← try
-        let (j, s) ← MetaM.run' ((auditDecl audited d reference).run (← tarjan.get))
+        let (j, s) ← MetaM.run' ((auditDecl audited core d reference).run (← tarjan.get))
         tarjan.set s
         pure j
       catch ex =>

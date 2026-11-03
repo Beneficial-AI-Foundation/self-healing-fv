@@ -182,6 +182,57 @@ def test_the_lean_helpers_work_on(toolchain):
     assert not problems(row), (problems(row), row)
 
 
+# Re-check #5 (2026-11-04, Codex): Lean 4.35 has no core `Lean.ofReduceBool`, so a project module
+# could declare one, and "declared in a `Lean.*` module" would give it the native allowance. Lean
+# finds a module by the root that holds its first component, so a project `Lean/` directory shadows
+# core `Lean` and StmtCanon's own `import Lean` fails there: the snapshot fails closed. StmtCanon also
+# counts the constant as core only if its `.olean` is in the toolchain's library and its module is not
+# audited (`coreNative`), so either outcome below is safe; a native allowance is not.
+EVIL = "axiom Lean.ofReduceBool : False\n\ntheorem evil_uses : False := Lean.ofReduceBool\n"
+EVIL_USER = "import Lean.Evil\n\ntheorem evil_user : False := evil_uses\n"
+EVIL_TOOLCHAIN = "v4.35.0"
+
+
+def evil_check(toolchain: str) -> dict[str, dict]:
+    """StmtCanon in a project whose module `Lean.Evil` declares `Lean.ofReduceBool`, audited directly
+    and through a module that imports it: per theorem, its axioms and native axioms, or why it failed."""
+    out = {}
+    with tempfile.TemporaryDirectory(prefix="lean-evil-") as d:
+        root = Path(d)
+        (root / "lean-toolchain").write_text(f"leanprover/lean4:{toolchain}\n")
+        (root / "lakefile.toml").write_text('name = "evil"\ndefaultTargets = ["Evil", "EvilUser"]\n\n'
+                                            '[[lean_lib]]\nname = "Evil"\nroots = ["Lean.Evil"]\n\n'
+                                            '[[lean_lib]]\nname = "EvilUser"\n')
+        (root / "Lean").mkdir()
+        (root / "Lean" / "Evil.lean").write_text(EVIL)
+        (root / "EvilUser.lean").write_text(EVIL_USER)
+        b = subprocess.run(["lake", "build"], cwd=root, capture_output=True, text=True)
+        if b.returncode != 0:
+            return {"build": {"error": (b.stderr or b.stdout).strip()[-400:]}}
+        for mod, decl in (("Lean.Evil", "evil_uses"), ("EvilUser", "evil_user")):
+            e = subprocess.run(["lake", "env", "lean", "--run", str(STMTCANON), "--import", mod, "--module", mod],
+                               cwd=root, capture_output=True, text=True)
+            recs = {r["name"]: r for r in map(json.loads, (x for x in e.stdout.splitlines() if x.startswith("{")))}
+            out[decl] = {"stmtcanon_ok": e.returncode == 0, "axioms": recs.get(decl, {}).get("axioms"),
+                         "native": recs.get(decl, {}).get("native_axioms"),
+                         "why": (e.stderr or e.stdout).strip()[-300:] if e.returncode else ""}
+    return out
+
+
+@pytest.mark.skipif(shutil.which("lake") is None or not installed(EVIL_TOOLCHAIN),
+                    reason=f"needs lake and {EVIL_TOOLCHAIN} (elan toolchain install leanprover/lean4:{EVIL_TOOLCHAIN})")
+def test_a_project_lean_ofreducebool_is_never_native_code():
+    """Expected: StmtCanon fails (the snapshot fails closed), or the axiom is an ordinary one. Never
+    native: that would let a repair rest on `False` under the native-code flag."""
+    out = evil_check(EVIL_TOOLCHAIN)
+    assert "build" not in out, out  # the planted project itself must build, or this tests nothing
+    for decl, r in out.items():
+        if r["stmtcanon_ok"]:
+            assert "Lean.ofReduceBool" in (r["axioms"] or []) and not r["native"], (decl, r)
+        else:
+            assert r["why"], (decl, r)
+
+
 def table(rows: list[dict]) -> str:
     lines = ["| Toolchain | StmtCanon | Records | `nd` native axioms | crafted axiom native? "
              "| `module` file: native axioms (mnd, mbvd); crafted private native? "
