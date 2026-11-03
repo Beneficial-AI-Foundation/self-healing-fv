@@ -128,12 +128,18 @@ def row(run: dict, decisions: dict | None, report: dict | None, patch: str | Non
         if patch:
             out["_patch"] = patch
     flags = []
-    if decisions is None:
+    if decisions is None and run.get("conclusion") == "skipped":
+        # The caller's own `if` skipped its job: a completion with no PR (a push to the default branch or to
+        # a branch without a PR), or SELF_HEAL=off. Nothing was decided, and nothing failed.
+        out["decision"] = "caller skipped (no PR, or SELF_HEAL=off)"
+    elif decisions is None:
         flags.append("no decisions record (select crashed or was cancelled)")
     elif d.get("run") and report is None:
         flags.append("picked but no report (the repair job crashed, timed out or was cancelled)")
     if report and (report.get("verdict") == "failed" or g.get("unavailable")):
-        flags.append("gate-unavailable" if g.get("unavailable") else "failed (infrastructure)")
+        # The run's own outcome when it has one (e.g. gate-unavailable: a root module missing at the head).
+        why = (report.get("error") or {}).get("outcome") or "infrastructure"
+        flags.append("gate-unavailable" if g.get("unavailable") else f"failed ({why})")
     out["flags"] = flags
     return out
 
