@@ -8,7 +8,7 @@ from __future__ import annotations
 from gates import compare
 from gates.snapshot import normalize_axioms
 
-from .test_fail_closed import BASE3, CFG, NATIVE_STOP, case, rec
+from .test_fail_closed import BASE3, CFG, NATIVE_STOP, case, rec, with_lines
 
 NATIVE = BASE3 + ["Lean.ofReduceBool"]
 STUBS = ["M.lean::T"]
@@ -17,6 +17,8 @@ STUBS = ["M.lean::T"]
 def head(base, broken, cand, diff, stubs=STUBS, head_sources=None):
     """Compare against the head. Its sources default to the base's: in case() the PR changed no
     spec file, so the head as committed has T's old (now failing) proof."""
+    for s in (base, broken, cand):  # records a test added or replaced after snap(), as StmtCanon would
+        with_lines(s)
     return compare.compare(CFG, base, broken, cand, diff, reference="head", stubs=stubs,
                            head_sources=head_sources if head_sources is not None else dict(base["sources"]))
 

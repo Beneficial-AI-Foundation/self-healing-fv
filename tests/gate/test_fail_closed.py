@@ -56,6 +56,8 @@ def case(cand_axioms=BASE3):
 
 
 def verdict(base, broken, cand, diff):
+    for s in (base, broken, cand):  # records a test added or replaced after snap(), as StmtCanon would
+        with_lines(s)
     return compare.compare(CFG, base, broken, cand, diff)
 
 

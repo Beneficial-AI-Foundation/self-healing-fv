@@ -1,12 +1,13 @@
-"""Source inventory (DESIGN.md §4.2): the theorems and lemmas written in the audited sources,
-found by a textual, namespace-aware parse that is independent of StmtCanon's filter. The gate
-requires every one of them to have a base record, so a declaration that StmtCanon misses (or a
-module that did not load) can never silently drop out of the frozen set."""
+"""Source inventory (DESIGN.md §4.2, §4.5): coverage between the declarations written in the audited
+sources and the records StmtCanon made, matched by Lean's source lines in both directions (`missing`).
+The gate requires it of every snapshot it relies on, so a declaration that StmtCanon misses (or a
+module that did not load) can never silently drop out of the frozen set, and a declaration Lean has
+that the source parse does not see (a macro-made one) cannot escape G0."""
 from __future__ import annotations
 
 import re
 
-from .leandecls import MODIFIERS, strip_comments
+from .leandecls import MODIFIERS, parse, strip_comments
 from .snapshot import module_of
 
 # Every declaration modifier Lean accepts (leandecls.MODIFIERS): a `public theorem` that this parse
@@ -45,29 +46,98 @@ def source_theorems_written(text: str) -> list[tuple[str, bool, str]]:
     return out
 
 
-def missing(snapshot: dict, skip_modules: set[str] | frozenset = frozenset()) -> tuple[int, list[str]]:
-    """(number of source theorems, those without a record in their own module). `skip_modules`:
-    modules left out of the count (component acceptance, §4.3: the excluded region, which no
-    accepted repair can reach and the gate certifies nothing in).
+# Scope openers for naming in messages and the name fallback below, with the module system's forms
+# (`public section`, `@[expose] public section`, `public noncomputable section`).
+SCOPE_OPENS = re.compile(r"^\s*(?:@\[[^\]]*\]\s*)*(?:(?:public|private|noncomputable)\s+)*(namespace|section|mutual)\b\s*(\S*)")
+# Declarations whose record coverage is required (text → record): theorems and definitions, the
+# frozen statements and spec predicates (DESIGN.md §4.2). Axioms are trust facts G2 reads from the
+# closures; a written axiom without a record would also go unseen, but the trusted models that
+# declare them are protected files the bot cannot touch.
+COVERED = {"theorem", "lemma", "def", "abbrev"}
+# Record kinds that must also be seen by the source parse (record → text): an invisible theorem or axiom
+# is what a swallowed or macro-made declaration looks like (gate sweep #1; plan review, amendment 3).
+SEEN_KINDS = {"theorem", "axiom"}
 
-    A name written in more than one source file (seen in dalek PR 535: the same lemma in
-    FromBytes.lean and Pow2K.lean) resolves to one constant when both modules load into one
-    environment, and its record carries only one of the modules. Such a name counts as recorded
-    if its record belongs to any of the files that declare it."""
+
+def qualified_names(text: str) -> dict[int, tuple[str, bool]]:
+    """{declaration line: (qualified name, private)} for the declarations leandecls finds, with the
+    namespaces in scope there (module-system section openers included). For messages, and for the
+    name fallback in `missing`; never to name a broken theorem (scope.resolve uses Lean's lines)."""
+    lines = strip_comments(text).splitlines()
+    scope_at: list[list[str]] = []
+    scopes: list[tuple[str, list[str]]] = []
+    for line in lines:
+        if m := SCOPE_OPENS.match(line):
+            kind = m.group(1)
+            scopes.append((kind, m.group(2).split(".") if kind == "namespace" and m.group(2) else []))
+        elif END.match(line) and scopes:
+            scopes.pop()
+        scope_at.append([p for _, parts in scopes for p in parts])
+    out = {}
+    for d in parse(text)[0]:
+        ns = scope_at[d["line"] - 1] if d["line"] - 1 < len(scope_at) else []
+        name = d["name"]
+        full = name[len("_root_."):] if name.startswith("_root_.") else ".".join(ns + [name])
+        out[d["line"]] = (full, re.match(r"^\s*(?:@\[[^\]]*\]\s*)*private\b", lines[d["line"] - 1]) is not None)
+    return out
+
+
+def missing(snapshot: dict, skip_modules: set[str] | frozenset = frozenset()) -> tuple[int, list[str]]:
+    """(number of declarations written in the sources, what coverage fails on), in both directions,
+    by Lean's source lines (DESIGN.md §4.5, §11 q24; 2026-11-03). `skip_modules`: modules left out
+    (component acceptance, §4.3: the excluded region).
+
+    Text → record: every theorem and definition the source parse finds has a record of its module at
+    its line; one whose name is on a later line counts if a record lies within its lines. Nothing
+    else counts: a record without a line, or a name written in two source files whose one constant
+    carries the other module (dalek PR 535), is uncovered, so the gate cannot decide. The names in
+    the messages come from a namespace tracker over the text (`qualified_names`); they decide nothing.
+
+    Record → text: every theorem or axiom Lean records with a line is a declaration the parse sees,
+    at that line, or a dotted child of the declaration whose lines it lies in (a `where` helper).
+    Otherwise the parse did not see it (a macro-made or swallowed declaration), and G0 could not
+    scope it: coverage fails, so the gate cannot decide."""
     records = snapshot.get("records", {})
-    found: list[tuple[str, str, bool]] = []
-    declared_in: dict[str, set[str]] = {}
+    dirs = snapshot.get("src_dirs")
+    by_line: dict[tuple[str, int], list[str]] = {}
+    for n, r in records.items():
+        if r.get("line") is not None:
+            by_line.setdefault((r.get("module"), r["line"]), []).append(n)
+    found, decls_of = [], {}
     for path, text in snapshot.get("sources", {}).items():
-        mod = module_of(path, snapshot.get("src_dirs"))
+        mod = module_of(path, dirs)
         if mod in skip_modules:
             continue
-        for full, private in source_theorems(text):
-            found.append((mod, full, private))
-            declared_in.setdefault(full, set()).add(mod)
+        qual = qualified_names(text)
+        decls_of[mod] = alld = parse(text)[0]  # every declaration, for record → text
+        for d in (d for d in alld if d["kind"] in COVERED):
+            full, private = qual.get(d["line"], (d["name"], False))
+            found.append((mod, d, full, private))
     out = []
-    for mod, full, private in found:
-        names = [full] + ([f"_private.{mod}.0.{full}"] if private else [])
-        ok_mods = declared_in[full] if len(declared_in[full]) > 1 else {mod}
-        if not any(c in records and records[c].get("module") in ok_mods for c in names):
-            out.append(f"{mod}: {full}")
+    for mod, d, full, private in found:
+        # Only Lean's lines decide (plan review, 2026-11-03): a record without a line, or one only a
+        # text-derived name could match (the same name written in two files, dalek PR 535), does
+        # not cover; the gate then cannot decide. `full` (the tracker's name) is for the message only.
+        if (mod, d["line"]) in by_line:
+            continue
+        if not d["name"] or d["name"].startswith("<"):  # the name is on a later line
+            if any((mod, ln) in by_line for ln in range(d["line"], d["end_line"] + 1)):
+                continue
+        out.append(f"{mod}: {full}")
+    for (mod, line), ns in sorted(by_line.items(), key=lambda x: (str(x[0][0]), x[0][1])):
+        ds = decls_of.get(mod)
+        if ds is None:
+            continue  # not a source of this snapshot, or skipped
+        for n in ns:
+            if records[n].get("kind") not in SEEN_KINDS:
+                continue
+            if any(d["line"] == line for d in ds):
+                continue
+            around = [d for d in ds if d["line"] <= line <= d["end_line"]]
+            parents = [p for d in around for p in by_line.get((mod, d["line"]), [])]
+            if any(n.startswith(p + ".") for p in parents):
+                continue
+            if any((not d["name"] or d["name"].startswith("<")) and not by_line.get((mod, d["line"])) for d in around):
+                continue  # the record of a declaration whose name is on a later line
+            out.append(f"{mod}: {n} (Lean records it at line {line}; the source parse sees no declaration there)")
     return len(found), out
