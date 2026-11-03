@@ -304,6 +304,7 @@ def main(argv: list[str] | None = None) -> int:
     cm.add_argument("--artifact", required=True, help="the run record's artifact name, named in the section")
     cm.add_argument("--target", required=True, help="target config; its [live] comment_header says which "
                     "sticky comment: the target's own (e.g. SPQR's sorry-delta) or the bot's (self-healing-fv)")
+    cm.add_argument("--print", action="store_true", help="print the section instead of posting it (no token needed)")
     co = sub.add_parser("collect", help="append the callers' pr-repair runs to data/live/<target>.jsonl (telemetry)")
     co.add_argument("--repo", required=True, help="the calling repo (owner/name)")
     co.add_argument("--target", required=True)
@@ -318,6 +319,9 @@ def main(argv: list[str] | None = None) -> int:
         from . import comment
         with open(ROOT / "targets" / f"{a.target}.toml", "rb") as f:
             header = tomllib.load(f).get("live", {}).get("comment_header", comment.OWN)
+        if a.print:
+            print(comment.section_for(a.report, a.run_url, a.artifact, comment.LIMIT, a.repo))
+            return 0
         return comment.main(a.report, a.repo, a.pr, a.run_url, a.artifact, header)
     if a.cmd == "collect":
         from . import collect

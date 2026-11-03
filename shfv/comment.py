@@ -27,7 +27,7 @@ import urllib.request
 from pathlib import Path
 from typing import Callable
 
-from .report import render
+from .brief import brief
 
 STICKY = "<!-- Sticky Pull Request Comment{header} -->"  # marocchino's marker
 OWN = "self-healing-fv"  # the header of the bot's own comment
@@ -53,9 +53,9 @@ def couldnt_check(reason: str, run_url: str) -> str:
     """The section for a run that says nothing about the proofs (infrastructure failure, or the gate
     could not decide): short, and plainly not a verdict (§5.1)."""
     reason = " ".join(reason.split())[:300].replace("`", "'").replace("@", "@​") or "no reason was recorded"
-    return ("## 🔧 Repair\n\n### ⚪ Couldn't check this PR\n\n"
+    return ("## 🔧 Repair: ⚪ couldn't check\n\n"
             f"Couldn't check this PR: `{reason}`. Not a statement about your proofs. Details: [workflow run]({run_url})."
-            "\n\n<sub>self-healing-fv · the bot pushes nothing.</sub>")
+            "\n\n<sub>self-healing-fv · the bot pushes nothing</sub>")
 
 
 def failure_reason(r: dict) -> str | None:
@@ -69,18 +69,22 @@ def failure_reason(r: dict) -> str | None:
     return "; ".join(reasons) or "infrastructure-failure"
 
 
+FOLD_RE = re.compile(r"(<!-- fold --><details><summary>.*?</summary>).*?(</details><!-- /fold -->)", re.S)
+
+
 def section(r: dict, run_url: str, artifact: str, limit: int, repo: str = "") -> str:
-    """The Repair section: the report, cut at a heading to fit `limit`, and where the rest is."""
+    """The Repair section (shfv/brief.py): short, with the full report on the run's summary page. To
+    fit `limit`, the folded blocks are emptied first, so the visible lines always stay."""
     if (why := failure_reason(r)) is not None:
         return couldnt_check(why, run_url)
-    foot = (f"\n\n<sub>self-healing-fv · [workflow run]({run_url}) · the full report and the patch are in its "
-            f"artifact `{artifact}` (`git apply repair.patch`). The bot pushes nothing.</sub>")
-    md = render(r, apply_command(r, repo, run_url, artifact) if repo else None).strip()
-    room = limit - len(foot) - len(BEGIN) - len(END) - 200
-    if len(md) > room:
-        cut = md.rfind("\n#### ", 0, room)
-        md = md[:cut if cut > 0 else room].rstrip() + "\n\n*Cut to fit a comment; the rest is in the full report.*"
-    return "## 🔧 Repair\n\n" + md + foot
+    sec = brief(r, run_url, apply_command(r, repo, run_url, artifact) if repo else None)
+    room = limit - len(BEGIN) - len(END) - 200
+    if len(sec) > room:
+        sec = FOLD_RE.sub(r"\1\n\nToo long for a comment: see the full report.\n\n\2", sec)
+    if len(sec) > room:
+        foot = sec[sec.rfind("\n<sub>"):]
+        sec = sec[:room - len(foot) - 80].rstrip() + "\n\n*Cut to fit a comment; the rest is in the full report.*" + foot
+    return sec
 
 
 def splice(body: str | None, sec: str, header: str) -> str:
@@ -160,10 +164,15 @@ def main(report: Path, repo: str, pr: int, run_url: str, artifact: str, header: 
     owner, name = repo.split("/")
     _, c = find(gql, owner, name, pr, header)
     other = len(splice(c["body"], "", header)) if c else 0  # what the target's own content takes
-    try:
-        sec = section(json.loads(report.read_text()), run_url, artifact, LIMIT - other, repo)
-    except (OSError, json.JSONDecodeError):
-        # The repair job stopped before it wrote (or uploaded) its report: say so, never stay silent.
-        sec = couldnt_check("the run stopped before writing its report", run_url)
+    sec = section_for(report, run_url, artifact, LIMIT - other, repo)
     print(f"{repo}#{pr}: {post(gql, repo, pr, sec, header)}")
     return 0
+
+
+def section_for(report: Path, run_url: str, artifact: str, limit: int, repo: str) -> str:
+    """The section for a report file; a missing or unreadable one gets "Couldn't check"."""
+    try:
+        return section(json.loads(report.read_text()), run_url, artifact, limit, repo)
+    except (OSError, json.JSONDecodeError):
+        # The repair job stopped before it wrote (or uploaded) its report: say so, never stay silent.
+        return couldnt_check("the run stopped before writing its report", run_url)

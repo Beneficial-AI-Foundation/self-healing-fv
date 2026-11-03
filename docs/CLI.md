@@ -147,7 +147,7 @@ uv run shfv repair --target dalek-lean-verify --base origin/master --head FETCH_
 
 ## 4. Read the report
 
-`report.md` is exactly the comment the bot would post on the PR. It is written for a reviewer who has not read the design, and it opens with one of five verdicts:
+`report.md` is the full report. On a target's PR it goes to the workflow run's summary page, and the PR comment is a short form of it (`shfv comment`, [ACTIONS.md](ACTIONS.md)); preview that with `shfv comment report.json --print …`. It is written for a reviewer who has not read the design, and it opens with one of five verdicts:
 
 | Verdict | Meaning |
 |---|---|

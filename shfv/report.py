@@ -1,7 +1,7 @@
-"""The run record (report.json, S7) and the PR comment (report.md, §5.4).
+"""The run record (report.json, S7) and the full report (report.md, §5.4).
 
-report.md is exactly what the bot would post as a GitHub PR comment (shadow mode, §3.3 S6):
-a hidden marker so the bot can edit its own comment in place, a plain-language summary, the
+report.md is the complete report for a reviewer: on a target's PR it is the workflow run's summary
+page, and the PR comment is its short form (shfv/brief.py). It has a hidden marker, a plain-language summary, the
 gate's checks, the evidence per theorem, and the comparison with the human fix (replay only; a
 live run, DESIGN.md §3.6, has no human fix and its report does not mention one).
 Model-written text is quoted, truncated and neutralized (no @-mentions, no live links).
@@ -654,16 +654,21 @@ def lead(r: dict, pr: str, repaired: list[dict], n_proofs: int, n_stmts: int,
                    "updating; the errors are below.")
     else:
         if n_stmts:
-            head = f"{n_stmts} theorem statement{'s' * (n_stmts != 1)} no longer type-check{'s' * (n_stmts == 1)}"
+            # Statements and definitions both escalate as statement-must-change; count them apart.
+            n_defs = sum(1 for e in escal if e["outcome"] == "statement-must-change" and e.get("definition"))
+            n_thm = n_stmts - n_defs
+            what = " and ".join(x for x in (f"{n_thm} theorem statement{'s' * (n_thm != 1)}" if n_thm else "",
+                                            f"{n_defs} definition{'s' * (n_defs != 1)}" if n_defs else "") if x)
+            head = f"{what} no longer type-check{'s' * (n_stmts == 1)}"
         else:
             head = f"{len(repaired)} of {n_proofs} broken proofs repaired"
         out.append(f"### ⚠️ Needs a human: {head}")
         out.append("")
         if n_stmts:
-            out.append(f"The change {pr} changed the extracted code or its dependencies so that the statement of "
-                       f"{'a theorem' if n_stmts == 1 else f'{n_stmts} theorems'} no longer type-checks. Fixing "
-                       f"{'it' if n_stmts == 1 else 'them'} needs a new statement, and the bot never changes statements: "
-                       "someone who owns the spec has to decide what the theorem should now promise.")
+            out.append(f"The change {pr} changed the extracted code or its dependencies so that {what} no longer "
+                       f"type-check{'s' * (n_stmts == 1)}. Fixing {'it' if n_stmts == 1 else 'them'} needs a new "
+                       "statement or definition, and the bot never changes either: someone who owns the spec has to "
+                       "decide what it should now promise.")
         else:
             out.append(f"The change {pr} broke {n_proofs} proof{'s' * (n_proofs != 1)}. The bot did not produce a repair "
                        "the gate accepts for all of them, so nothing is proposed; the evidence is below.")
