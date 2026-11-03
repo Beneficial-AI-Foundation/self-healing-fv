@@ -11,8 +11,12 @@
   S5 gate      `gate diff` → `gate scope` → `gate snapshot --apply --clean` → `gate compare`
   S6/S7        outcome per theorem, report.json (run record) and report.md (PR comment)
 
+Acceptance is per component (§4.3, decided 2026-11-03): every broken theorem that can be repaired on
+its own is attempted and gated (`gate compare --acceptance component`), while the ones in modules that
+cannot be built, and the ones left unrepaired, stay stubbed and escalate; the patch never carries a stub.
+
 The gate is reached only through its CLI (§4.5, §4.8). Not built yet: S3 differential tests
-(V1), component acceptance (V1, §4.3), and the metering proxy and sandbox (TODO §3.4, §9.5).
+(V1), and the metering proxy and sandbox (TODO §3.4, §9.5).
 """
 from __future__ import annotations
 
@@ -368,7 +372,8 @@ class Run:
                               line=det.get("line", 0), errors=[det.get("msg", "")],
                               cause=", ".join(self.record.get("causes") or [self.record["cause"]]) + pin_summary(self.record),
                               trigger=trigger, toolchain=toolchain,
-                              still_stubbed=[o["key"] for o in broken[i:]],
+                              # Later ones, and earlier ones left unrepaired (restubbed): all still `sorry`.
+                              still_stubbed=[o["key"] for o in broken if o is not b and o["name"] not in repaired],
                               repaired_before=[short(r) for r in repaired], context_dir=ctx, lsp_tools=lsp,
                               structured=structured, module=self.modules(cand).module(b["file"]))
             log_root = self.out / "attempts" / f"{i:02d}-{b['key'][:60]}"
@@ -377,7 +382,7 @@ class Run:
                 self.p.step(f"[{i}/{len(broken)}] {b['key']} → automation sweep ({det.get('kind')})")
                 ok, tries = self.sweep(cand, b)
                 entry["sweep"] = tries
-                if ok and not self.pregate_violations(cand, b):
+                if ok and not self.pregate_violations(cand, b) and not self.reaches_sorry(cand, b, base_records):
                     self.p.result(f"repaired by the sweep, no model call ({', '.join(t['action'] for t in tries)})")
                     entry.update(outcome="candidate", repaired_by="sweep")
                     repaired.append(b["name"])
@@ -420,6 +425,8 @@ class Run:
                 # Pre-gate (feedback only; the gate alone decides): the file builds, and G0 holds.
                 builds, errors = self.build_module(cand, b)
                 violations = self.pregate_violations(cand, b) if builds else []
+                if builds and not violations and (why := self.reaches_sorry(cand, b, base_records)):
+                    violations = [why]  # it rests on a stub: the gate would reject the whole candidate
                 entry["prebuild_ok"] = builds
                 self.p.result(f"{att.stop}, {att.turns} turns, {costs.describe(att.cost_status, att.cost_usd, att.model)}, "
                               f"{fmt_s(att.seconds)} · file builds: {'yes' if builds else 'no'}"
@@ -536,16 +543,43 @@ class Run:
         except (OSError, json.JSONDecodeError, KeyError):
             return []
 
+    def reaches_sorry(self, cand: Path, b: dict, base_records: dict) -> str | None:
+        """Pre-gate (feedback only, §3.3 S4; component acceptance, §4.3): after the file builds, does
+        the repaired theorem's closure reach `sorryAx` where its base version's did not? Then it uses a
+        theorem that is still stubbed, and the gate would reject the whole candidate (G2). Asked with
+        `#print axioms` on the built module; inconclusive (private name, error) means no finding."""
+        name = b.get("name")
+        if not name or name.startswith("_private") or "sorryAx" in base_records.get(name, {}).get("axioms", []):
+            return None
+        mod = self.modules(cand).module(b["file"])
+        q = self.scratch / "pregate-axioms.lean"  # outside the candidate tree, so never in its diff
+        q.write_text(f"import {mod}\n#print axioms {name}\n")
+        r = proc.run(["lake", "env", "lean", str(q)], cand,
+                     {**os.environ, "LEAN_NUM_THREADS": str(self.cfg["lean"]["lean_num_threads"])}, timeout=600)
+        out = r.stdout + r.stderr
+        if r.returncode != 0 or "depends on axioms" not in out:
+            return None
+        if re.search(r"\bsorryAx\b", out):
+            return (f"the proof of {short(name)} depends on `sorry`: it uses a theorem that is still unproved here "
+                    "(stubbed), so it cannot be accepted; prove it without that theorem")
+        return None
+
     def delivery_diff(self, cand: Path, broken: list[dict]) -> str:
         """The repair as it would apply to the change's head: the real broken sources (in replay
         the base proofs with the new extraction; live, the head as committed), not the stubbed state
-        the gate works on (review finding 15). Theorems left unrepaired keep their original failing proof."""
+        the gate works on (review finding 15). Theorems left unrepaired keep their original failing proof,
+        and so does every other proof S2 stubbed (component acceptance: a stub in the same file, e.g. a
+        theorem the PR added, would otherwise show as context the head does not have). The patch never
+        carries a stub: a `sorry` in an added line is a pipeline bug, and the run fails rather than
+        delivering it (§3.3 S6)."""
         base_proof = {}
-        for b in broken:
-            if b.get("stubbed", True):
-                d = decl_text((self.orig / b["file"]).read_text(), b["key"])
+        keys = {(b["file"], b["key"]) for b in broken if b.get("stubbed", True)}
+        keys |= {tuple(s.split("::", 1)) for s in self.stubbed()}
+        for f, key in sorted(keys):
+            if (self.orig / f).is_file():
+                d = decl_text((self.orig / f).read_text(), key)
                 if d:
-                    base_proof[(b["file"], b["key"])] = d["proof"]
+                    base_proof[(f, key)] = d["proof"]
 
         def unstub(path: str, text: str) -> str:
             for (f, key), proof in base_proof.items():
@@ -555,8 +589,11 @@ class Run:
             return text
         before, after = tree_sources(self.broken), tree_sources(cand)
         changed = sorted(p for p in set(before) | set(after) if before.get(p) != after.get(p))
-        return patch.make_diff({p: unstub(p, before[p]) for p in changed if p in before},
+        diff = patch.make_diff({p: unstub(p, before[p]) for p in changed if p in before},
                                {p: unstub(p, after[p]) for p in changed if p in after})
+        if bad := stub_lines(diff):
+            raise RuntimeError(f"the delivery patch would add `sorry` ({bad[0][:200]}); not delivering it")
+        return diff
 
     def _restub(self, cand: Path, b: dict) -> None:
         """Put the stub back on a theorem whose attempt failed, so later theorems and the gate see
@@ -568,10 +605,12 @@ class Run:
             f.write_text(replace_body(cur, b["key"], stub["proof"]))
 
     # ------------------------------------------------------------------ S5
-    def run_gate(self, label: str, B: Path, K: Path, after: Path, past_scope: bool = False) -> dict:
+    def run_gate(self, label: str, B: Path, K: Path, after: Path, past_scope: bool = False,
+                 acceptance: str = "component") -> dict:
         """Gate a candidate tree. For the bot's own candidate a failed scope check stops here, before
         anything is built (§3.4). `past_scope` builds anyway, for reference candidates (the human fix)
-        whose G1/G2 findings are evidence; the gate still refuses protected paths."""
+        whose G1/G2 findings are evidence; the gate still refuses protected paths. `acceptance` (§4.3):
+        the bot's candidate is gated per component (decided 2026-11-03), a reference candidate whole."""
         d = self.scratch / f"{label}.patch"
         gate("diff", "--config", str(self.config), "--before", str(self.broken_root), "--after", str(after), "--out", str(d))
         common = ["--config", str(self.config), "--base", str(B), "--broken", str(K), "--diff", str(d)]
@@ -601,7 +640,7 @@ class Run:
             hashes.write_text(self.input_hashes)
             live += ["--expect-hashes", str(hashes)]
         gate("compare", *common, "--candidate", str(C), "--out", str(V), "--reference", self.reference, *live,
-             check=False)  # 2 = gate-unavailable
+             "--acceptance", acceptance, check=False)  # 2 = gate-unavailable, 3 = partially accepted
         if not V.exists():
             raise GateUnavailable("gate compare produced no verdict")
         res["verdict"] = json.loads(V.read_text())
@@ -759,54 +798,69 @@ class Run:
                 report["escalations"].append({"theorem": key, "file": f, "line": d.get("line"), "outcome": "added-by-pr",
                                               "errors": [d["msg"]] if d.get("msg") else []})
             broken = [b for b in broken if (b["file"], b["key"]) not in sb]
+            # Component acceptance (§4.3, decided 2026-11-03): modules that fail or are blocked in the
+            # stubbed broken state are the excluded region; everything else is repaired and gated on its
+            # own. Mirrors gates/compare.py, which decides: within the component, a frozen declaration that
+            # is missing, or a module whose status is unknown, still makes the case ineligible.
+            xmods = {m for m, s in Kj["modules"].items() if s in ("failed", "blocked")}
+            in_x = lambda f: self.modules(self.broken).module(f) in xmods
+            missing_in_component = [n for n in missing_frozen if (frozen.get(n) or {}).get("module") not in xmods]
+            unknown_modules = [m for m, s in Kj["modules"].items() if s != "observed" and m not in xmods]
             report["broken"] = {"proofs": [b["name"] for b in broken], "statements": [s["name"] for s in stmt_broken],
                                 "frozen_inventory": len(frozen), "observed_in_broken": observed,
                                 "unobserved_modules": [m for m, s in Kj["modules"].items() if s != "observed"],
+                                "excluded_modules": sorted(xmods),
                                 "missing_frozen": missing_frozen[:200]}
             self.p.step(f"{len(broken)} proof(s) broken, {len(stmt_broken)} statement(s) no longer type-check · "
-                        f"frozen declarations observed in broken state: {observed}/{len(frozen)}",
+                        f"frozen declarations observed in broken state: {observed}/{len(frozen)}"
+                        + (f" · {len(xmods)} module(s) cannot be built until a human fixes them" if xmods else ""),
                         took=self.timing["snapshots_s"] + self.timing["prepare_s"])
             ordered = leaves_first(broken, Bj["records"])
-            targets = ordered
+            for s in stmt_broken:
+                report["escalations"].append({"theorem": s["name"], "file": s["file"], "line": s["line"],
+                                              "outcome": "statement-must-change", "statement": s["statement"],
+                                              "definition": s.get("definition"),
+                                              "errors": s["errors"], "rename_only": None,  # TODO(§3.3 S2)
+                                              "extraction_change": self.extraction_change(s["errors"])})
             if stmt_broken:
-                for s in stmt_broken:
-                    report["escalations"].append({"theorem": s["name"], "file": s["file"], "line": s["line"],
-                                                  "outcome": "statement-must-change", "statement": s["statement"],
-                                                  "definition": s.get("definition"),
-                                                  "errors": s["errors"], "rename_only": None,  # TODO(§3.3 S2)
-                                                  "extraction_change": self.extraction_change(s["errors"])})
                 self.p.step(f"escalate: {', '.join(s['key'] for s in stmt_broken)} → statement-must-change "
                             "(the bot never changes a statement)")
-                targets = stmt_broken + ordered if self.attempt_anyway else []
-                if not self.attempt_anyway:
-                    for b in ordered:  # TODO(§4.3 component acceptance, V1): repair these as suggestions
-                        report["repairs"].append({"theorem": b["name"], "file": b["file"], "decl": b["key"],
-                                                  "attempts": [], "outcome": "blocked-on",
-                                                  "reason": "case is ineligible: a statement must change first"})
-            elif added_stubs and not self.attempt_anyway:
-                why = (f"{len(added_stubs)} theorem(s) this PR added have failing proofs, and the bot repairs only "
-                       f"theorems that have a version before the PR (e.g. {added_stubs[0].split('::', 1)[1]})")
-                self.p.step(f"ineligible: {why}; no repair attempted")
-                for b in ordered:
-                    report["repairs"].append({"theorem": b["name"], "file": b["file"], "decl": b["key"],
-                                              "attempts": [], "outcome": "blocked-on",
-                                              "reason": f"case is ineligible: {why}"})
-                targets = []
-            elif (report["broken"]["unobserved_modules"] or missing_frozen) and not self.attempt_anyway:
-                # Ineligible (§3.3 S2): modules of the broken state cannot be checked (file-level errors,
-                # e.g. a removed import) or frozen declarations are missing from it, so under complete-case
-                # acceptance nothing could be accepted. Spend nothing on repairs; the report says why.
-                bad = report["broken"]["unobserved_modules"]
-                why = (f"{len(bad)} module(s) of the broken state cannot be checked (e.g. {bad[0]})" if bad else
-                       f"{len(missing_frozen)} frozen declaration(s) "
+            if (unknown_modules or missing_in_component) and not self.attempt_anyway:
+                # Ineligible (§3.3 S2): the component itself cannot be checked completely, so nothing
+                # could be accepted. Spend nothing on repairs; the report says why.
+                why = (f"{len(unknown_modules)} module(s) of the broken state could not be checked "
+                       f"(e.g. {unknown_modules[0]})" if unknown_modules else
+                       f"{len(missing_in_component)} frozen declaration(s) "
                        + ("do not elaborate at the head" if self.live else "are missing from the broken state")
-                       + f" (e.g. {missing_frozen[0]})")
+                       + f" (e.g. {missing_in_component[0]})")
                 self.p.step(f"ineligible: {why}; no repair attempted")
                 for b in ordered:
                     report["repairs"].append({"theorem": b["name"], "file": b["file"], "decl": b["key"],
                                               "attempts": [], "outcome": "blocked-on",
                                               "reason": f"case is ineligible: {why}"})
                 targets = []
+            elif self.attempt_anyway:
+                targets = stmt_broken + ordered
+            else:
+                # Every theorem repairable on its own is attempted (owner decision: usefulness over cost;
+                # the per-run cap bounds spend). One in the excluded region cannot be built, so it waits.
+                targets = [b for b in ordered if not in_x(b["file"])]
+                failed_mods = sorted(m for m in xmods if Kj["modules"][m] == "failed")
+                for b in ordered:
+                    if not in_x(b["file"]):
+                        continue
+                    here = [s["name"] for s in stmt_broken if s["file"] == b["file"]]
+                    mod = self.modules(self.broken).module(b["file"])
+                    blockers = here or [s["name"] for s in stmt_broken] or failed_mods
+                    reason = (f"its file has statements that no longer type-check ({', '.join(short(n) for n in here[:3])}"
+                              f"{' …' if len(here) > 3 else ''}), so it cannot be built until they are fixed" if here else
+                              f"its module {mod} imports one that does not build "
+                              f"({', '.join(failed_mods[:3])}{' …' if len(failed_mods) > 3 else ''}), so it cannot be "
+                              "built until that is fixed")
+                    report["repairs"].append({"theorem": b["name"], "file": b["file"], "decl": b["key"],
+                                              "attempts": [], "outcome": "blocked-on", "blocked_by": blockers[:20],
+                                              "reason": reason})
+                    self.p.step(f"{b['key']} → blocked: {reason}")
             t0 = time.time()
             if targets:
                 cand = self.repair(targets, Bj["records"], report)
@@ -824,7 +878,7 @@ class Run:
                 t0 = time.time()
                 self.p.step("gate the human fix as a reference candidate (replay only)")
                 try:
-                    g = self.run_gate("human-fix", B, K, self.human_fix_tree(), past_scope=True)
+                    g = self.run_gate("human-fix", B, K, self.human_fix_tree(), past_scope=True, acceptance="complete")
                     report["human_fix_gate"] = summarize_gate(g)
                     self.p.gate_line(report["human_fix_gate"])
                 except GateUnavailable as e:  # reference evidence only: never fails the run
@@ -933,11 +987,15 @@ class Run:
         """Map the gate's verdict onto the theorems the agent produced candidates for."""
         v = verdict.get("verdict")
         failed = verdict.get("failed_checks", [])
+        status = {t["name"]: t.get("status") for t in verdict.get("theorems", [])}
         for e in report["repairs"]:
             if e.get("outcome") != "candidate":
                 continue
-            if v == "accepted":
+            if v == "accepted" or v == "partially-accepted" and status.get(e["theorem"]) == "accepted":
                 e["outcome"] = "repaired"
+            elif v == "partially-accepted":  # defensive: the gate accepts a candidate as a whole
+                e["outcome"] = "proof-hard"
+                e["reason"] = f"not accepted by the gate ({status.get(e['theorem']) or 'no verdict for it'})"
             elif v == "passed-without-kernel-replay":
                 e["outcome"] = "passed-checks"
                 e["reason"] = "every gate check that ran passed; not accepted until the kernel replay (G5) runs"
@@ -1084,6 +1142,11 @@ SWEEPABLE = {"no-goals", "heartbeats", "unsolved-goals"}
 SWEEP_BUILDS = 3
 SWEEP_HEARTBEATS = 1000000  # 5x Lean's default; raising it is allowed (G0) and shown in the report
 SWEEP_CLOSER = "all_goals first | omega | simp_all | decide | rfl"
+
+
+def stub_lines(diff: str) -> list[str]:
+    """Added lines of a unified diff that contain `sorry` (the delivery must never carry a stub)."""
+    return [l for l in diff.splitlines() if l.startswith("+") and not l.startswith("+++") and re.search(r"\bsorry\b", l)]
 
 
 def delete_tactic_block(src: str, line: int) -> str:
@@ -1299,17 +1362,21 @@ def summarize_gate(g: dict) -> dict:
             "unavailable": v.get("unavailable", []), "inherited_sorry": v.get("inherited_sorry", {}),
             "kernel_replay_incomplete": v.get("kernel_replay_incomplete", []), "native_code": v.get("native_code", []),
             # Flag (live, §4.9; report only): repaired theorems resting on axioms their version before
-            # the PR did not use. Lifted from G2's info like the gate's own flags: on `accepted` only.
+            # the PR did not use. Lifted from G2's info like the gate's own flags: on acceptance only.
             "axioms_beyond_base_version": ((v.get("checks", {}).get("G2") or {}).get("info") or {}).get(
-                "axioms_beyond_base_version", {}) if v.get("verdict") == "accepted" else {},
+                "axioms_beyond_base_version", {}) if v.get("verdict") in ("accepted", "partially-accepted") else {},
+            # Component acceptance (§4.3): what was accepted, what the verdict does not cover, what waits.
+            "acceptance": v.get("acceptance"), "accepted_theorems": v.get("accepted_theorems", []),
+            "excluded": v.get("excluded", {}), "kept_stubs": v.get("kept_stubs", []), "blocked": v.get("blocked", {}),
             "built": v.get("built"), "theorems": v.get("theorems", []), "heartbeats": v.get("heartbeats", []),
             "checks": checks, "diff": g["diff"], "gate_version": v.get("gate_version"),
             "candidate_build_seconds": g.get("candidate_build_seconds")}
 
 
 def overall(report: dict) -> str:
-    """accepted | passed-without-kernel-replay | escalated | failed (infrastructure or gate) |
-    no-break (live: the head builds, nothing to repair)."""
+    """accepted | partially-accepted (some repairs accepted, the rest needs a human, §4.3) |
+    passed-without-kernel-replay | escalated | failed (infrastructure or gate) | no-break (live:
+    the head builds, nothing to repair)."""
     if "error" in report:
         return "failed"
     outs = [e.get("outcome") for e in report["repairs"]] + [e["outcome"] for e in report["escalations"]]
@@ -1320,6 +1387,8 @@ def overall(report: dict) -> str:
         return "failed"
     if gv == "accepted" and all(o == "repaired" for o in outs):
         return "accepted"
+    if gv in ("accepted", "partially-accepted") and "repaired" in outs:
+        return "partially-accepted"
     if gv == "passed-without-kernel-replay" and all(o == "passed-checks" for o in outs):
         return "passed-without-kernel-replay"
     return "escalated"

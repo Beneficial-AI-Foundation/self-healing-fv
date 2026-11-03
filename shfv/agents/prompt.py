@@ -52,7 +52,9 @@ def build_prompt(task: RepairTask) -> str:
                    "use them but must not change them: " + ", ".join(f"`{t}`" for t in task.repaired_before) + "\n")
     if task.still_stubbed:
         others += ("\nOther theorems broken by the same change are temporarily replaced by `sorry`; they are "
-                   "not your task and you must not touch them: " + ", ".join(f"`{t}`" for t in task.still_stubbed) + "\n")
+                   "not your task and you must not touch them: " + ", ".join(f"`{t}`" for t in task.still_stubbed)
+                   + ". Do not use them in your proof either: a proof that rests on one depends on `sorry` and "
+                   "cannot be accepted.\n")
     tools = ("The Lean LSP tools (goal states, diagnostics, trying tactics) are available too."
              if task.lsp_tools else "Read the compiler's error messages for goal states.")
     context = ""
