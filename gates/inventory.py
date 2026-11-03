@@ -16,6 +16,11 @@ END = re.compile(r"^\s*end\b")
 
 def source_theorems(text: str) -> list[tuple[str, bool]]:
     """(fully qualified name, private) of every named theorem/lemma in a Lean source file."""
+    return [(full, private) for full, private, _ in source_theorems_written(text)]
+
+
+def source_theorems_written(text: str) -> list[tuple[str, bool, str]]:
+    """(fully qualified name, private, name as written) of every named theorem/lemma, in source order."""
     out, scopes = [], []  # scopes: (kind, namespace parts)
     for line in strip_comments(text).splitlines():
         if m := OPENS.match(line):
@@ -29,7 +34,7 @@ def source_theorems(text: str) -> list[tuple[str, bool]]:
                 full = name[len("_root_."):]
             else:
                 full = ".".join([p for _, parts in scopes for p in parts] + [name])
-            out.append((full, re.match(r"^\s*(?:@\[[^\]]*\]\s*)*private\b", line) is not None))
+            out.append((full, re.match(r"^\s*(?:@\[[^\]]*\]\s*)*private\b", line) is not None, name))
     return out
 
 

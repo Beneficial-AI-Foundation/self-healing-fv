@@ -227,7 +227,9 @@ def compare(cfg: dict, base: dict, broken: dict, cand: dict, diff: str, referenc
     for b in bset:
         if in_x(b["file"]):
             continue  # component: in the excluded region, never accepted, so its record is not needed
-        if not b["name"] or b["name"] not in (broken if head else base)["records"]:
+        if b.get("problem"):  # e.g. two theorems of that short name in the file, unresolved (scope.resolve)
+            unavailable.append(f"broken theorem {b['key']} ({b['file']}): {b['problem']}")
+        elif not b["name"] or b["name"] not in (broken if head else base)["records"]:
             unavailable.append(f"broken theorem {b['key']} ({b['file']}) has no {'head' if head else 'base'} record")
     outside: list[dict] = []  # stubs the candidate cannot repair (head reference)
     if head:
@@ -239,6 +241,8 @@ def compare(cfg: dict, base: dict, broken: dict, cand: dict, diff: str, referenc
             unavailable += [f"the stubbed broken state is not the head plus stubs: {p}" for p in problems[:5]]
         in_set = {(b["file"], b["key"]) for b in bset}
         outside = [s for s in found if (s["file"], s["key"]) not in in_set]
+        unavailable += [f"stub {s['key']} ({s['file']}): {s['problem']}" for s in outside
+                        if s.get("problem") and not in_x(s["file"])]
         # Every broken theorem is a stub by construction, so the head must show it unstubbed: a "head"
         # that is the stubbed tree itself (or was tampered into it) shows no stubs at all.
         unfound = sorted(f"{f}::{k}" for f, k in in_set - {(s["file"], s["key"]) for s in found})

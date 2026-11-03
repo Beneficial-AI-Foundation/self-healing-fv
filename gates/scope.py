@@ -36,12 +36,44 @@ def short(key: str) -> str:
     return key.split("#", 1)[0]
 
 
-def full_name(snapshot: dict, file: str, key: str) -> str | None:
-    """Fully qualified name of declaration `key` of `file`, from the snapshot's records."""
+def resolve(snapshot: dict, file: str, key: str) -> tuple[str | None, str | None]:
+    """(fully qualified name, problem) of declaration `key` of `file`, from the snapshot's records.
+
+    The written name is matched against the records of its module. When several records match
+    (`Foo.part` and `Bar.part` in one file; gate re-check, 2026-11-03: matching by suffix took the
+    wrong one, and a stub went uncounted), the occurrence is resolved through the namespace-aware
+    source parse (inventory.py): the key's position among the theorems of that written name must
+    agree with that parse's count, and the name it gives must be a record. Otherwise `problem` says
+    why, and the gate cannot decide (owner decision 2026-11-03, Dana: resolve, fail closed if unsure)."""
+    from .inventory import source_theorems_written  # inventory imports snapshot, as this module does
     mod, s = module_of(file, snapshot.get("src_dirs")), short(key)
-    names = [n for n, r in snapshot.get("records", {}).items()
-             if r.get("module") == mod and (n == s or n.endswith("." + s))]
-    return min(names, key=len) if names else None
+    records = snapshot.get("records", {})
+    names = [n for n, r in records.items() if r.get("module") == mod and (n == s or n.endswith("." + s))]
+    text = snapshot.get("sources", {}).get(file)
+    same = [d for d in leandecls.parse(text)[0] if d["name"] == s] if text is not None else []
+    # One record and one declaration of that written name: unambiguous. Two written, even if only one
+    # has a record (the other failed to fingerprint), go through the source parse.
+    if len(names) <= 1 and len(same) <= 1:
+        return (names[0] if names else None), None
+    if text is None:
+        return None, f"`{s}` names {len(names)} declarations in {file}, whose source is not in the snapshot"
+    thms = [d for d in same if d["kind"] in ADDABLE]
+    written = [(full, private) for full, private, w in source_theorems_written(text) if w == s]
+    pos = next((i for i, d in enumerate(thms) if d["key"] == key), None)
+    if pos is None or len(written) != len(thms):
+        return None, (f"`{s}` names {len(names)} declarations in {file} ({', '.join(sorted(names)[:3])}), and the "
+                      "gate cannot tell which one is meant")
+    full, private = written[pos]
+    name = f"_private.{mod}.0.{full}" if private else full
+    if name not in names:
+        return None, f"`{key}` in {file} resolves to `{name}`, which has no record (candidates: {', '.join(sorted(names)[:3])})"
+    return name, None
+
+
+def full_name(snapshot: dict, file: str, key: str) -> str | None:
+    """Fully qualified name of declaration `key` of `file`, or None if it has no record or cannot be
+    told apart from another declaration of the same short name (`resolve` says why)."""
+    return resolve(snapshot, file, key)[0]
 
 
 def broken_set(base: dict, broken: dict) -> list[dict]:
@@ -56,8 +88,12 @@ def broken_set(base: dict, broken: dict) -> list[dict]:
         b = {d["key"]: d for d in leandecls.parse(before)[0]}
         for d in leandecls.parse(text)[0]:
             if d["body"] == STUB and d["key"] in b and b[d["key"]]["body"] != STUB:
-                out.append({"file": file, "key": d["key"], "kind": d["kind"],
-                            "name": full_name(broken, file, d["key"]) or full_name(base, file, d["key"])})
+                observed = broken.get("modules", {}).get(module_of(file, broken.get("src_dirs"))) == "observed"
+                name, problem = resolve(broken, file, d["key"]) if observed else (None, None)
+                if name is None and problem is None:  # no records there (a module that failed): the base's
+                    name, problem = resolve(base, file, d["key"])
+                out.append({"file": file, "key": d["key"], "kind": d["kind"], "name": name,
+                            **({"problem": problem} if problem else {})})
     return out
 
 
@@ -85,7 +121,8 @@ def derived_stubs(head_sources: dict[str, str], broken: dict) -> tuple[list[dict
                 problems.append(f"{file}: `{key}` differs from the head outside its proof")
             elif k["body"] != h["body"]:
                 if k["body"] == STUB and h["body"] != STUB:
-                    stubs.append({"file": file, "key": key, "name": full_name(broken, file, key)})
+                    name, problem = resolve(broken, file, key)
+                    stubs.append({"file": file, "key": key, "name": name, **({"problem": problem} if problem else {})})
                 else:
                     problems.append(f"{file}: the proof of `{key}` differs from the head and is not a stub")
     return stubs, problems
