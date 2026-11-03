@@ -114,9 +114,12 @@ jobs:
       SHFV_TOKEN: ${{ secrets.SHFV_TOKEN }}
 
   # No model key here, and the PR's code is never checked out: only this repo and the run's report.
+  # It runs also when the repair job failed (`shfv repair` exits 1 when the run could not check the
+  # PR, so the run list shows it): the comment then says so ("Couldn't check this PR"), never nothing.
+  # Not after a cancellation: a new push cancels the run, and the run for that push comments.
   comment:
     needs: [select, repair]
-    if: needs.repair.result == 'success'
+    if: ${{ !cancelled() && needs.select.outputs.count == '1' && (needs.repair.result == 'success' || needs.repair.result == 'failure') }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -137,7 +140,9 @@ jobs:
           token: ${{ secrets.SHFV_TOKEN || github.token }}
           persist-credentials: false
 
+      # Missing if the repair job stopped before uploading: `shfv comment` then posts "Couldn't check".
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
+        continue-on-error: true
         with:
           name: ${{ env.ARTIFACT }}
           path: ${{ runner.temp }}/record

@@ -114,6 +114,8 @@ def cause_text(r: dict) -> str:
 
 def gate_table(r: dict, g: dict) -> list[str]:
     inv = r.get("broken", {}).get("frozen_inventory", "all")
+    if (g.get("excluded") or {}).get("declarations_n"):  # component acceptance: the gate's own count, without X
+        inv = ((g.get("checks", {}).get("G1") or {}).get("info") or {}).get("inventory", inv)
     build = g.get("candidate_build_seconds")
     lines = ["| Check | | |", "|---|---|---|"]
     for cid, name, desc in CHECK_ROWS:
@@ -131,6 +133,8 @@ def gate_table(r: dict, g: dict) -> list[str]:
                                build=f" in {fmt_s(build)}" if build else "")
             if cid in ("G1", "G2") and g.get("reference") == "head":
                 text += " (against the PR as written)"
+            if cid == "G1" and (nx := (g.get("excluded") or {}).get("declarations_n")):
+                text += f"; {nx} more, in modules that cannot be built yet, not covered"
             if cid == "G5" and (checker := (c.get("info") or {}).get("checker")):
                 text = re.sub(r"\s*\((cached build|built)\)$", "", checker)
                 text = text.replace("lean4checker", "`lean4checker`", 1).replace("bundled leanchecker", "`leanchecker` (bundled with Lean)")
@@ -388,7 +392,7 @@ def audit_section(r: dict, focus: str | None = None) -> list[str]:
     return out
 
 
-def render(r: dict) -> str:
+def render(r: dict, apply_cmd: str | None = None) -> str:
     inp = r["inputs"]
     subject = re.sub(r"\s*\(#\d+\)\s*$", "", inp["change_subject"])
     subject = subject.replace("@", "@\u200b")  # a PR title is free text: no mentions when it is posted
@@ -404,90 +408,7 @@ def render(r: dict) -> str:
     t = r.get("totals", {})
     out = [MARKER.format(case=r["case_id"])]
     v = r.get("verdict")
-    if v == "accepted":
-        out.append(f"### ✅ Proofs repaired: {len(repaired)} of {n_proofs} broken proof{'s' * (n_proofs != 1)} fixed, accepted by the gate")
-        out.append("")
-        out.append(f"The change {pr} broke {n_proofs} proof{'s' * (n_proofs != 1)}. The bot repaired "
-                   f"{'it' if n_proofs == 1 else 'them'}, and the gate checked the repair mechanically and accepted it: "
-                   + ("the bot changed no theorem statement, definition or trusted model of the PR, added no axioms or "
-                      "`sorry`, and the project rebuilds from scratch."
-                      if is_head(r) else
-                      "no theorem statement or definition changed, no new axioms or `sorry`, and the project rebuilds "
-                      "from scratch."))
-        inherited = (r.get("gate") or {}).get("inherited_sorry") or {}
-        if inherited:
-            lemmas = sorted({s for v_ in inherited.values() for s in v_})
-            out.append("")
-            out.append(f"🏷️ **Rests on unproved lemmas, as before the change.** {len(inherited)} repaired theorem"
-                       f"{'s' * (len(inherited) != 1)} still depend{'s' * (len(inherited) == 1)} on "
-                       f"{len(lemmas)} lemma{'s' * (len(lemmas) != 1)} that {'was' if len(lemmas) == 1 else 'were'} "
-                       "already unproved (`sorry`) at the base commit, exactly as "
-                       f"{'it' if len(inherited) == 1 else 'they'} did there; the repair adds none: "
-                       + ", ".join(f"`{s}`" for s in distinct_short_names(lemmas)[:8]) + (" …" if len(lemmas) > 8 else ""))
-        incomplete = (r.get("gate") or {}).get("kernel_replay_incomplete") or []
-        if incomplete:
-            out.append("")
-            out.append(f"🏷️ **Kernel replay incomplete.** The independent re-check by the Lean kernel (G5) cannot run "
-                       "proofs by native code (`native_decide`, `bv_decide`), so it stopped early in "
-                       + ", ".join(f"`{x['module']}` (at `{short_name(x['stopped_at'])}`)" for x in incomplete[:3])
-                       + ". That declaration is unchanged by the repair and was already proved this way at the base "
-                       "commit; the rest of that module was checked by the kernel during the clean rebuild, but "
-                       "not re-checked independently.")
-        out += new_axiom_flag(r)
-        native = (r.get("gate") or {}).get("native_code") or []
-        if native:
-            out.append("")
-            out.append(f"🏷️ **Rests on native code, as before the change.** {len(native)} repaired theorem"
-                       f"{'s' * (len(native) != 1)} rest{'s' * (len(native) == 1)} on a proof by native code "
-                       "(`native_decide` or `bv_decide`, axiom `Lean.ofReduceBool`), which trusts Lean's compiler and "
-                       f"runtime as well as the kernel. {'It' if len(native) == 1 else 'Each'} already did so at the "
-                       "base commit; the repair adds no native code where there was none: "
-                       + ", ".join(f"`{s}`" for s in distinct_short_names(native)[:8]) + (" …" if len(native) > 8 else ""))
-    elif v == "passed-without-kernel-replay":
-        out.append(f"### 🟡 Repair passed every check that ran, not accepted yet: {len(repaired)} of {n_proofs} broken "
-                   f"proof{'s' * (n_proofs != 1)} fixed")
-        out.append("")
-        out.append(f"The change {pr} broke {n_proofs} proof{'s' * (n_proofs != 1)}. The bot repaired "
-                   f"{'it' if n_proofs == 1 else 'them'}, and every gate check that ran passed: no theorem statement or "
-                   "definition changed, no new axioms or `sorry`, and the project rebuilds from scratch. The change is "
-                   "**not accepted** yet: acceptance also needs the kernel replay (`lean4checker`), which did "
-                   "not run.")
-    elif v == "no-break":
-        out.append("### ✅ Nothing to repair: the head builds")
-        out.append("")
-        out.append(f"{pr} builds green here, so no proof is broken and the bot did nothing. "
-                   "If its Lean check failed, the failure is not one this run reproduces.")
-    elif v == "failed":
-        err = r.get("error") or {}
-        reasons = sorted({e.get("reason") for e in repairs + escal if e.get("reason")})
-        out.append("### ⛔ The repair run failed (infrastructure)")
-        out.append("")
-        out.append(f"The run for {pr} could not complete, so it says nothing about the proofs. "
-                   + (f"`{err.get('outcome')}`: {err.get('detail', '')[:500]}" if err
-                      else "; ".join(reasons)[:500] or "No reason was recorded."))
-    elif any(e["outcome"] == "extraction-setup" for e in escal):
-        out.append("### ⚠️ Needs a human: the extracted code does not build")
-        out.append("")
-        out.append(f"At {pr}, the extracted Lean code itself fails to build, so there is no state to repair proofs "
-                   "against. This usually means the extraction or the hand-written models of external code need "
-                   "updating; the errors are below.")
-    else:
-        if n_stmts:
-            head = f"{n_stmts} theorem statement{'s' * (n_stmts != 1)} no longer type-check{'s' * (n_stmts == 1)}"
-        else:
-            head = f"{len(repaired)} of {n_proofs} broken proofs repaired"
-        out.append(f"### ⚠️ Needs a human: {head}")
-        out.append("")
-        if n_stmts:
-            out.append(f"The change {pr} changed the extracted code or its dependencies so that the statement of "
-                       f"{'a theorem' if n_stmts == 1 else f'{n_stmts} theorems'} no longer type-checks. Fixing "
-                       f"{'it' if n_stmts == 1 else 'them'} needs a new statement, and the bot never changes statements: "
-                       "someone who owns the spec has to decide what the theorem should now promise.")
-        else:
-            out.append(f"The change {pr} broke {n_proofs} proof{'s' * (n_proofs != 1)}. The bot did not produce a repair "
-                       "the gate accepts for all of them, so nothing is proposed; the evidence is below.")
-            if note := change_trust_note(r):
-                out += [""] + note[:-1]
+    out += lead(r, pr, repaired, n_proofs, n_stmts, apply_cmd)
     if note := reference_note(r):
         out += [""] + note
     out.append("")
@@ -511,7 +432,7 @@ def render(r: dict) -> str:
     other = (r.get("live_analysis") or {}).get("other_errors") or []
     if other:
         out.append(f"**Errors outside theorem proofs at the head** ({len(other)}; no proof edit can fix these, and "
-                   "they make the case ineligible for acceptance):")
+                   "nothing in the modules they stop from building can be accepted):")
         out.append("")
         out.append(fence("\n\n".join(f"{e['file']}:{e.get('line') or ''} {e['msg']}" for e in other[:5]), limit=3000))
         out.append("")
@@ -561,7 +482,14 @@ def render(r: dict) -> str:
 
     g = r.get("gate")
     if g:
-        out.append("#### Gate" + (": the bot's candidate" if v != "accepted" else ""))
+        out.append("#### Gate" + (": the bot's candidate" if v not in ("accepted", "partially-accepted") else ""))
+        if g.get("verdict") == "partially-accepted":
+            ex = g.get("excluded") or {}
+            out.append("")
+            out.append("Accepted per theorem (component acceptance): every check below passed on the bot's edits, and "
+                       "no accepted proof rests on a theorem that is still broken."
+                       + (f" Not covered, because it cannot be built yet: {len(ex.get('modules', []))} module(s), e.g. "
+                          + ", ".join(f"`{m}`" for m in ex["modules"][:3]) + "." if ex.get("modules") else ""))
         out.append("")
         if g.get("verdict") == "gate-unavailable":
             out.append("**The gate could not decide**, so nothing was accepted and nothing is held against the "
@@ -576,7 +504,8 @@ def render(r: dict) -> str:
                 f"`{short_name(h['decl'])}` → {h['maxHeartbeats']}" for h in g["heartbeats"]))
         out.append("")
     if repaired:
-        out.append("#### Repaired" if v == "accepted" else "#### Repaired, pending the kernel replay"
+        out.append("#### Repaired" if v == "accepted" else "#### Repaired and accepted" if v == "partially-accepted"
+                   else "#### Repaired, pending the kernel replay"
                    if v == "passed-without-kernel-replay" else "#### Repairs that passed the agent's own build")
         out.append("")
         out.append("| Theorem | Edit of the old proof | Repaired by |")
@@ -592,6 +521,8 @@ def render(r: dict) -> str:
     delivery = r.get("delivery_diff")
     if g and delivery:
         label = ("The repair the bot proposes (applies to the change's head)" if v == "accepted" else
+                 "The accepted repairs (applies to the change's head; the rest still needs a human)"
+                 if v == "partially-accepted" else
                  "Unaccepted suggestion: the agent's edits, which did not pass the gate")
         out.append(f"<details><summary>{label}</summary>")
         out.append("")
@@ -669,6 +600,151 @@ def render(r: dict) -> str:
     if len(md) > GITHUB_LIMIT:
         md = md[:GITHUB_LIMIT - 200] + "\n\n… (truncated to fit a GitHub comment; full report in the run record)\n"
     return md
+
+
+def lead(r: dict, pr: str, repaired: list[dict], n_proofs: int, n_stmts: int,
+         apply_cmd: str | None = None) -> list[str]:
+    """The headline and the lead paragraph, by verdict (`apply_cmd`: the PR comment's apply line)."""
+    repairs, escal = r.get("repairs", []), r.get("escalations", [])
+    out: list[str] = []
+    v = r.get("verdict")
+    if v == "accepted":
+        out.append(f"### ✅ Proofs repaired: {len(repaired)} of {n_proofs} broken proof{'s' * (n_proofs != 1)} fixed, accepted by the gate")
+        out.append("")
+        out.append(f"The change {pr} broke {n_proofs} proof{'s' * (n_proofs != 1)}. The bot repaired "
+                   f"{'it' if n_proofs == 1 else 'them'}, and the gate checked the repair mechanically and accepted it: "
+                   + ("the bot changed no theorem statement, definition or trusted model of the PR, added no axioms or "
+                      "`sorry`, and the project rebuilds from scratch."
+                      if is_head(r) else
+                      "no theorem statement or definition changed, no new axioms or `sorry`, and the project rebuilds "
+                      "from scratch."))
+        out += apply_block(apply_cmd)
+        out += flag_lines(r)
+    elif v == "partially-accepted":
+        out += partial_lead(r, pr, repaired, n_proofs, n_stmts)
+        out += apply_block(apply_cmd)
+        out += flag_lines(r)
+    elif v == "passed-without-kernel-replay":
+        out.append(f"### 🟡 Repair passed every check that ran, not accepted yet: {len(repaired)} of {n_proofs} broken "
+                   f"proof{'s' * (n_proofs != 1)} fixed")
+        out.append("")
+        out.append(f"The change {pr} broke {n_proofs} proof{'s' * (n_proofs != 1)}. The bot repaired "
+                   f"{'it' if n_proofs == 1 else 'them'}, and every gate check that ran passed: no theorem statement or "
+                   "definition changed, no new axioms or `sorry`, and the project rebuilds from scratch. The change is "
+                   "**not accepted** yet: acceptance also needs the kernel replay (`lean4checker`), which did "
+                   "not run.")
+    elif v == "no-break":
+        out.append("### ✅ Nothing to repair: the head builds")
+        out.append("")
+        out.append(f"{pr} builds green here, so no proof is broken and the bot did nothing. "
+                   "If its Lean check failed, the failure is not one this run reproduces.")
+    elif v == "failed":
+        err = r.get("error") or {}
+        reasons = sorted({e.get("reason") for e in repairs + escal if e.get("reason")})
+        out.append("### ⛔ The repair run failed (infrastructure)")
+        out.append("")
+        out.append(f"The run for {pr} could not complete, so it says nothing about the proofs. "
+                   + (f"`{err.get('outcome')}`: {err.get('detail', '')[:500]}" if err
+                      else "; ".join(reasons)[:500] or "No reason was recorded."))
+    elif any(e["outcome"] == "extraction-setup" for e in escal):
+        out.append("### ⚠️ Needs a human: the extracted code does not build")
+        out.append("")
+        out.append(f"At {pr}, the extracted Lean code itself fails to build, so there is no state to repair proofs "
+                   "against. This usually means the extraction or the hand-written models of external code need "
+                   "updating; the errors are below.")
+    else:
+        if n_stmts:
+            head = f"{n_stmts} theorem statement{'s' * (n_stmts != 1)} no longer type-check{'s' * (n_stmts == 1)}"
+        else:
+            head = f"{len(repaired)} of {n_proofs} broken proofs repaired"
+        out.append(f"### ⚠️ Needs a human: {head}")
+        out.append("")
+        if n_stmts:
+            out.append(f"The change {pr} changed the extracted code or its dependencies so that the statement of "
+                       f"{'a theorem' if n_stmts == 1 else f'{n_stmts} theorems'} no longer type-checks. Fixing "
+                       f"{'it' if n_stmts == 1 else 'them'} needs a new statement, and the bot never changes statements: "
+                       "someone who owns the spec has to decide what the theorem should now promise.")
+        else:
+            out.append(f"The change {pr} broke {n_proofs} proof{'s' * (n_proofs != 1)}. The bot did not produce a repair "
+                       "the gate accepts for all of them, so nothing is proposed; the evidence is below.")
+            if note := change_trust_note(r):
+                out += [""] + note[:-1]
+    return out
+
+
+def apply_block(cmd: str | None) -> list[str]:
+    """The one-step apply command (PR comment only: it needs the workflow run's id)."""
+    if not cmd:
+        return []
+    return ["", "**Apply the patch** (from the repository root, on the commit above):", "", fence(cmd, "sh")]
+
+
+def partial_lead(r: dict, pr: str, repaired: list[dict], n_proofs: int, n_stmts: int) -> list[str]:
+    """Component acceptance (§4.3): what was fixed, what needs a human, and that CI stays red."""
+    names = distinct_short_names([e["theorem"] for e in repaired])
+    rest = [e for e in r.get("repairs", []) if e.get("outcome") not in ("repaired", "passed-checks")]
+    waiting = [e for e in rest if e.get("outcome") == "blocked-on"]
+    hard = [e for e in rest if e.get("outcome") != "blocked-on"]
+    added = [e for e in r.get("escalations", []) if e["outcome"] == "added-by-pr"]
+    human = []
+    if n_stmts:
+        human.append(f"{n_stmts} statement{'s' * (n_stmts != 1)} or definition{'s' * (n_stmts != 1)} no longer "
+                     f"type-check{'s' * (n_stmts == 1)} after the change, and the bot never changes "
+                     f"{'it' if n_stmts == 1 else 'them'}")
+    if added:
+        human.append(f"{len(added)} theorem{'s' * (len(added) != 1)} this PR added "
+                     f"{'has a failing proof' if len(added) == 1 else 'have failing proofs'}")
+    if hard:
+        human.append(f"{len(hard)} proof{'s' * (len(hard) != 1)} the bot did not repair: "
+                     + ", ".join(f"`{s}`" for s in distinct_short_names([e["theorem"] for e in hard])[:5])
+                     + (" …" if len(hard) > 5 else ""))
+    if waiting:
+        human.append(f"{len(waiting)} proof{'s' * (len(waiting) != 1)} wait{'s' * (len(waiting) == 1)} on those "
+                     "(`blocked-on`): " + ", ".join(f"`{s}`" for s in distinct_short_names(
+                         [e["theorem"] for e in waiting])[:5]) + (" …" if len(waiting) > 5 else ""))
+    return [f"### 🟡 Partly repaired: {len(repaired)} of {n_proofs} broken proof{'s' * (n_proofs != 1)} fixed and "
+            "accepted; the rest needs a human", "",
+            f"**Fixed by the bot, accepted by the gate:** " + ", ".join(f"`{s}`" for s in names[:8])
+            + (" …" if len(names) > 8 else "") + f" (in {pr}).", "",
+            "**Needs a human:** " + ("; ".join(human) or "see below") + ".", "",
+            "**CI stays red until those are fixed.** The patch contains only the accepted repairs, so applying it "
+            "does not make the build pass on its own. Apply it, fix what is listed below, and push: the next push "
+            "re-runs the bot on whatever is still broken."]
+
+
+def flag_lines(r: dict) -> list[str]:
+    """The 🏷️ flags of an acceptance (§4.3, §4.9): conditions allowed only as they stood before."""
+    out: list[str] = []
+    inherited = (r.get("gate") or {}).get("inherited_sorry") or {}
+    if inherited:
+        lemmas = sorted({s for v_ in inherited.values() for s in v_})
+        out.append("")
+        out.append(f"🏷️ **Rests on unproved lemmas, as before the change.** {len(inherited)} repaired theorem"
+                   f"{'s' * (len(inherited) != 1)} still depend{'s' * (len(inherited) == 1)} on "
+                   f"{len(lemmas)} lemma{'s' * (len(lemmas) != 1)} that {'was' if len(lemmas) == 1 else 'were'} "
+                   "already unproved (`sorry`) at the base commit, exactly as "
+                   f"{'it' if len(inherited) == 1 else 'they'} did there; the repair adds none: "
+                   + ", ".join(f"`{s}`" for s in distinct_short_names(lemmas)[:8]) + (" …" if len(lemmas) > 8 else ""))
+    incomplete = (r.get("gate") or {}).get("kernel_replay_incomplete") or []
+    if incomplete:
+        out.append("")
+        out.append(f"🏷️ **Kernel replay incomplete.** The independent re-check by the Lean kernel (G5) cannot run "
+                   "proofs by native code (`native_decide`, `bv_decide`), so it stopped early in "
+                   + ", ".join(f"`{x['module']}` (at `{short_name(x['stopped_at'])}`)" for x in incomplete[:3])
+                   + ". That declaration is unchanged by the repair and was already proved this way at the base "
+                   "commit; the rest of that module was checked by the kernel during the clean rebuild, but "
+                   "not re-checked independently.")
+    out += new_axiom_flag(r)
+    native = (r.get("gate") or {}).get("native_code") or []
+    if native:
+        out.append("")
+        out.append(f"🏷️ **Rests on native code, as before the change.** {len(native)} repaired theorem"
+                   f"{'s' * (len(native) != 1)} rest{'s' * (len(native) == 1)} on a proof by native code "
+                   "(`native_decide` or `bv_decide`, axiom `Lean.ofReduceBool`), which trusts Lean's compiler and "
+                   f"runtime as well as the kernel. {'It' if len(native) == 1 else 'Each'} already did so at the "
+                   "base commit; the repair adds no native code where there was none: "
+                   + ", ".join(f"`{s}`" for s in distinct_short_names(native)[:8]) + (" …" if len(native) > 8 else ""))
+    return out
 
 
 def write(report: dict, out_dir: Path) -> tuple[Path, Path]:

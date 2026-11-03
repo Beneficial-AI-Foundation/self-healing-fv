@@ -111,3 +111,53 @@ def test_the_target_config_picks_the_mode(target, header):
     from shfv.cli import ROOT
     with open(ROOT / "targets" / f"{target}.toml", "rb") as f:
         assert tomllib.load(f)["live"].get("comment_header", OWN) == header
+
+
+PARTIAL = {**REPORT, "verdict": "partially-accepted", "delivery_diff": "--- a/Toy/Specs.lean\n+++ b/Toy/Specs.lean\n",
+           "broken": {"proofs": ["Toy.a", "Toy.b"], "statements": ["Toy.s"]},
+           "repairs": [{"theorem": "Toy.a", "file": "Toy/Specs.lean", "decl": "a", "outcome": "repaired", "attempts": []},
+                       {"theorem": "Toy.b", "file": "Toy/Stmt.lean", "decl": "b", "outcome": "blocked-on",
+                        "attempts": [], "reason": "its file has statements that no longer type-check (s)"}],
+           "escalations": [{"theorem": "Toy.s", "file": "Toy/Stmt.lean", "line": 3, "outcome": "statement-must-change",
+                            "errors": ["unknown identifier 'quad'"], "statement": "theorem s : quad 1 = 4"}],
+           "gate": {"verdict": "partially-accepted", "checks": {}, "excluded": {"modules": ["Toy.Stmt"]}}}
+RUN = "https://github.com/example/toy/actions/runs/123456"
+
+
+def test_a_mixed_result_leads_with_fixed_and_human_and_says_ci_stays_red():
+    s = comment.section(PARTIAL, RUN, "live-toy-aaaaaaaa", comment.LIMIT, "example/toy")
+    lead = s.split("| | |")[0]
+    assert "Partly repaired: 1 of 2 broken proofs fixed and accepted" in lead
+    assert lead.index("Fixed by the bot") < lead.index("Needs a human") < lead.index("CI stays red")
+    assert "1 statement or definition no longer type-checks" in lead and "`b`" in lead
+    assert "the next push re-runs the bot" in lead
+
+
+def test_the_apply_command_is_one_line_that_works_as_written():
+    cmd = comment.apply_command(PARTIAL, "example/toy", RUN, "live-toy-aaaaaaaa")
+    assert cmd == ('d=$(mktemp -d) && gh run download 123456 -R example/toy -n live-toy-aaaaaaaa -D "$d" '
+                   '&& git apply "$d/repair.patch"')
+    assert cmd in comment.section(PARTIAL, RUN, "live-toy-aaaaaaaa", comment.LIMIT, "example/toy")
+    sub = {**PARTIAL, "inputs": {**PARTIAL["inputs"], "repo_lean_root": "SymCRust/lean/"}}
+    assert "git apply --directory=SymCRust/lean " in comment.apply_command(sub, "example/toy", RUN, "x")
+    # Nothing to apply: no command.
+    assert comment.apply_command({**PARTIAL, "verdict": "escalated"}, "example/toy", RUN, "x") is None
+    assert comment.apply_command({**PARTIAL, "delivery_diff": ""}, "example/toy", RUN, "x") is None
+
+
+def test_a_run_that_could_not_check_says_so_briefly():
+    failed = {**REPORT, "verdict": "failed",
+              "error": {"outcome": "gate-unavailable", "detail": "gate snapshot: `lake` failed, ping @someone"}}
+    s = comment.section(failed, RUN, "live-toy-aaaaaaaa", comment.LIMIT, "example/toy")
+    assert "Couldn't check this PR: `gate-unavailable: gate snapshot: 'lake' failed, ping @​someone`." in s
+    assert "Not a statement about your proofs." in s and f"[workflow run]({RUN})" in s
+    assert len(s.splitlines()) < 10 and "| | |" not in s
+
+
+def test_a_missing_report_still_gets_a_comment(tmp_path, monkeypatch):
+    api = FakeGraphQL([])
+    monkeypatch.setattr(comment, "graphql", lambda token: api)
+    monkeypatch.setenv("GITHUB_TOKEN", "x")
+    assert comment.main(tmp_path / "missing" / "report.json", "example/toy", 7, RUN, "a", OWN) == 0
+    [made] = api.comments
+    assert "Couldn't check this PR: `the run stopped before writing its report`" in made["body"]

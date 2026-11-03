@@ -97,7 +97,7 @@ def rows(rep: dict) -> list[dict]:
     """One row per broken theorem of a run: repair targets, then escalations."""
     hf = {h["theorem"]: h for h in rep.get("human_fix", [])}
     g = rep.get("gate") or {}
-    accepted = g.get("verdict") == "accepted"
+    accepted = g.get("verdict") in ("accepted", "partially-accepted")
     inherited = set(g.get("inherited_sorry") or {}) if accepted else set()
     replay_modules = {k["module"] for k in g.get("kernel_replay_incomplete") or []} if accepted else set()
     native = set(g.get("native_code") or []) if accepted else set()
