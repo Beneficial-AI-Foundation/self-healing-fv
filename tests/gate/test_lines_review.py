@@ -41,11 +41,10 @@ def test_coverage_reports_a_theorem_without_a_record():
     assert "Toy.Specs: N.t" in missing, missing
 
 
-def test_coverage_reports_a_theorem_without_a_record_after_public_section():
-    """Expected: the same report. At f85e09d coverage passes, so N.t would be neither frozen (G1)
-    nor in G2's per-declaration checks, and nothing says so."""
-    n, missing = inventory.missing(coverage_snapshot(HIDDEN))
-    assert "Toy.Specs: N.t" in missing, missing
+# The `public section` case of this report lives in test_phase1_review.py,
+# test_line_coverage_decides_after_public_section (re-check #5). The version here gave its record no
+# line, so every declaration was reported and the asserted text "N.t" came from the namespace
+# tracker, not from line coverage: it passed whatever coverage decided.
 
 
 # ------------------------------------------------------------------ `public theorem`
