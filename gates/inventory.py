@@ -33,8 +33,10 @@ def source_theorems(text: str) -> list[tuple[str, bool]]:
     return out
 
 
-def missing(snapshot: dict) -> tuple[int, list[str]]:
-    """(number of source theorems, those without a record in their own module).
+def missing(snapshot: dict, skip_modules: set[str] | frozenset = frozenset()) -> tuple[int, list[str]]:
+    """(number of source theorems, those without a record in their own module). `skip_modules`:
+    modules left out of the count (component acceptance, §4.3: the excluded region, which no
+    accepted repair can reach and the gate certifies nothing in).
 
     A name written in more than one source file (seen in dalek PR 535: the same lemma in
     FromBytes.lean and Pow2K.lean) resolves to one constant when both modules load into one
@@ -45,6 +47,8 @@ def missing(snapshot: dict) -> tuple[int, list[str]]:
     declared_in: dict[str, set[str]] = {}
     for path, text in snapshot.get("sources", {}).items():
         mod = module_of(path, snapshot.get("src_dirs"))
+        if mod in skip_modules:
+            continue
         for full, private in source_theorems(text):
             found.append((mod, full, private))
             declared_in.setdefault(full, set()).add(mod)

@@ -372,10 +372,12 @@ def snapshot(cfg: dict, tree: Path, *, clean: bool = False, apply_diff: Path | N
     result["sources"] = {module_file(m, dirs): (tree / module_file(m, dirs)).read_text() for m in audited}
     if apply_diff is not None:
         # G5: kernel replay of the modules the diff changed (the rest is rebuilt from unchanged
-        # sources). Needs a green build: a failed one is already a G3 rejection.
+        # sources). Needs every changed module built: a green build, or (component acceptance, §4.3)
+        # one that fails only elsewhere; whether that is allowed is compare's G3, not this.
         replay_mods = sorted({module_of(p, dirs) for p in changed_paths if p.endswith(".lean")} & set(mods))
-        result["kernel_replay"] = kernel.replay(tree, replay_mods, cfg) if build["ok"] else \
-            {"ran": False, "error": "the candidate did not build", "modules": {}}
+        built = build["ok"] or (not unknown and all(status.get(m) == "observed" for m in replay_mods))
+        result["kernel_replay"] = kernel.replay(tree, replay_mods, cfg) if built else \
+            {"ran": False, "error": "a module the diff changed did not build", "modules": {}}
         result["kernel_replay"]["required_modules"] = replay_mods
     result["seconds"] = round(time.time() - t0)
     return result

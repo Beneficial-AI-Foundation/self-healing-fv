@@ -36,11 +36,46 @@ LIMIT = 65536 - 1536  # GitHub's cap on a comment body, less room for the target
 GRAPHQL = "https://api.github.com/graphql"
 
 
-def section(r: dict, run_url: str, artifact: str, limit: int) -> str:
+def apply_command(r: dict, repo: str, run_url: str, artifact: str) -> str | None:
+    """One line that downloads the run's artifact and applies its patch (repair.patch at the artifact's
+    root; `gh run download -n` extracts a single artifact flat into `-D`), from the repository root.
+    Only for an accepted repair (whole or in part) with a patch; None otherwise."""
+    m = re.search(r"/actions/runs/(\d+)", run_url)
+    if not (m and r.get("delivery_diff") and r.get("verdict") in ("accepted", "partially-accepted")):
+        return None
+    root = (r.get("inputs") or {}).get("repo_lean_root", "").strip("/")
+    where = f" --directory={root}" if root else ""  # the patch's paths are relative to the Lake project
+    return (f'd=$(mktemp -d) && gh run download {m.group(1)} -R {repo} -n {artifact} -D "$d" '
+            f'&& git apply{where} "$d/repair.patch"')
+
+
+def couldnt_check(reason: str, run_url: str) -> str:
+    """The section for a run that says nothing about the proofs (infrastructure failure, or the gate
+    could not decide): short, and plainly not a verdict (§5.1)."""
+    reason = " ".join(reason.split())[:300].replace("`", "'").replace("@", "@​") or "no reason was recorded"
+    return ("## 🔧 Repair\n\n### ⚪ Couldn't check this PR\n\n"
+            f"Couldn't check this PR: `{reason}`. Not a statement about your proofs. Details: [workflow run]({run_url})."
+            "\n\n<sub>self-healing-fv · the bot pushes nothing.</sub>")
+
+
+def failure_reason(r: dict) -> str | None:
+    """Why a finished run says nothing about the proofs, or None if it does."""
+    if r.get("verdict") != "failed":
+        return None
+    err = r.get("error") or {}
+    if err:
+        return f"{err.get('outcome', 'infrastructure-failure')}: {err.get('detail', '')}"
+    reasons = sorted({e.get("reason") for e in r.get("repairs", []) + r.get("escalations", []) if e.get("reason")})
+    return "; ".join(reasons) or "infrastructure-failure"
+
+
+def section(r: dict, run_url: str, artifact: str, limit: int, repo: str = "") -> str:
     """The Repair section: the report, cut at a heading to fit `limit`, and where the rest is."""
+    if (why := failure_reason(r)) is not None:
+        return couldnt_check(why, run_url)
     foot = (f"\n\n<sub>self-healing-fv · [workflow run]({run_url}) · the full report and the patch are in its "
             f"artifact `{artifact}` (`git apply repair.patch`). The bot pushes nothing.</sub>")
-    md = render(r).strip()
+    md = render(r, apply_command(r, repo, run_url, artifact) if repo else None).strip()
     room = limit - len(foot) - len(BEGIN) - len(END) - 200
     if len(md) > room:
         cut = md.rfind("\n#### ", 0, room)
@@ -121,10 +156,14 @@ def main(report: Path, repo: str, pr: int, run_url: str, artifact: str, header: 
     token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
     if not token:
         raise SystemExit("GITHUB_TOKEN is not set")
-    r = json.loads(report.read_text())
     gql = graphql(token)
     owner, name = repo.split("/")
     _, c = find(gql, owner, name, pr, header)
     other = len(splice(c["body"], "", header)) if c else 0  # what the target's own content takes
-    print(f"{repo}#{pr}: {post(gql, repo, pr, section(r, run_url, artifact, LIMIT - other), header)}")
+    try:
+        sec = section(json.loads(report.read_text()), run_url, artifact, LIMIT - other, repo)
+    except (OSError, json.JSONDecodeError):
+        # The repair job stopped before it wrote (or uploaded) its report: say so, never stay silent.
+        sec = couldnt_check("the run stopped before writing its report", run_url)
+    print(f"{repo}#{pr}: {post(gql, repo, pr, sec, header)}")
     return 0

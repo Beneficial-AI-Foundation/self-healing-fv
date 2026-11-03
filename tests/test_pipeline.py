@@ -567,12 +567,29 @@ def toy_live(tmp_path_factory):
         f.write("\ntheorem pr_new (x : Nat) : double x = x + x := by\n  unfold double\n  omega\n")
     git(repo, "commit", "-qam", "re-extract, and a new theorem")
     added = git(repo, "rev-parse", "HEAD")
+    # branch `base2`, then `mixed` (component acceptance, DESIGN.md §4.3): the base has a module Toy.Stmt
+    # about `quad`; the change re-extracts `double` (breaking both proofs in Specs and `double_three` in
+    # Stmt) and renames `quad`, so the statement of `quad_spec` no longer elaborates and Toy.Stmt fails.
+    git(repo, "checkout", "-qb", "base2", base)
+    with open(repo / "Toy/Funs.lean", "a") as f:
+        f.write("\ndef quad (x : Nat) : Nat := 4 * x\n")
+    (repo / "Toy/Stmt.lean").write_text("import Toy.Funs\n\ntheorem quad_spec (x : Nat) : quad x = 4 * x := by\n"
+                                        "  unfold quad\n  rfl\n\ntheorem double_three : double 3 = 6 := by\n"
+                                        "  unfold double\n  omega\n")
+    (repo / "Toy.lean").write_text((repo / "Toy.lean").read_text() + "import Toy.Stmt\n")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-qm", "a module about quad")
+    git(repo, "checkout", "-qb", "mixed")
+    (repo / "Toy/Funs.lean").write_text((repo / "Toy/Funs.lean").read_text().replace(OLD_DOUBLE, NEW_DOUBLE)
+                                        .replace("def quad (x", "def quadruple (x"))
+    git(repo, "commit", "-qam", "re-extract, renaming quad")
+    mixed = git(repo, "rev-parse", "HEAD")
     git(repo, "checkout", "-q", "main")
     return {"root": root, "repo": repo, "base": base, "head": head, "ok": ok, "bad": bad, "model": model,
-            "axiom": axiom, "cheat": cheat, "added": added}
+            "axiom": axiom, "cheat": cheat, "added": added, "mixed": mixed}
 
 
-def run_live(toy_live, monkeypatch, head, script, label, github=None):
+def run_live(toy_live, monkeypatch, head, script, label, github=None, base="main"):
     import mine_history
     from shfv import live
     monkeypatch.setitem(mine_history.REPO_CONFIGS, "toy", {
@@ -581,7 +598,7 @@ def run_live(toy_live, monkeypatch, head, script, label, github=None):
         "toolchain": ["lean-toolchain", "lakefile.toml", "lake-manifest.json"]})
     cfg = toy_live["root"] / "toy.toml"
     cfg.write_text(CONFIG.format(per_run_usd=10.0))
-    record = live.live_record("toy", toy_live["repo"], "main", head, pr=12, title="Re-extract", github=github)
+    record = live.live_record("toy", toy_live["repo"], base, head, pr=12, title="Re-extract", github=github)
     agent = FakeAgent(script)
     run = Run(record["case_id"], cfg, agent, toy_live["repo"], toy_live["root"] / "work", toy_live["root"] / "runs",
               label=label, live=record)
@@ -673,20 +690,67 @@ def test_an_axiom_the_pr_adds_outside_the_models_is_a_finding_and_unusable(toy_l
     top = md.split("| | |")[0]
     assert "The changes the PR itself made are listed below" in top and "The PR itself changed no" not in top
     assert "**Axioms added** (1, wherever declared, used or not): `pr_cheat`" in md
+    # `pr_cheat` comes after `double_spec` in the file, so this proof does not even build and nothing is
+    # accepted; a repair that does rest on such an axiom is the gate's planted test
+    # (tests/gate/test_head_reference.py).
     script = {"double_spec": ("done", ":= pr_cheat.elim", None), "double_even": GOOD["double_even"]}
     rep, md, _ = run_live(toy_live, monkeypatch, toy_live["cheat"], script, "cheat-used")
-    assert rep["verdict"] != "accepted" and "G2" in rep["gate"]["failed_checks"]
+    assert rep["verdict"] == "escalated" and rep["gate"]["verdict"] == "rejected"
+    assert outcomes(rep) == {"double_spec": "proof-hard", "double_even": "blocked-on"}
+
+
+def applies_to(toy_live, sha: str, diff: str, name: str) -> None:
+    """The delivered patch applies, as the comment's one-step command does it, to the head as committed."""
+    d = toy_live["root"] / f"apply-{name}"
+    shutil.rmtree(d, ignore_errors=True)
+    subprocess.run(["git", "clone", "-q", str(toy_live["repo"]), str(d)], check=True)
+    git(d, "checkout", "-q", sha)
+    (toy_live["root"] / f"{name}.patch").write_text(diff)
+    git(d, "apply", "--check", str(toy_live["root"] / f"{name}.patch"))
 
 
 def test_a_theorem_the_pr_added_whose_proof_fails_is_escalated(toy_live, monkeypatch):
-    """Review finding 3: it is stubbed but has no version before the PR, so it is not repaired, and
-    a result that still carries its stub is never accepted."""
+    """Review finding 3: it is stubbed but has no version before the PR, so it is not repaired.
+    Component acceptance (§4.3, decided 2026-11-03): its stub stays, and the theorems that do have a
+    version before the PR are still repaired and accepted on their own."""
     rep, md, agent = run_live(toy_live, monkeypatch, toy_live["added"], GOOD, "added")
-    assert rep["verdict"] == "escalated" and not agent.calls and "gate" not in rep
     [e] = [e for e in rep["escalations"] if e["outcome"] == "added-by-pr"]
     assert e["theorem"] == "pr_new" and e["file"] == "Toy/Specs.lean" and e["errors"]
-    assert all(r["outcome"] == "blocked-on" and "this PR added" in r["reason"] for r in rep["repairs"])
     assert "added by this PR, its proof fails" in md and rep["reference"] == "head"
+    assert [c[0] for c in agent.calls] == ["double_spec", "double_even"]
+    assert rep["verdict"] == "partially-accepted" and rep["gate"]["verdict"] == "partially-accepted"
+    assert outcomes(rep) == {"double_spec": "repaired", "double_even": "repaired"}
+    assert rep["gate"]["kept_stubs"] == ["pr_new"]
+    d = rep["delivery_diff"]  # the same file as pr_new: its stub must not show, even as context
+    assert d and "sorry" not in d, d
+    applies_to(toy_live, toy_live["added"], d, "added")
+
+
+def test_mixed_change_repairs_what_it_can_and_escalates_the_rest(toy_live, monkeypatch):
+    """Component acceptance (§4.3): a statement that no longer elaborates (Toy.Stmt) no longer stops
+    the bot. The proofs in Toy.Specs are repaired and accepted; `double_three`, in the module that
+    cannot be built, waits for the statement; the patch has the repairs only."""
+    rep, md, agent = run_live(toy_live, monkeypatch, toy_live["mixed"], GOOD, "mixed", base="base2")
+    assert [c[0] for c in agent.calls] == ["double_spec", "double_even"]
+    assert rep["verdict"] == "partially-accepted", (rep["gate"]["verdict"], rep["gate"]["failed_checks"])
+    o = outcomes(rep)
+    assert o == {"double_spec": "repaired", "double_even": "repaired", "double_three": "blocked-on"}, o
+    [three] = [e for e in rep["repairs"] if e["decl"] == "double_three"]
+    assert three["blocked_by"] == ["quad_spec"] and "quad_spec" in three["reason"] and not three["attempts"]
+    [s] = [e for e in rep["escalations"] if e["outcome"] == "statement-must-change"]
+    assert s["theorem"] == "quad_spec"
+    g = rep["gate"]
+    assert g["acceptance"] == "component" and sorted(g["accepted_theorems"]) == ["double_even", "double_spec"]
+    assert "Toy.Stmt" in g["excluded"]["modules"] and rep["broken"]["excluded_modules"] == g["excluded"]["modules"]
+    d = rep["delivery_diff"]
+    assert d and "sorry" not in d and "Toy/Stmt.lean" not in d, d
+    applies_to(toy_live, toy_live["mixed"], d, "mixed")
+
+
+def test_the_delivery_never_carries_a_stub():
+    assert pipeline.stub_lines("+++ b/X.lean\n+theorem t : True := by sorry\n-  old\n") == [
+        "+theorem t : True := by sorry"]
+    assert pipeline.stub_lines("--- a/X.lean\n+++ b/X.lean\n theorem t : True := by sorry\n+  trivial\n") == []
 
 
 def test_live_head_that_builds_has_nothing_to_repair(toy_live, monkeypatch):

@@ -57,6 +57,7 @@ The agent, the pipeline and the report do not need to be trusted, because only t
 - **The gate stays model-free and independent of `shfv/`.** `gates/` never imports `shfv/` or any model SDK. The pipeline reaches the gate only through its CLI (`python -m gates.cli`), and imports from `gates/` only the diff format and the subprocess helper.
 - The target config may say what to build and what to protect, but never loosen what the gate accepts.
 - **Know the reference** (`docs/DESIGN.md` §4.9, decided 2026-10-30). Live runs gate with `--reference head`: the bot is held to the PR as written, and the PR's own statement and trust changes go to the audit, reported and not judged. Replays keep `--reference base`. A gate change must keep both modes' planted tests green (`tests/gate/test_planted.py` is base, `tests/gate/test_head_reference.py` is head), and must not let a snapshot that leaves out root modules become the reference.
+- **Know the acceptance** (`docs/DESIGN.md` §4.3, decided 2026-11-03). The pipeline gates the bot's candidate with `--acceptance component`: each repaired theorem is accepted on its own if it reaches no stub, while modules that cannot be built are excluded and unrepaired theorems keep their stubs. The gate's default stays `complete`. Keep `tests/gate/test_component.py` green in both references; the delivered patch must never carry a stub.
 
 ## Data
 

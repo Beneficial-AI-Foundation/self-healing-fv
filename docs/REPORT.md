@@ -24,7 +24,7 @@ The last line on stdout has the form `<VERDICT> · <counts by outcome> · <cost>
 
 | Command | 0 | 1 | Other |
 |---|---|---|---|
-| `shfv repair` | The run completed, whatever its verdict (`accepted`, `escalated`, `passed-without-kernel-replay`) | The run failed (`verdict: failed`), or it could not start (unknown case, adapter cannot meet the tool profile, or cannot enforce a configured cap without `--allow-unenforced-caps`) | 130: interrupted (a partial record is still written); 2: bad arguments |
+| `shfv repair` | The run completed, whatever its verdict (`accepted`, `partially-accepted`, `escalated`, `passed-without-kernel-replay`) | The run failed (`verdict: failed`), or it could not start (unknown case, adapter cannot meet the tool profile, or cannot enforce a configured cap without `--allow-unenforced-caps`) | 130: interrupted (a partial record is still written); 2: bad arguments |
 | `shfv render` | Re-rendered | – | – |
 | `shfv export` | Exported | A run has no provenance, or was made with uncommitted code | – |
 | `shfv doctor` | Every check passed | Something is missing | – |
@@ -38,7 +38,7 @@ So exit 0 does not mean "repaired". Always read `verdict`.
 
 | Command | 0 | 1 | 2 |
 |---|---|---|---|
-| `gate compare` | `accepted` | `rejected` or `passed-without-kernel-replay` | `gate-unavailable`, or the gate failed |
+| `gate compare` | `accepted` | `rejected` or `passed-without-kernel-replay` | `gate-unavailable`, or the gate failed; 3: `partially-accepted` (`--acceptance component` only) |
 | `gate scope` | G0 passed | G0 failed | The gate failed |
 | `gate audit` | `no-change` | `changed` | `incomplete`, or the gate failed |
 | `gate snapshot` | Snapshot written (even of a tree that does not build: read `build.ok`) | – | Refused (the diff touches a protected or unaudited path), or the gate failed |
@@ -83,7 +83,8 @@ Exit 2 is also argparse's code for bad arguments. Exit 2 never means a pass.
 | `verdict` | Meaning | What a caller can do |
 |---|---|---|
 | `accepted` | Every broken proof was repaired and the gate accepted the whole candidate, kernel replay included | Use `delivery_diff`. Check the flags in `gate.inherited_sorry`, `gate.kernel_replay_incomplete`, `gate.native_code` and (live) `gate.axioms_beyond_base_version`; count flagged acceptances separately. |
-| `escalated` | At least one theorem was not repaired | Read `escalations` and each `repairs[].outcome` and `reason`. Hand them to a person. |
+| `partially-accepted` | Some broken proofs were repaired and accepted (component acceptance, DESIGN.md §4.3); others escalated or wait on them. The project still does not build until a person fixes the rest. | Use `delivery_diff` (only the accepted repairs; never a stub), with the same flags as `accepted`. Hand `escalations` and the unrepaired `repairs` to a person. |
+| `escalated` | At least one theorem was not repaired, and nothing was accepted | Read `escalations` and each `repairs[].outcome` and `reason`. Hand them to a person. |
 | `passed-without-kernel-replay` | Every gate check that ran passed, but G5 did not run | Treat as not accepted |
 | `failed` | The run itself failed (setup, build environment, or the gate could not decide for every theorem). Says nothing about the proofs. | Read `error`, fix the environment, re-run |
 | `no-break` | Live only: the head builds here, so there was nothing to repair. The `audit` still says what the change did. | Nothing, or check why the target's own Lean check failed |
@@ -105,11 +106,11 @@ Each entry of `repairs` has `theorem` (fully qualified), `file`, `decl` (name as
 | `repaired` | Accepted by the gate |
 | `passed-checks` | Every gate check that ran passed, but G5 did not run: not accepted |
 | `proof-hard` | No accepted repair within the budget, or the gate rejected the candidate (`reason` names the failing checks) |
-| `blocked-on` | Depends on a theorem that is still broken, or the case is ineligible (`reason` says which) |
+| `blocked-on` | Depends on a theorem that is still broken; or sits in a module that cannot be built until escalated statements are fixed (`blocked_by` names them); or the case is ineligible (`reason` says which) |
 | `infrastructure-failure` | The agent or the environment failed before saying anything about the theorem |
 | `gate-unavailable` | The gate could not decide. Nothing is accepted, and nothing is held against the repair. |
 
-Each entry of `escalations` has `theorem`, `file`, `line`, `outcome` (`statement-must-change`; live also `extraction-setup`, when the extracted code itself does not build at the head: then `theorem` is the file's name and only `errors` follows, and `added-by-pr`, a theorem the PR added whose proof fails: it has no version before the PR, so the bot does not repair it, and the case is ineligible because its stub would stay in any candidate), `errors` (Lean's messages), `statement` (as it stands), `definition` (when a definition body no longer type-checks, else null), `extraction_change` (a list of `{name, before, after}` signatures of extracted functions named in the errors) and `rename_only` (always null for now).
+Each entry of `escalations` has `theorem`, `file`, `line`, `outcome` (`statement-must-change`; live also `extraction-setup`, when the extracted code itself does not build at the head: then `theorem` is the file's name and only `errors` follows, and `added-by-pr`, a theorem the PR added whose proof fails: it has no version before the PR, so the bot does not repair it; its stub stays, and nothing that uses it is accepted), `errors` (Lean's messages), `statement` (as it stands), `definition` (when a definition body no longer type-checks, else null), `extraction_change` (a list of `{name, before, after}` signatures of extracted functions named in the errors) and `rename_only` (always null for now).
 
 Each attempt object has `adapter`, `model`, `resolved_model`, `stop` (`done`, `gave-up`, `max-turns`, `budget`, `timeout` or `error`), `tokens`, `tokens_complete`, `cost_usd`, `cost_status`, `reported_cost_usd`, `turns`, `seconds`, `final_message`, `diagnosis`, `transcript`, `error`. `turns` is in the adapter's own unit (`agent.turns_unit`), so it is not comparable across adapters.
 
@@ -119,18 +120,23 @@ Each attempt object has `adapter`, `model`, `resolved_model`, `stop` (`done`, `g
 
 | Field | Meaning |
 |---|---|
-| `verdict` | `accepted`, `rejected`, `passed-without-kernel-replay` or `gate-unavailable` |
+| `verdict` | `accepted`, `partially-accepted`, `rejected`, `passed-without-kernel-replay` or `gate-unavailable` |
+| `acceptance` | `complete` or `component` (DESIGN.md §4.3). The bot's candidate is gated with `component`; older runs recorded a descriptive string here. |
+| `accepted_theorems` | The repaired theorems the gate accepted (non-empty only on `accepted` and `partially-accepted`) |
+| `excluded` | Component acceptance: `modules` that fail or are blocked in the stubbed broken state, and the `declarations` in them (`declarations_n` in all): not covered by the verdict |
+| `kept_stubs` | Component acceptance: broken theorems (and, live, theorems the PR added) still stubbed in the candidate |
+| `blocked` | Component acceptance: `{declaration: [kept stubs it reaches]}`, existing declarations that wait on an unrepaired theorem |
+| `theorems` | One per broken theorem: `name`, `file`, `failed_checks`, `repaired`, `status` (`accepted`, `still-stubbed`, `excluded`, `rejected` or `undecided`) |
 | `reference` | What the bot was held to (DESIGN.md §4.9): `head` for a live run (the PR as written; the gate judged only the bot's edits, and the PR's own changes are in `audit`, not judged), `base` for a replay. Absent in runs before 2026-10-30, which were all `base`. |
 | `failed_checks` | Ids of checks that failed, e.g. `["G1", "G2"]` |
 | `unavailable` | Reasons the gate could not decide (non-empty with `gate-unavailable`) |
-| `eligible` | Whether every frozen declaration was observed in the stubbed broken state. `null` if G0 failed before any build. With `reference: head`, also false when a proof the pipeline stubbed is outside the broken set (`checks.G1.info.stubbed_outside_broken_set`). |
+| `eligible` | Whether every frozen declaration was observed in the stubbed broken state. `null` if G0 failed before any build. With `reference: head` and complete-case acceptance, also false when a proof the pipeline stubbed is outside the broken set (`checks.G1.info.stubbed_outside_broken_set`). Component acceptance: only declarations outside the excluded region count. |
 | `built` | Whether the candidate was built (false when G0 failed first) |
-| `theorems` | Per broken theorem: `name`, `file`, `failed_checks`, `repaired` |
 | `checks` | Per check id (`G0`, `G1`, `G2`, `G3`, `G5`): `ok` (true, false, or null if it did not run), `violations` (each with `check`, `msg`, often `decl`), `info`. G5 also has `status` (`ran` or `not run`) and `required: true`. |
-| `inherited_sorry` | Flag: `{theorem: [unproved base lemmas it reaches]}`. Non-empty only on `accepted`. |
-| `kernel_replay_incomplete` | Flag: `[{module, stopped_at, native}]`, modules where the kernel replay stopped at a native-code proof that was already there at the base. Non-empty only on `accepted`. |
-| `native_code` | Flag: `[theorem]`, repaired theorems that rest on native code (`Lean.ofReduceBool`), as their base versions did. Report only. Non-empty only on `accepted`. |
-| `axioms_beyond_base_version` | Flag, `reference: head` only: `{theorem: [axioms]}`, repaired theorems that rest on axioms their base version did not use and the PR head does (e.g. one the PR added to a model). Allowed by G2; a 🏷️ line per theorem in the report says which axioms the PR added. Report only. Non-empty only on `accepted` (the gate's own copy is in `checks.G2.info`). Count it as a flagged acceptance, like the three above. |
+| `inherited_sorry` | Flag: `{theorem: [unproved base lemmas it reaches]}`. Non-empty only on `accepted` and `partially-accepted`. |
+| `kernel_replay_incomplete` | Flag: `[{module, stopped_at, native}]`, modules where the kernel replay stopped at a native-code proof that was already there at the base. Non-empty only on `accepted` and `partially-accepted`. |
+| `native_code` | Flag: `[theorem]`, repaired theorems that rest on native code (`Lean.ofReduceBool`), as their base versions did. Report only. Non-empty only on `accepted` and `partially-accepted`. |
+| `axioms_beyond_base_version` | Flag, `reference: head` only: `{theorem: [axioms]}`, repaired theorems that rest on axioms their base version did not use and the PR head does (e.g. one the PR added to a model). Allowed by G2; a 🏷️ line per theorem in the report says which axioms the PR added. Report only. Non-empty only on `accepted` and `partially-accepted` (the gate's own copy is in `checks.G2.info`). Count it as a flagged acceptance, like the three above. |
 | `heartbeats` | `maxHeartbeats` raises in the diff |
 | `diff` | The candidate diff the gate checked, relative to the stubbed broken state (not the change's head; for that, use `delivery_diff`) |
 | `gate_version` | The gate that decided |

@@ -9,7 +9,7 @@ This page holds the headline numbers and is updated as results come in. The meth
 Tool `20f70af`, gate `5693641`, Claude Code with Opus 5.5, all 15 confirmed curve25519-dalek-lean-verify breaks. Sources: [OVERVIEW.md §6](OVERVIEW.md#6-early-results) and [human-fix-comparison.md](experiments/human-fix-comparison.md).
 
 - **Cases:** 4 of 15 accepted: PRs 41 and 782 by the no-model sweep, PRs 278 and 734 by the agent. 9 of 15 escalated because a statement no longer type-checks. 2 of 15 escalated because the broken state could not be checked (PRs 720, 824).
-- **Theorems:** 17 of 95 proof breaks repaired (14 by the agent, 3 by the sweep). Only 5 of the 17 carry no flag: 11 rest on an inherited `sorry` and 1 has an incomplete kernel replay. The other 78 proof breaks were in ineligible cases and were not attempted.
+- **Theorems:** 17 of 95 proof breaks repaired (14 by the agent, 3 by the sweep). Only 5 of the 17 carry no flag: 11 rest on an inherited `sorry` and 1 has an incomplete kernel replay. The other 78 proof breaks were in ineligible cases and were not attempted. These numbers are from complete-case acceptance; since 2026-11-03 the bot attempts proofs outside the modules a statement break stops (section 7), and the dev cases have not been re-run under that rule.
 - **Cost:** $6.42 of agent cost for the two agent cases (API list-price estimate).
 - **Safety:** no run crashed or ended `gate-unavailable`. On PR 535, the audit of the change itself flags the weakened `*_clamped` specs ([curve25519-dalek-lean-verify issue 873](https://github.com/Beneficial-AI-Foundation/curve25519-dalek-lean-verify/issues/873)) among 259 statement changes.
 - These cases were used during development, so they are not held out.
@@ -72,3 +72,10 @@ Source: [ACTIONS.md "Pilot results"](ACTIONS.md#pilot-results).
   - **dalek PRs 343 and 101.** In 13 of 56 theorem statement breaks, the statement no longer type-checked but the human kept its text. In 11 of the 13, the human changed the file's namespace or `open` lines instead, which is an edit outside proof bodies that G0 does not allow.
   - **SPQR PR 106.** Renames in a trusted model make the whole case ineligible.
 - **The type-check rule misses some statement changes** ([human-fix-comparison.md](experiments/human-fix-comparison.md), tool `20f70af`). In 23 of 95 dalek proof breaks, the statement still type-checked but the human changed it anyway: 19 in PR 584, 3 in PR 535 and 1 in PR 824. So "still type-checks" does not mean "no spec change". All 23 were in ineligible cases, so the bot never attempted them.
+
+## 7. Partial acceptance (2026-11-03)
+
+Component acceptance ([DESIGN.md §4.3](DESIGN.md#43-checks)): each repaired proof is accepted on its own when it rests on nothing still broken. Both runs below are local, with Claude Code and `claude-opus-5-5`; the run records stay unpublished.
+
+- **libsignal-verify, Lean 4.31 → 4.35 with Aeneas `de16f3c` (a local dry run of the upcoming bump, live mode).** Before, the bot escalated the whole case for $0: 17 Protocols statements and definitions no longer type-check against VCVio v4.35.0, and no proof was attempted. Now it escalates those 17, leaves out the 28 modules (356 declarations) they stop from building, and repairs both broken proofs (`extend_from_slice_spec`, `deriveKeysTotal`). The gate accepts both, with no flag: `partially-accepted`, 470 frozen declarations unchanged, kernel replay of both changed modules. $0.76, 5m20s. The 44-line patch applies to the head as committed.
+- **Complete acceptance is unchanged.** Dalek PR 278 replayed with the new rule: accepted, 6 of 6, the same 5 inherited-`sorry` flags as on 2026-10-27, $1.03.
