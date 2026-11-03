@@ -39,40 +39,36 @@ def short(key: str) -> str:
 def resolve(snapshot: dict, file: str, key: str) -> tuple[str | None, str | None]:
     """(fully qualified name, problem) of declaration `key` of `file`, from the snapshot's records.
 
-    The written name is matched against the records of its module. When several records match
-    (`Foo.part` and `Bar.part` in one file; gate re-check, 2026-11-03: matching by suffix took the
-    wrong one, and a stub went uncounted), the occurrence is resolved through the namespace-aware
-    source parse (inventory.py): the key's position among the theorems of that written name must
-    agree with that parse's count, and the name it gives must be a record. Otherwise `problem` says
-    why, and the gate cannot decide (owner decision 2026-11-03, Dana: resolve, fail closed if unsure)."""
-    from .inventory import source_theorems_written  # inventory imports snapshot, as this module does
-    mod, s = module_of(file, snapshot.get("src_dirs")), short(key)
-    records = snapshot.get("records", {})
-    names = [n for n, r in records.items() if r.get("module") == mod and (n == s or n.endswith("." + s))]
+    Named from Lean, not from text (owner decision 2026-11-03, Dana, after two gate re-checks: a
+    short-name suffix took `Foo.part` for `Bar.part`, then a namespace-aware text parse was fooled
+    by a `public section`). The key's declaration line in the snapshot's own source is matched with
+    the records' `line` (StmtCanon: where the name is written) in that module. Fail closed, never
+    guess: no record on that line, several, or one whose name does not end with the written name,
+    and `problem` says why; the gate then cannot decide."""
+    mod = module_of(file, snapshot.get("src_dirs"))
     text = snapshot.get("sources", {}).get(file)
-    same = [d for d in leandecls.parse(text)[0] if d["name"] == s] if text is not None else []
-    # One record and one declaration of that written name: unambiguous. Two written, even if only one
-    # has a record (the other failed to fingerprint), go through the source parse.
-    if len(names) <= 1 and len(same) <= 1:
-        return (names[0] if names else None), None
     if text is None:
-        return None, f"`{s}` names {len(names)} declarations in {file}, whose source is not in the snapshot"
-    thms = [d for d in same if d["kind"] in ADDABLE]
-    written = [(full, private) for full, private, w in source_theorems_written(text) if w == s]
-    pos = next((i for i, d in enumerate(thms) if d["key"] == key), None)
-    if pos is None or len(written) != len(thms):
-        return None, (f"`{s}` names {len(names)} declarations in {file} ({', '.join(sorted(names)[:3])}), and the "
-                      "gate cannot tell which one is meant")
-    full, private = written[pos]
-    name = f"_private.{mod}.0.{full}" if private else full
-    if name not in names:
-        return None, f"`{key}` in {file} resolves to `{name}`, which has no record (candidates: {', '.join(sorted(names)[:3])})"
+        return None, f"{file} is not among the snapshot's sources"
+    d = next((d for d in leandecls.parse(text)[0] if d["key"] == key), None)
+    if d is None:
+        return None, f"`{key}` is not declared in {file}"
+    at = sorted(n for n, r in snapshot.get("records", {}).items()
+                if r.get("module") == mod and r.get("line") == d["line"])
+    if not at:
+        return None, f"`{key}` ({file}:{d['line']}) has no record at that line"
+    if len(at) > 1:
+        return None, f"`{key}` ({file}:{d['line']}): several records at that line ({', '.join(at[:3])})"
+    name = at[0]
+    user = name.split(".0.", 1)[1] if name.startswith("_private.") and ".0." in name else name
+    written = d["name"].removeprefix("_root_.")
+    if not (user == written or user.endswith("." + written)):
+        return None, f"`{key}` ({file}:{d['line']}): the record at that line is `{name}`, not a `{written}`"
     return name, None
 
 
 def full_name(snapshot: dict, file: str, key: str) -> str | None:
-    """Fully qualified name of declaration `key` of `file`, or None if it has no record or cannot be
-    told apart from another declaration of the same short name (`resolve` says why)."""
+    """Fully qualified name of declaration `key` of `file`, or None if it cannot be named for certain
+    (`resolve` says why)."""
     return resolve(snapshot, file, key)[0]
 
 

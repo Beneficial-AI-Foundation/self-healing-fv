@@ -111,7 +111,8 @@ def parse(src: str) -> tuple[list[dict], list[str]]:
         seen[name] = seen.get(name, 0) + 1
         key = name if seen[name] == 1 else f"{name}#{seen[name]}"
         decls.append({"key": key, "kind": cur["kind"], "name": name, "prefix": norm(pre),
-                      "statement": norm(stmt), "body": norm(body)})
+                      "statement": norm(stmt), "body": norm(body),
+                      "line": cur["idx"][0] + 1})  # 1-based, where the keyword and name are (scope.resolve)
 
     for i, line in enumerate(lines):
         m = DECL_RE.match(line)

@@ -10,6 +10,10 @@ from .leandecls import strip_comments
 from .snapshot import module_of
 
 THEOREM_RE = re.compile(r"^\s*(?:@\[[^\]]*\]\s*)*(?:(?:private|protected|nonrec)\s+)*(?:theorem|lemma)\s+([^\s:({\[⦃]+)")
+# Does not know the module system's `public section` (gate re-check #2, 2026-11-03): its `end` then
+# pops an enclosing namespace and later theorems are misnamed. This parse no longer names a broken
+# theorem (scope.resolve uses Lean's source lines); it only checks coverage, where a misread scope can
+# let one record stand for two theorems. A line-based coverage check is a follow-up (DESIGN.md §11, q24).
 OPENS = re.compile(r"^\s*(namespace|section|noncomputable\s+section|mutual)\b\s*(\S*)")
 END = re.compile(r"^\s*end\b")
 
@@ -20,7 +24,8 @@ def source_theorems(text: str) -> list[tuple[str, bool]]:
 
 
 def source_theorems_written(text: str) -> list[tuple[str, bool, str]]:
-    """(fully qualified name, private, name as written) of every named theorem/lemma, in source order."""
+    """(fully qualified name, private, name as written) of every named theorem/lemma, in source order.
+    The gate names nothing with it (scope.resolve); tests/gate/test_names_review.py shows where it misreads."""
     out, scopes = [], []  # scopes: (kind, namespace parts)
     for line in strip_comments(text).splitlines():
         if m := OPENS.match(line):
