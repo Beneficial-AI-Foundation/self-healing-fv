@@ -156,7 +156,11 @@ def isNativeAux (env : Environment) (n : Name) : Bool := Id.run do
   let some i := comps.findIdx? (fun c => c.toString (escape := false) == "_native") | return false
   if i == 0 || i + 3 != comps.length then return false
   if !(comps[i+2]!.toString (escape := false)).startsWith "ax" then return false
-  let owner := (comps.take i).foldl (fun acc c => acc ++ c) Name.anonymous
+  let named := (comps.take i).foldl (fun acc c => acc ++ c) Name.anonymous
+  -- The axiom can carry the private prefix of its module when the owner is public (SPQR, Lean 4.31,
+  -- `bv_decide`: `_private.Spqr.Specs.Util.Inz.0.spqr.util.inz_spec._native.bv_decide.ax_1_14` for
+  -- `spqr.util.inz_spec`); the owner is then the user name, and (3)–(5) apply to it.
+  let owner := if env.contains named then named else (privateToUserName? named).getD named
   match ax.type.getAppFnArgs with
   | (``Eq, #[α, e, rhs]) =>
     if α != mkConst ``Bool || rhs != mkConst ``Bool.true || e.hasLooseBVars || e.hasFVar || e.hasMVar then
@@ -168,7 +172,7 @@ def isNativeAux (env : Environment) (n : Name) : Bool := Id.run do
   if let some arng := declRangeExt.find? env n then
     if !rangeWithin orng.range arng.range then return false
   for c in env.header.moduleData[oi.toNat]!.constNames do
-    if c == n || owner.isPrefixOf c then continue
+    if c == n || owner.isPrefixOf c || named.isPrefixOf c then continue
     if let some ci := env.find? c then
       if (depExprs ci).any (fun e => e.getUsedConstants.contains n) then return false
   return true

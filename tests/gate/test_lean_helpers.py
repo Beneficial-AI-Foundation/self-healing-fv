@@ -46,6 +46,38 @@ theorem uses_crafted : True := by
 """
 TOP = "  import Probe\n\ntheorem top : True := trivial\n"  # indented: the old regex missed it
 BAD = "import\n"  # a header Lean's parser rejects
+# A `module` file (SPQR's shape): Lean names the per-use native axioms of public theorems privately,
+# `_private.MProbe.0.mnd._native.native_decide.ax_1_1`. The crafted private axiom is its own
+# command, outside its would-be owner `mnd2`, so it stays an ordinary axiom. From Lean 4.30, where
+# per-use axioms exist.
+MPROBE = """\
+module
+
+public import Std.Tactic.BVDecide
+public meta import Std.Tactic.BVDecide.Reflect
+
+public section
+
+theorem mnd : 2 ^ 10 = 1024 := by native_decide
+
+theorem mbvd (x : BitVec 8) : (x * 3) &&& 1 = x &&& 1 := by bv_decide
+
+theorem mnd2 : True := trivial
+
+private axiom mnd2._native.native_decide.ax_9 : @Eq Bool true Bool.true
+
+theorem uses_private : True := by
+  have _h := mnd2._native.native_decide.ax_9
+  trivial
+
+end
+"""
+MODULE_FROM = (4, 30)
+
+
+def version(toolchain: str) -> tuple[int, int]:
+    major, minor = toolchain.removeprefix("v").split(".")[:2]
+    return int(major), int(minor)
 
 
 def check(toolchain: str) -> dict:
@@ -54,9 +86,13 @@ def check(toolchain: str) -> dict:
     with tempfile.TemporaryDirectory(prefix="lean-helpers-") as d:
         root = Path(d)
         (root / "lean-toolchain").write_text(f"leanprover/lean4:{toolchain}\n")
-        (root / "lakefile.toml").write_text('name = "probe"\ndefaultTargets = ["Probe", "Top"]\n\n'
-                                            '[[lean_lib]]\nname = "Probe"\n\n[[lean_lib]]\nname = "Top"\n')
+        mod = version(toolchain) >= MODULE_FROM
+        libs = ["Probe", "Top"] + (["MProbe"] if mod else [])
+        (root / "lakefile.toml").write_text(f'name = "probe"\ndefaultTargets = {json.dumps(libs)}\n'
+                                            + "".join(f'\n[[lean_lib]]\nname = "{n}"\n' for n in libs))
         (root / "Probe.lean").write_text(PROBE)
+        if mod:
+            (root / "MProbe.lean").write_text(MPROBE)
         (root / "Top.lean").write_text(TOP)
         (root / "Bad.lean").write_text(BAD)
         b = subprocess.run(["lake", "build"], cwd=root, capture_output=True, text=True)
@@ -75,6 +111,14 @@ def check(toolchain: str) -> dict:
         row["nd_axioms"] = recs.get("nd", {}).get("axioms")
         row["crafted_axioms"] = recs.get("uses_crafted", {}).get("axioms")
         row["crafted_native"] = recs.get("uses_crafted", {}).get("native_axioms")
+        if mod:
+            m = subprocess.run(["lake", "env", "lean", "--run", str(STMTCANON), "--import", "MProbe",
+                                "--module", "MProbe"], cwd=root, capture_output=True, text=True)
+            if m.returncode != 0:
+                row["error"] = row.get("error") or f"StmtCanon (module): {(m.stderr or m.stdout).strip()[-400:]}"
+            mrecs = {r["name"]: r for r in map(json.loads, (x for x in m.stdout.splitlines() if x.startswith("{")))}
+            row["module"] = {n: {"axioms": mrecs.get(n, {}).get("axioms"), "native": mrecs.get(n, {}).get("native_axioms")}
+                             for n in ("mnd", "mbvd", "uses_private")}
         (root / "files.txt").write_text(f"{root / 'Top.lean'}\n{root / 'Bad.lean'}\n")
         p = subprocess.run(["lake", "env", "lean", "--run", str(DEPS), str(root / "files.txt")],
                            cwd=root, capture_output=True, text=True)
@@ -103,6 +147,16 @@ def problems(row: dict) -> list[str]:
         out.append(f"nd: native {native}, axioms {row['nd_axioms']}")
     if "crafted._native.native_decide.ax_9" not in (row["crafted_axioms"] or []) or row["crafted_native"]:
         out.append(f"crafted: axioms {row['crafted_axioms']}, native {row['crafted_native']}")
+    for n, tactic in (("mnd", "native_decide"), ("mbvd", "bv_decide")) if "module" in row else ():
+        r = row["module"][n]
+        prefix = f"_private.MProbe.0.{n}._native.{tactic}."
+        if not r["native"] or not all(a.startswith(prefix) for a in r["native"]) \
+                or not set(r["native"]) <= set(r["axioms"] or []):
+            out.append(f"module {n}: native {r['native']}, axioms {r['axioms']}")
+    if "module" in row:
+        r = row["module"]["uses_private"]
+        if "_private.MProbe.0.mnd2._native.native_decide.ax_9" not in (r["axioms"] or []) or r["native"]:
+            out.append(f"module crafted: axioms {r['axioms']}, native {r['native']}")
     if "Probe" not in (row["deps_top"] or []) or not row["deps_bad_error"]:
         out.append(f"Deps: Top {row['deps_top']}, Bad rejected {row['deps_bad_error']}")
     return out
@@ -129,16 +183,24 @@ def test_the_lean_helpers_work_on(toolchain):
 
 
 def table(rows: list[dict]) -> str:
-    lines = ["| Toolchain | StmtCanon | Records | `nd` native axioms | crafted axiom native? | Deps (indented import, bad header) | Result |",
-             "|---|---|---|---|---|---|---|"]
+    lines = ["| Toolchain | StmtCanon | Records | `nd` native axioms | crafted axiom native? "
+             "| `module` file: native axioms (mnd, mbvd); crafted private native? "
+             "| Deps (indented import, bad header) | Result |",
+             "|---|---|---|---|---|---|---|---|"]
     for r in rows:
         bad = problems(r)
         if "error" in r:
-            lines.append(f"| {r['toolchain']} | | | | | | **fails**: {r['error'][:120]} |")
+            lines.append(f"| {r['toolchain']} | | | | | | | **fails**: {r['error'][:120]} |")
             continue
+        if "module" in r:
+            m = r["module"]
+            nat = ", ".join(f"`{a}`" for n in ("mnd", "mbvd") for a in (m[n]["native"] or [])) or "none"
+            mod = f"{nat}; {'yes' if m['uses_private']['native'] else 'no'}"
+        else:
+            mod = "n/a (before 4.30)"
         lines.append(f"| {r['toolchain']} | {'ok' if r['stmtcanon_ok'] else 'fails'} | {len(r['records'])} "
                      f"| {', '.join(f'`{a}`' for a in r['nd_native'] or []) or 'none'} "
-                     f"| {'yes' if r['crafted_native'] else 'no'} "
+                     f"| {'yes' if r['crafted_native'] else 'no'} | {mod} "
                      f"| {r['deps_top']}, {'rejected' if r['deps_bad_error'] else 'accepted'} "
                      f"| {'ok' if not bad else '**' + '; '.join(bad)[:160] + '**'} |")
     return "\n".join(lines)

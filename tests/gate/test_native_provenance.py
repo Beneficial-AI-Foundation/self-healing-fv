@@ -14,7 +14,9 @@ import pytest
 from .test_component import CONFIG, run
 from .test_planted import FIXTURE, NEW_DOUBLE, SPECS, gate
 
-FAKE = 'macro "fake_native " n:ident : command => `(axiom $n : @Eq Bool true Bool.true)\n\n'
+FAKE = ('macro "fake_native " n:ident : command => `(axiom $n : @Eq Bool true Bool.true)\n\n'
+        # Private, as Lean names a genuine per-use axiom in a `module` file (SPQR, Lean 4.31).
+        'macro "fake_private " n:ident : command => `(private axiom $n : @Eq Bool true Bool.true)\n\n')
 ADD_OLD = "theorem double_add (x y : Nat) : double (x + y) = double x + double y := by\n  unfold double\n  omega\n"
 ADD_STUB = "theorem double_add (x y : Nat) : double (x + y) = double x + double y := by sorry\n"
 ADD_VALID = ("theorem double_add (x y : Nat) : double (x + y) = double x + double y := by\n  unfold double\n"
@@ -61,6 +63,22 @@ def test_a_correctly_shaped_axiom_the_bot_adds_is_not_native_code(env):
     assert cand["build"]["ok"], cand["build"].get("errors")
     assert AX in cand["records"]["double_spec"]["axioms"]  # premise: the repair rests on it
     assert AX not in cand["records"]["double_spec"].get("native_axioms", [])  # not native by provenance
+    assert v["verdict"] in ("rejected", "gate-unavailable"), (v["verdict"], v["accepted_theorems"], v["native_code"])
+
+
+def test_a_private_axiom_named_under_a_public_theorem_is_not_native_code(env):
+    """The owner of `_private.<Mod>.0.T._native…` is `T` when only `T` exists (Phase 1 reruns,
+    2026-11-04: SPQR's genuine `bv_decide` axioms are private). The range rule still applies to that
+    owner: this one is declared by a macro call outside `double_spec`, so it is an ordinary axiom."""
+    edit = {SPECS: lambda t: t.replace(ADD_STUB, ADD_VALID + f"  fake_private {AX}\n")
+            .replace(SPEC_STUB, SPEC_USES_AX)}
+    rc, v = run(env, "fake-private", edit)
+    assert v is not None
+    cand = json.loads((env["root"] / "fake-private.C.json").read_text())
+    assert cand["build"]["ok"], cand["build"].get("errors")
+    priv = "_private.Toy.Specs.0." + AX
+    assert priv in cand["records"]["double_spec"]["axioms"]  # premise: the repair rests on it
+    assert priv not in cand["records"]["double_spec"].get("native_axioms", [])
     assert v["verdict"] in ("rejected", "gate-unavailable"), (v["verdict"], v["accepted_theorems"], v["native_code"])
 
 
