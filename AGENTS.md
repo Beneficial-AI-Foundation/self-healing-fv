@@ -86,7 +86,7 @@ Case record: repo, base commit, change commit, fix commit(s), cause, broken theo
 ## Conventions
 
 - Work on branches; small commits; rebase rather than merge; squash-merge PRs.
-- Reference the Linear issue id (`SCI-17xx`) in branch names or PR titles. In Linear text, use full GitHub URLs, never a bare `#123`.
+- Never put a Linear issue id (`SCI-17xx`) in a branch name or PR title: Linear then links the PR as closing the issue and marks it Done when the PR merges. Write "Part of SCI-17xx" in the PR body instead. In Linear text, use full GitHub URLs, never a bare `#123`.
 - Match the surrounding code: comment density, naming, and the `DESIGN.md §x` references in docstrings.
 - No secrets in git (API keys go in CI secrets or a local `.env`, which is ignored).
 - No large files: Lean build output (`.lake/`), clones of target repos, and run data stay out of git (see `.gitignore`). Run records contain model transcripts; review them before sharing.
