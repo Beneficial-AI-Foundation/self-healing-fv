@@ -657,7 +657,9 @@ class Run:
             raise GateUnavailable("gate compare produced no verdict")
         res["verdict"] = json.loads(V.read_text())
         res["verdict"]["built"] = True
-        res["candidate_build_seconds"] = json.loads(C.read_text())["build"]["seconds"]
+        cj = json.loads(C.read_text())
+        res["candidate_build_seconds"] = cj["build"]["seconds"]
+        res["admissions"] = record_admissions(res["verdict"], cj.get("records", {}))
         if not self.keep:
             shutil.rmtree(self.scratch / f"{label}-gate-tree", ignore_errors=True)
         return res
@@ -882,6 +884,9 @@ class Run:
                 g = self.run_gate("candidate", B, K, cand)
                 self.timing["gate_s"] = time.time() - t0
                 report["gate"] = summarize_gate(g)
+                if g.get("admissions"):  # a pipeline-side backstop; the gate decides (G2)
+                    raise RuntimeError("the accepted candidate's records carry a `sorry` of their own in "
+                                       f"{', '.join(g['admissions'][:3])}; not delivering it")
                 report["delivery_diff"] = self.delivery_diff(cand / self.wp, targets)
                 self.p.gate_line(report["gate"])
                 self.finish_outcomes(report, g["verdict"])
@@ -1174,6 +1179,18 @@ def mentions_stub(text: str, before: str, key: str, still_stubbed: list[tuple[st
     clash = {scope_short(s) for s in own}
     return sorted({k for k, name in still_stubbed if k != key and not (name not in own and scope_short(k) in clash)
                    and any(re.search(rf"(?<![\w']){re.escape(scope_short(k))}(?![\w'])", t) for t in scanned)})
+
+
+def record_admissions(verdict: dict, records: dict) -> list[str]:
+    """The delivery's `sorry` check from record facts, not text (plan review, 2026-11-03): for an
+    accepted candidate, the accepted theorems and the declarations the repair added must not carry a
+    `sorry` of their own in the candidate's records (StmtCanon's `sorry_sources`). Empty unless the
+    verdict accepts. The gate already rejects this (G2); this only keeps a gate bug from reaching a PR."""
+    if verdict.get("verdict") not in ("accepted", "partially-accepted"):
+        return []
+    added = ((verdict.get("checks") or {}).get("G2") or {}).get("info", {}).get("added", [])
+    names = list(verdict.get("accepted_theorems") or []) + list(added)
+    return sorted(n for n in names if n in (records.get(n) or {}).get("sorry_sources", []))
 
 
 def stub_lines(diff: str) -> list[str]:

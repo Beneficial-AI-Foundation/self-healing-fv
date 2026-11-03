@@ -819,3 +819,13 @@ def test_pregate_names_a_kept_stub_where_axioms_cannot_tell():
                            "by sorry\n\ntheorem uses_part (x : Nat) : True := by\n  exact (part_two x).1")
     assert pipeline.mentions_stub(other, before, "uses_part", part, []) == []
     assert pipeline.mentions_stub(via, before, "uses_part", [("part", "Sub.part")], ["Scalar.part"]) == []
+
+
+def test_the_delivery_checks_record_facts_for_an_own_sorry():
+    """Plan review 2026-11-03: the delivery's `sorry` check reads the candidate's records, not text."""
+    v = {"verdict": "accepted", "accepted_theorems": ["T"], "checks": {"G2": {"info": {"added": ["h"]}}}}
+    clean = {"T": {"sorry_sources": []}, "h": {"sorry_sources": []}}
+    assert pipeline.record_admissions(v, clean) == []
+    assert pipeline.record_admissions(v, {**clean, "h": {"sorry_sources": ["h"]}}) == ["h"]
+    assert pipeline.record_admissions(v, {**clean, "T": {"sorry_sources": ["L"]}}) == []  # inherited, not its own
+    assert pipeline.record_admissions({**v, "verdict": "rejected"}, {"T": {"sorry_sources": ["T"]}}) == []
