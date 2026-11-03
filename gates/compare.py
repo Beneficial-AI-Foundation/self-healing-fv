@@ -60,8 +60,11 @@ candidate must build with no stubs. "component" (decided 2026-11-03, Dana; the p
     use it. Every check above holds on the rest (the component), its coverage rules included;
   - the candidate may keep the stubs of broken theorems it did not repair (and, head reference,
     stubs outside the broken set): their `sorry` is allowed as a source; any other is not;
-  - a repaired theorem whose closure, its helpers' included, reaches a stub is a G2 violation, as
-    before; an existing declaration that reaches one is listed as `blocked`, not a violation;
+  - a repaired theorem whose closure, its helpers' included, reaches a stub is a G2 violation, also
+    when that theorem's base proof had a `sorry` (a kept stub is never an inherited source); an
+    existing declaration that reaches one is listed as `blocked` if it already reached that stub in
+    the stubbed broken state, and is a G2 violation if it newly does (e.g. through an added `@[simp]`
+    lemma; owner decision 2026-11-03, after the gate review);
   - the candidate may fail to build only in modules that failed in the stubbed broken state (G3),
     and every module observed there must be observed in the candidate.
   The candidate as a whole must pass; then each repaired theorem is accepted (`accepted_theorems`).
@@ -357,18 +360,28 @@ def compare(cfg: dict, base: dict, broken: dict, cand: dict, diff: str, referenc
         extra = sorted(set(c.get("axioms", [])) - allowed)
         srcs = set(c.get("sorry_sources", []))
         if component and name not in repaired and srcs & kept_stubs:
-            # An existing declaration (its proof unchanged, G0) that reaches a stub the candidate
-            # keeps: blocked on that theorem, not a violation, as long as every other sorry it
-            # reaches is one its reference closure already had.
-            if SORRY not in extra or srcs <= ref_sources | kept_stubs:
+            # An existing declaration that reaches a stub the candidate keeps. Its proof text is
+            # unchanged (G0), but its elaboration may not be: an added `@[simp]` or instance lemma
+            # can make an unchanged proof go through a stub (gate review, 2026-11-03). So it is
+            # blocked on that theorem only if it already reached that same stub in the stubbed
+            # broken state, and every other sorry it reaches is one its reference closure had.
+            # Newly resting on a stub is a violation (owner decision, 2026-11-03, Dana).
+            newly = sorted((srcs & kept_stubs) - set((broken["records"].get(name) or {}).get("sorry_sources", [])))
+            if newly:
+                v2.append({"check": "G2", "decl": name, "msg": f"newly rests on {', '.join(newly[:5])}, which is "
+                           "still stubbed: the candidate changed how its unchanged proof elaborates"})
+                extra = [x for x in extra if x != SORRY]  # reported here, once
+            elif SORRY not in extra or srcs <= ref_sources | kept_stubs:
                 blocked[name] = sorted(srcs & kept_stubs)
                 extra = [x for x in extra if x != SORRY]
         if name in repaired and SORRY in c.get("axioms", []):
             # Sorry only where the base version already reached it, through the same unproved
-            # lemmas, and flagged (owner decision 2026-10-26). A stub of a still-broken theorem
-            # is never a base sorry source, so depending on one is still rejected here.
+            # lemmas, and flagged (owner decision 2026-10-26). A kept stub is never an inherited
+            # source, even when that theorem's base proof had a `sorry` of its own (gate review,
+            # 2026-11-03; owner decision, Dana): the stub claims the whole statement, about the new
+            # code, where the base proof may have proved the part this theorem used.
             srcs = set(c.get("sorry_sources", []))
-            new = sorted(srcs - ref_sources if SORRY not in extra else srcs)
+            new = sorted(((srcs - ref_sources) | (srcs & kept_stubs)) if SORRY not in extra else srcs)
             if name in srcs or new or not srcs:
                 v2.append({"check": "G2", "decl": name, "msg": "depends on sorry"
                            + (f" through {', '.join(new[:5])}" if new else "")})
@@ -523,6 +536,13 @@ def compare(cfg: dict, base: dict, broken: dict, cand: dict, diff: str, referenc
     else:
         verdict = "accepted"
     ok = verdict in ("accepted", "partially-accepted")
+    # The candidate is judged as a whole (§4.3): no theorem reads as accepted under a verdict that
+    # accepts nothing (gate review, 2026-11-03).
+    if not ok:
+        for t in theorems:
+            if t["status"] == "accepted":
+                t["status"] = "rejected" if verdict == "rejected" else "undecided"
+            t["repaired"] = False
     return {"format": 2, "gate_version": version(), "reference": reference, "verdict": verdict, "failed_checks": failed,
             "unavailable": unavailable, "eligible": eligible, "theorems": theorems,
             "accepted_theorems": accepted_theorems if ok else [],
