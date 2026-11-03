@@ -3,6 +3,8 @@ GitHub GraphQL API. The comment must stay one that marocchino/sticky-pull-reques
 finding (its marker last, written by the same user, not minimized)."""
 from __future__ import annotations
 
+import copy
+
 import pytest
 
 from shfv import comment
@@ -160,6 +162,15 @@ SEVENTEEN = {**REPORT, "verdict": "escalated",
                        "definitions_changed": [], "removed": [], "axioms_added": ["ax"], "axioms_changed": [],
                        "added": [], "sorry_written": [], "roots_added": [],
                        "trusted_models_changed": ["rust/T/FunsExternal.lean"]}}
+
+
+def test_a_replay_labels_the_change_s_own_changes_like_the_other_labels():
+    """Replay mode has no "(the gate did not judge these …)" clause, so the colon sits inside the bold
+    label, as in "**Fixed (2):**" (render of dalek PR 734, 2026-11-04)."""
+    r = copy.deepcopy(SEVENTEEN)
+    r["inputs"]["live"] = False
+    s = comment.section(r, RUN, "a", comment.LIMIT, "example/toy")
+    assert "**The change's own changes:** 2 statements changed" in s, s
 
 
 def test_the_comment_for_seventeen_escalations_is_short_and_plain():

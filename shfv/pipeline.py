@@ -400,7 +400,7 @@ class Run:
             # 2. Agent attempts: patch the old proof, then a fresh session with the failure as feedback.
             theorem_deadline = time.monotonic() + 60 * min(bud["per_theorem_minutes"], remaining_min)
             theorem_usd = None if remaining_usd is None else min(bud.get("per_theorem_usd", remaining_usd), remaining_usd)
-            feedback, outcome = "", None
+            feedback, outcome, failed = "", None, ""
             max_attempts = int(bud.get("attempts_per_theorem", 2))
             for n in range(1, max_attempts + 1):
                 minutes_left = (theorem_deadline - time.monotonic()) / 60
@@ -427,8 +427,11 @@ class Run:
                 # Pre-gate (feedback only; the gate alone decides): the file builds, and G0 holds.
                 builds, errors = self.build_module(cand, b)
                 violations = self.pregate_violations(cand, b) if builds else []
-                if builds and not violations and (why := self.reaches_sorry(cand, b, base_records, stubbed_now)):
-                    violations = [why]  # it rests on a stub: the gate would reject the whole candidate
+                stub = builds and not violations and self.reaches_sorry(cand, b, base_records, stubbed_now)
+                if stub:
+                    violations = [stub]  # it rests on a stub: the gate would reject the whole candidate
+                failed = ("did not build" if not builds else "used a theorem that is still unproved" if stub
+                          else "broke the scope rules" if violations else "")
                 entry["prebuild_ok"] = builds
                 self.p.result(f"{att.stop}, {att.turns} turns, {costs.describe(att.cost_status, att.cost_usd, att.model)}, "
                               f"{fmt_s(att.seconds)} · file builds: {'yes' if builds else 'no'}"
@@ -455,12 +458,13 @@ class Run:
                 continue
             entry["outcome"] = outcome or "proof-hard"
             last = entry["attempts"][-1] if entry["attempts"] else {}
+            tries = len(entry["attempts"])
             entry["reason"] = ("not attempted: no budget left for this theorem" if not last else
                                {"gave-up": "the agent gave up", "max-turns": "turn cap reached",
                                 "budget": "cost cap reached", "timeout": "time cap reached",
                                 "error": f"agent error: {last.get('error') or ''}"[:300]}.get(
-                                   last.get("stop"), "the file did not build, or broke the scope rules, after "
-                                   f"{len(entry['attempts'])} attempt(s)"))
+                                   last.get("stop"), f"the last of {tries} attempt{'s' if tries != 1 else ''} "
+                                   + (failed or "did not build, or broke the scope rules")))
             if b.get("stubbed", True):
                 self._restub(cand, b)
         return cand_root

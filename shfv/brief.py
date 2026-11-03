@@ -168,7 +168,7 @@ def audit_line(r: dict) -> list[str]:
         parts.append(f"`sorry` written in {plural(n, 'declaration')}")
     if n := len(a.get("roots_added") or []):
         parts.append(plural(n, "library", "libraries") + " added")
-    line = f"**{who}**{judged}: " + (", ".join(parts) or "no differences found")
+    line = (f"**{who}**{judged}: " if judged else f"**{who}:** ") + (", ".join(parts) or "no differences found")
     if not a.get("complete", a["outcome"] != "incomplete") and a.get("not_compared_n"):
         line += f"; {a['not_compared_n']} declarations could not be compared"
     body = audit_section(r, r.get("audit_focus"))[2:]  # without its own heading
