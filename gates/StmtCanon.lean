@@ -205,10 +205,13 @@ def coreNative (env : Environment) (sysroot : System.FilePath) (audited : Std.Ha
 /-- Is `n` an auxiliary, not a user-facing declaration? With the environment (self-healing-fv,
     2026-11-03; probe on Lean 4.21–4.35 in DESIGN.md §4.5): a constant with a declaration range is
     written in source, and user-facing whatever its name components (`Foo.inj`, `induct.t`,
-    `a.proof_1`, `_aux_hidden`), except: a hygienic name; a notation/macro/elab helper
-    (`_aux_<Module>___macroRules_…`, `___elabRules_…`, `___unexpand_…`), the implementation of a
-    syntax command; and a per-use native axiom by provenance (`isNativeAux`). Constants without a
-    range, and calls without an environment, use the name rules above. -/
+    `a.proof_1`, `_aux_hidden`), except: an inaccessible name (`isInaccessibleUserName`: a `✝`
+    component or `_inaccessible`); a notation/macro/elab helper (`_aux_<Module>___macroRules_…`,
+    `___elabRules_…`, `___unexpand_…`), the implementation of a syntax command; and a per-use native
+    axiom by provenance (`isNativeAux`). A macro-scoped name with a range is kept: `initialize` makes
+    `initFn._@.<Mod>.<hash>._hygCtx._hyg.<n>` (dalek PR 734: 1, SPQR PR 679: 8), frozen like any
+    other definition; leaving those out is DESIGN.md §11 question 26. Constants without a range, and
+    calls without an environment, use the name rules above. -/
 def isAuxiliary (n : Name) (env? : Option Environment := none) : Bool :=
   let user := (privateToUserName? n).getD n
   match env? with
