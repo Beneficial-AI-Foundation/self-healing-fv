@@ -74,6 +74,23 @@ def test_flags_gate_unavailable():
     assert r["flags"] == ["gate-unavailable"]
 
 
+def test_a_run_the_caller_skipped_is_not_flagged_as_a_crash():
+    """The fork smoke test: pushes to the default branch and to a PR's base branch complete the checks
+    with no PR, and the caller's `if` skips its job. 9 of 13 flags were these."""
+    r = collect.row(run(9, conclusion="skipped"), None, None)
+    assert r["decision"].startswith("caller skipped") and r["flags"] == []
+    assert collect.row(run(9, conclusion="cancelled"), None, None)["flags"] == [
+        "no decisions record (select crashed or was cancelled)"]
+
+
+def test_a_failed_run_names_its_outcome():
+    r = collect.row(run(9, conclusion="failure"), decisions(),
+                    {**REPORT, "verdict": "failed", "error": {"outcome": "gate-unavailable", "detail": "root module"}})
+    assert r["flags"] == ["failed (gate-unavailable)"]
+    r = collect.row(run(9, conclusion="failure"), decisions(), {**REPORT, "verdict": "failed"})
+    assert r["flags"] == ["failed (infrastructure)"]
+
+
 def test_skip_row():
     r = collect.row(run(9), decisions(run=False, skip="changes proofs only"), None)
     assert r["decision"] == "changes proofs only" and r["flags"] == [] and "verdict" not in r
