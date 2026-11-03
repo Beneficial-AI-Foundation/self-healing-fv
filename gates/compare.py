@@ -241,8 +241,11 @@ def compare(cfg: dict, base: dict, broken: dict, cand: dict, diff: str, referenc
         # Base reference: the stubbed broken state must be the base plus stubs, as the head reference
         # checks against the head (gate re-check #3, 2026-11-03: a stub the parse could not see, or a
         # declaration a stub swallowed, went unnoticed). Trusted models may differ: a replay overlays the
-        # change's own (§3.3 S1); they are protected, so the candidate cannot touch them.
-        mine = {**broken, "sources": {f: t for f, t in broken.get("sources", {}).items() if not protected(cfg, f)}}
+        # change's own (§3.3 S1); they are protected, so the candidate cannot touch them. Only they are
+        # exempt: other protected files that are Lean sources (a build_config linter, SPQR's
+        # `HeaderLinter/`) must match the base like any other (gate re-check #4, 2026-11-03).
+        mine = {**broken, "sources": {f: t for f, t in broken.get("sources", {}).items()
+                                      if protected(cfg, f) != "trusted_models"}}
         _, problems = scope.derived_stubs(base.get("sources", {}), mine)
         unavailable += [f"the stubbed broken state is not the base plus stubs: {p}" for p in problems[:5]]
     if head:

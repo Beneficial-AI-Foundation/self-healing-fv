@@ -15,8 +15,7 @@ from .snapshot import module_of, protected
 
 STUB = ":= by sorry"
 BANNED = [
-    (r"\bsorry\b", "sorry"), (r"\bsorryAx\b", "sorryAx"), (r"\badmit\b", "admit"), (r"\baxiom\b", "axiom"),
-    (r"\bopaque\b", "opaque"), (r"@\[[^\]]*\bextern\b", "@[extern]"),
+    (r"\bsorry\b", "sorry"), (r"\bsorryAx\b", "sorryAx"), (r"\badmit\b", "admit"), (r"\baxiom\b", "axiom"),    (r"\bopaque\b", "opaque"), (r"@\[[^\]]*\bextern\b", "@[extern]"),
     (r"\bimplemented_by\b", "@[implemented_by]"), (r"\bcsimp\b", "@[csimp]"),
     (r"^\s*import\b|\bimport\s+[A-Z]", "import"), (r"\bdebug\.", "debug.* option"),
     (r"\bmaxHeartbeats\s+0\b", "maxHeartbeats 0"), (r"\bunsafe\b", "unsafe"),
@@ -121,7 +120,27 @@ def derived_stubs(head_sources: dict[str, str], broken: dict) -> tuple[list[dict
                     stubs.append({"file": file, "key": key, "name": name, **({"problem": problem} if problem else {})})
                 else:
                     problems.append(f"{file}: the proof of `{key}` differs from the head and is not a stub")
+        if (p := raw_stub_problem(htext, ktext)) is not None:
+            problems.append(f"{file}: {p}")
     return stubs, problems
+
+
+def raw_stub_problem(ref: str, stubbed: str) -> str | None:
+    """Byte-exact: is `stubbed` the reference text with some proof bodies replaced by stubs, and
+    nothing else changed? The comparison above reads normalized text, as G0 does, so it misses a
+    change to whitespace inside a string literal, or two declarations swapped (gate re-check #4,
+    2026-11-03); a changed declaration there would become G1's reference. Here the reference's
+    declarations must appear in the same order, and the reference with each stubbed body put in
+    must equal `stubbed` exactly. None if so, else the reason."""
+    rd, kd = leandecls.parse(ref)[0], leandecls.parse(stubbed)[0]
+    if [d["key"] for d in rd] != [d["key"] for d in kd]:
+        return "its declarations differ from the reference's, or are in another order"
+    out = ref
+    for r, k in sorted(zip(rd, kd), key=lambda p: p[0]["body_span"][0], reverse=True):
+        if k["body"] == STUB and r["body"] != STUB:
+            (a, b), (c, d) = r["body_span"], k["body_span"]
+            out = out[:a] + stubbed[c:d] + out[b:]
+    return None if out == stubbed else "it differs from the reference outside the stubbed proofs (raw text)"
 
 
 def banned(text: str) -> list[str]:

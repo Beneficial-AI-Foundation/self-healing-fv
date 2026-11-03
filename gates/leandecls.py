@@ -103,6 +103,10 @@ def parse(src: str) -> tuple[list[dict], list[str]]:
     lines); gaps[i] is the normalized non-declaration text before decls[i] (gaps[-1]: after
     the last one). Duplicate names get keys `name#2`, `name#3`, ... in order."""
     lines = strip_comments(src).split("\n")
+    # Offsets into `src`: strip_comments keeps lengths and newlines, so line i starts at offs[i].
+    offs = [0]
+    for ln in lines[:-1]:
+        offs.append(offs[-1] + len(ln) + 1)
     decls, gaps, cur, gap, pending = [], [], None, [], []
     seen: dict[str, int] = {}
 
@@ -115,9 +119,13 @@ def parse(src: str) -> tuple[list[dict], list[str]]:
         name = cur["name"] or f"<{cur['kind']}>"
         seen[name] = seen.get(name, 0) + 1
         key = name if seen[name] == 1 else f"{name}#{seen[name]}"
+        start = offs[cur["idx"][0]]
         decls.append({"key": key, "kind": cur["kind"], "name": name, "prefix": norm(pre),
                       "statement": norm(stmt), "body": norm(body),
-                      "line": cur["idx"][0] + 1})  # 1-based, where the keyword and name are (scope.resolve)
+                      "line": cur["idx"][0] + 1,  # 1-based, where the keyword and name are (scope.resolve)
+                      # Raw offsets of the body in `src` (from its `:=`/`|`/`where` to the declaration's
+                      # last line), for byte-exact comparisons (scope.raw_stub_problem).
+                      "body_span": (start + len(stmt), offs[cur["idx"][-1]] + len(lines[cur["idx"][-1]]))})
 
     for i, line in enumerate(lines):
         m = DECL_RE.match(line)
