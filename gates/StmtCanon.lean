@@ -180,7 +180,7 @@ def isNativeAxiom (env : Environment) (n : Name) : Bool :=
     | some idx => let m := env.header.moduleNames[idx.toNat]!
                   (`Init).isPrefixOf m || (`Lean).isPrefixOf m
     | none => false
-  ((n == ``Lean.ofReduceBool || n == ``Lean.ofReduceNat) && core) || isNativeAux env n
+  ((n == `Lean.ofReduceBool || n == `Lean.ofReduceNat) && core) || isNativeAux env n
 
 /-- Is `n` an auxiliary, not a user-facing declaration? With the environment (self-healing-fv,
     2026-11-03; probe on Lean 4.21–4.35 in DESIGN.md §4.5): a constant with a declaration range is

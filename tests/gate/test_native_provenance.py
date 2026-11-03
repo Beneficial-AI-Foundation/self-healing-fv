@@ -62,3 +62,14 @@ def test_a_correctly_shaped_axiom_the_bot_adds_is_not_native_code(env):
     assert AX in cand["records"]["double_spec"]["axioms"]  # premise: the repair rests on it
     assert AX not in cand["records"]["double_spec"].get("native_axioms", [])  # not native by provenance
     assert v["verdict"] in ("rejected", "gate-unavailable"), (v["verdict"], v["accepted_theorems"], v["native_code"])
+
+
+def test_stmtcanon_checks_only_names_every_supported_lean_has():
+    """A checked name literal (double backtick) fails to elaborate where the constant does not exist,
+    and then every snapshot on that toolchain has no records (Lean 4.35 has no `Lean.ofReduceBool`;
+    libsignal-verify 4.35 rerun, 2026-11-04). Names that may be absent are plain `Name` literals."""
+    import re
+    from pathlib import Path
+    src = (Path(__file__).resolve().parents[2] / "gates" / "StmtCanon.lean").read_text()
+    checked = set(re.findall(r"``([A-Za-z_][\w.]*)", src))
+    assert checked <= {"Eq", "Bool", "Bool.true", "sorryAx"}, checked
