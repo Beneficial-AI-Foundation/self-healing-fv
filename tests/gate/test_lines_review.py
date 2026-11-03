@@ -41,7 +41,7 @@ def test_coverage_reports_a_theorem_without_a_record():
     assert "Toy.Specs: N.t" in missing, missing
 
 
-@pytest.mark.xfail(strict=True, reason="DESIGN §11 q24 (deferred, owner decision 2026-11-03): the coverage "
+@pytest.mark.xfail(strict=True, raises=AssertionError, reason="DESIGN §11 q24 (deferred, owner decision 2026-11-03): the coverage "
                    "parse misreads a closed `public section`; a line-based coverage check would fix it")
 def test_coverage_reports_a_theorem_without_a_record_after_public_section():
     """Expected: the same report. At f85e09d coverage passes, so N.t would be neither frozen (G1)
