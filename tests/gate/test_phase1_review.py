@@ -9,6 +9,8 @@ its neighbour on the same line. G2 then never sees it, nor its admission.
 """
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from gates import inventory
@@ -84,6 +86,21 @@ def test_an_unused_where_helper_with_a_dropped_name_is_still_checked(tmp_path):
     repair = SPEC_VALID + "where\n  _aux_Toy_Specs___h : False := by close_goal\n"
     rc, v = run(e, "where-child", edit_specs((SPEC_STUB, repair)))
     assert_not_accepted(v)
+
+
+def test_a_metaprogram_that_turns_a_tactic_into_sorry_is_seen(tmp_path):
+    """Delta check of 0df83f6: metaprogram definitions (here `macro_rules`, type `Lean.Macro`) keep no
+    record. One written by the bot, indented after its repair (G0 reads it as proof text, sweep #2),
+    rewrites `omega` to a repo macro that is `sorry`, so the unchanged proof of `double_even` (after
+    it in the file) becomes an admission. The metaprogram itself goes unseen, but its effect does:
+    G2 sees `sorryAx` in double_even's closure. Holds at 8892775 (regression guard)."""
+    e = make_env(tmp_path, lambda t: t.replace("/-- A spec predicate", CLOSE_GOAL + "/-- A spec predicate"),
+                 [(SPEC_OLD, SPEC_STUB)], False)
+    rules = "  macro_rules | `(tactic| omega) => `(tactic| close_goal)\n"
+    rc, v = run(e, "macro-rules", edit_specs((SPEC_STUB, SPEC_VALID + rules)))
+    assert_not_accepted(v)
+    cand = json.loads((tmp_path / "macro-rules.C.json").read_text())
+    assert "sorryAx" in cand["records"]["double_even"]["axioms"]  # premise: the rewrite took effect
 
 
 # Codex (re-check #5), a relaxation against ade19f1: a base theorem StmtCanon drops (macro-helper
