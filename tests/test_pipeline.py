@@ -843,6 +843,51 @@ def test_pregate_names_a_kept_stub_where_axioms_cannot_tell():
     assert pipeline.mentions_stub(via, before, "uses_part", [("part", "Sub.part")], ["Scalar.part"]) == []
 
 
+REACH_SRC = """\
+namespace Field
+theorem sub_spec : True := trivial
+end Field
+namespace Point
+theorem sub_spec : True := by sorry
+end Point
+
+theorem uses_field : True := by
+  have _h := Field.sub_spec
+  trivial
+
+theorem uses_point : True := by
+  have _h := Point.sub_spec
+  trivial
+
+theorem helper : True := Point.sub_spec
+theorem via_helper : True := helper
+
+private theorem priv_uses : True := Point.sub_spec
+"""
+
+
+@pytest.mark.skipif(shutil.which("lake") is None, reason="needs elan/lake")
+def test_the_pregate_asks_lean_which_stubs_a_proof_reaches(tmp_path):
+    """dalek PR 734, 2026-11-04: by short name, the text heuristic took the field-element `sub_spec` a
+    proof used for the still-stubbed Ristretto `sub_spec`, and rolled back both attempts. Lean, asked by
+    full name, tells them apart, and also sees use through a helper, which the text misses."""
+    (tmp_path / "lean-toolchain").write_text((FIXTURE / "lean-toolchain").read_text())
+    (tmp_path / "lakefile.toml").write_text('name = "reach"\ndefaultTargets = ["Reach"]\n\n[[lean_lib]]\nname = "Reach"\n')
+    (tmp_path / "Reach.lean").write_text(REACH_SRC)
+    lake_build(tmp_path)
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    reach = lambda n: pipeline.stub_reach(tmp_path, "Reach", n, ["Point.sub_spec"], scratch, 2)
+    assert reach("uses_field") == []
+    assert reach("uses_point") == ["Point.sub_spec"]
+    assert reach("via_helper") == ["Point.sub_spec"]
+    assert reach("_private.Reach.0.priv_uses") == ["Point.sub_spec"]
+    assert reach("no_such_theorem") is None  # inconclusive: the caller falls back to the text
+    # The text heuristic's false finding, for the record: why it is now only the fallback.
+    assert pipeline.mentions_stub(REACH_SRC, REACH_SRC.replace("Field.sub_spec\n  trivial", "sorry", 1),
+                                  "uses_field", [("Point.sub_spec", "Point.sub_spec")], []) == ["Point.sub_spec"]
+
+
 def test_the_delivery_checks_record_facts_for_an_own_sorry():
     """Plan review 2026-11-03: the delivery's `sorry` check reads the candidate's records, not text."""
     v = {"verdict": "accepted", "accepted_theorems": ["T"], "checks": {"G2": {"info": {"added": ["h"]}}}}

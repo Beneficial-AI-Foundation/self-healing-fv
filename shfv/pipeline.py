@@ -552,17 +552,28 @@ class Run:
         whole candidate (G2). If its base version reached no `sorry`, asked with `#print axioms` on the
         built module (inconclusive, e.g. a private name or an error, means no finding). If it did
         (inherited `sorry`), `#print axioms` cannot tell the stub from the inherited source (gate review,
-        2026-11-03), so the new proof and the declarations the attempt added are searched for the names
-        of `still_stubbed` instead: a textual heuristic that misses indirect use, which the gate catches."""
+        2026-11-03), so Lean is asked which still-stubbed theorems, by full name, the repaired theorem's
+        closure reaches (`stub_reach`). Only when that is inconclusive, and for stubs with no full name,
+        the new proof and the declarations the attempt added are searched for their short names instead
+        (`mentions_stub`), a textual heuristic: by short name it took dalek PR 734's field-element
+        `sub_spec` for the still-stubbed Ristretto `sub_spec` and rolled back valid attempts (2026-11-04)."""
         name = b.get("name")
-        if not name or name.startswith("_private"):
+        if not name:
             return None
         base = base_records.get(name, {})
         if "sorryAx" in base.get("axioms", []):
-            hit = mentions_stub((cand / b["file"]).read_text(), (self.broken / b["file"]).read_text(), b["key"],
-                                list(still_stubbed), base.get("sorry_sources", []))
+            named = [n for _, n in still_stubbed if n]
+            reached = stub_reach(cand, self.modules(cand).module(b["file"]), name, named, self.scratch,
+                                 self.cfg["lean"]["lean_num_threads"]) if named else []
+            hit = [short(n) for n in reached or []]
+            text = [(k, n) for k, n in still_stubbed if not n or reached is None]
+            if text:
+                hit += mentions_stub((cand / b["file"]).read_text(), (self.broken / b["file"]).read_text(), b["key"],
+                                     text, base.get("sorry_sources", []))
             return (f"the proof of {short(name)} uses {', '.join(hit[:3])}, which is still unproved here (stubbed), so "
                     "it cannot be accepted; prove it without that theorem") if hit else None
+        if name.startswith("_private"):
+            return None
         mod = self.modules(cand).module(b["file"])
         q = self.scratch / "pregate-axioms.lean"  # outside the candidate tree, so never in its diff
         q.write_text(f"import {mod}\n#print axioms {name}\n")
@@ -1179,6 +1190,70 @@ SWEEP_CLOSER = "all_goals first | omega | simp_all | decide | rfl"
 def scope_short(key: str) -> str:
     """A declaration key as written in proofs: without the parser's `#n` suffix and the namespace."""
     return key.split("#", 1)[0].rsplit(".", 1)[-1]
+
+
+REACH = "SHFV-STUB-REACH"
+REACH_QUERY = """\
+import {module}
+import Lean
+open Lean
+
+/-- `a.b.0.c` as a name, numeric components as numbers (private names: `_private.M.0.x`). -/
+def shfvParse (s : String) : Name :=
+  (s.splitOn ".").foldl (fun n c => match c.toNat? with
+    | some k => Name.mkNum n k
+    | none => Name.mkStr n c) Name.anonymous
+
+#eval show CoreM Unit from do
+  let env ← getEnv
+  let want : String := {start}
+  let targets : List String := {targets}
+  let start := if env.contains (shfvParse want) then some (shfvParse want) else
+    env.constants.fold (fun acc n _ => if acc.isNone && toString n == want then some n else acc) none
+  let some start := start | IO.println "{marker} unknown"
+  let mut todo : Array Name := #[start]
+  let mut seen : NameSet := {{}}
+  let mut hits : Array String := #[]
+  while todo.size > 0 do
+    let n := todo[todo.size - 1]!
+    todo := todo.pop
+    if seen.contains n then continue
+    seen := seen.insert n
+    if n != start && targets.contains (toString n) then
+      hits := hits.push (toString n)
+      continue
+    let some ci := env.find? n | continue
+    let es := match ci with
+      | .defnInfo v => #[v.type, v.value]
+      | .thmInfo v => #[v.type, v.value]
+      | .opaqueInfo v => #[v.type, v.value]
+      | ci => #[ci.type]
+    for e in es do
+      for c in e.getUsedConstants do
+        unless seen.contains c do todo := todo.push c
+  IO.println s!"{marker} {{(toJson hits).compress}}"
+"""
+
+
+def stub_reach(cand: Path, module: str, name: str, targets: list[str], scratch: Path,
+               threads: int) -> list[str] | None:
+    """The full names in `targets` (still-stubbed theorems) that the closure of `name` reaches, asked of
+    Lean on the built candidate (pre-gate feedback, §3.3 S4). The walk is the one `#print axioms` makes
+    (type and value of each constant), and stops at a target. Names compare as StmtCanon writes them
+    (`toString`), so two theorems that share a short name stay apart. None if Lean cannot answer (the
+    module does not load, the name is unknown, an error): the caller falls back to `mentions_stub`."""
+    q = scratch / "pregate-reach.lean"  # outside the candidate tree, so never in its diff
+    q.write_text(REACH_QUERY.format(module=module, start=json.dumps(name, ensure_ascii=False),
+                                    targets=json.dumps(targets, ensure_ascii=False), marker=REACH))
+    r = proc.run(["lake", "env", "lean", str(q)], cand, {**os.environ, "LEAN_NUM_THREADS": str(threads)}, timeout=900)
+    found = [l.split(REACH, 1)[1].strip() for l in (r.stdout + r.stderr).splitlines() if REACH in l]
+    if r.returncode != 0 or len(found) != 1 or found[0] == "unknown":
+        return None
+    try:
+        hits = json.loads(found[0])
+    except json.JSONDecodeError:
+        return None
+    return sorted(h for h in hits if h in targets) if isinstance(hits, list) else None
 
 
 def mentions_stub(text: str, before: str, key: str, still_stubbed: list[tuple[str, str | None]],
