@@ -6,10 +6,12 @@ from __future__ import annotations
 
 import re
 
-from .leandecls import strip_comments
+from .leandecls import MODIFIERS, strip_comments
 from .snapshot import module_of
 
-THEOREM_RE = re.compile(r"^\s*(?:@\[[^\]]*\]\s*)*(?:(?:private|protected|nonrec)\s+)*(?:theorem|lemma)\s+([^\s:({\[⦃]+)")
+# Every declaration modifier Lean accepts (leandecls.MODIFIERS): a `public theorem` that this parse
+# missed went uncounted (gate re-check #3, 2026-11-03).
+THEOREM_RE = re.compile(r"^\s*(?:@\[[^\]]*\]\s*)*(?:" + MODIFIERS + r"\s+)*(?:theorem|lemma)\s+([^\s:({\[⦃]+)")
 # Does not know the module system's `public section` (gate re-check #2, 2026-11-03): its `end` then
 # pops an enclosing namespace and later theorems are misnamed. This parse no longer names a broken
 # theorem (scope.resolve uses Lean's source lines); it only checks coverage, where a misread scope can

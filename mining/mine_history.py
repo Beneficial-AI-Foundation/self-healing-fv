@@ -218,9 +218,12 @@ def strip_comments(src: str) -> str:
     return "".join(out)
 
 
+# Lean's declaration modifiers (`declModifiers`, 4.35), `public` and `meta` included: without them a
+# `public theorem` folds into the previous declaration, and stubbing that one swallows it.
+MODIFIERS = r"(?:private|public|protected|meta|noncomputable|partial|unsafe|nonrec)"
 DECL_RE = re.compile(
     r"^[ \t]*(?:@\[[^\]]*\][ \t]*)*"
-    r"(?:(?:private|protected|noncomputable|partial|unsafe|nonrec)[ \t]+)*"
+    rf"(?:{MODIFIERS}[ \t]+)*"
     r"(theorem|lemma|def|abbrev|instance|axiom|opaque|structure|inductive|class)\b[ \t]*"
     r"([^\s:({\[⦃]*)"
 )
@@ -328,7 +331,7 @@ def parse_decls(src: str | None) -> dict[str, dict]:
         header, statement = split_header(norm(stmt))
         name = cur["name"]
         if not name:  # name wrapped onto the next line, e.g. long Aeneas-generated names
-            m = re.match(r"(?:(?:private|protected|noncomputable|partial|unsafe|nonrec) )*\w+ ([^\s:({\[⦃]+)", statement)
+            m = re.match(rf"(?:{MODIFIERS} )*\w+ ([^\s:({{\[⦃]+)", statement)
             name = m.group(1) if m and cur["kind"] != "instance" else f"<{cur['kind']}>:{statement[:80]}"
         key = name
         k = 2

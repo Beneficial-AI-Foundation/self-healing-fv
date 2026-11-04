@@ -8,15 +8,20 @@ from __future__ import annotations
 
 import re
 
+# Declaration modifiers as Lean's grammar has them (`declModifiers`, Lean 4.35: visibility `private` or
+# `public`, `protected`, `meta` or `noncomputable`, `unsafe`, `partial` or `nonrec`). Missing `public`
+# let a `public theorem` fold into the previous declaration's body (gate re-check #3, 2026-11-03).
+MODIFIERS = r"(?:private|public|protected|meta|noncomputable|partial|unsafe|nonrec)"
 DECL_RE = re.compile(
     r"^[ \t]*(?:@\[[^\]]*\][ \t]*)*"
-    r"(?:(?:private|protected|noncomputable|partial|unsafe|nonrec)[ \t]+)*"
+    rf"(?:{MODIFIERS}[ \t]+)*"
     r"(theorem|lemma|def|abbrev|instance|axiom|opaque|structure|inductive|class|example)\b[ \t]*"
     r"([^\s:({\[⦃]*)"
 )
 # Lines that end the previous declaration even though they are not declarations.
 BOUNDARY_RE = re.compile(
-    r"^(@\[|set_option\b|namespace\b|end\b|section\b|noncomputable section|open\b|variable\b|"
+    # `public section`, `public import`, `meta import`, `public meta import` (the module system) too.
+    r"^(@\[|set_option\b|namespace\b|end\b|section\b|noncomputable section|public\b|private\b|meta\b|open\b|variable\b|"
     r"attribute\b|#|universe\b|mutual\b|import\b|local\b|scoped\b|notation\b|infix|prefix|postfix|"
     r"macro|syntax\b|elab|run_cmd\b|deriving\b|export\b|omit\b|include\b)"
 )
@@ -98,6 +103,10 @@ def parse(src: str) -> tuple[list[dict], list[str]]:
     lines); gaps[i] is the normalized non-declaration text before decls[i] (gaps[-1]: after
     the last one). Duplicate names get keys `name#2`, `name#3`, ... in order."""
     lines = strip_comments(src).split("\n")
+    # Offsets into `src`: strip_comments keeps lengths and newlines, so line i starts at offs[i].
+    offs = [0]
+    for ln in lines[:-1]:
+        offs.append(offs[-1] + len(ln) + 1)
     decls, gaps, cur, gap, pending = [], [], None, [], []
     seen: dict[str, int] = {}
 
@@ -110,9 +119,13 @@ def parse(src: str) -> tuple[list[dict], list[str]]:
         name = cur["name"] or f"<{cur['kind']}>"
         seen[name] = seen.get(name, 0) + 1
         key = name if seen[name] == 1 else f"{name}#{seen[name]}"
+        start = offs[cur["idx"][0]]
         decls.append({"key": key, "kind": cur["kind"], "name": name, "prefix": norm(pre),
                       "statement": norm(stmt), "body": norm(body),
-                      "line": cur["idx"][0] + 1})  # 1-based, where the keyword and name are (scope.resolve)
+                      "line": cur["idx"][0] + 1,  # 1-based, where the keyword and name are (scope.resolve)
+                      # Raw offsets of the body in `src` (from its `:=`/`|`/`where` to the declaration's
+                      # last line), for byte-exact comparisons (scope.raw_stub_problem).
+                      "body_span": (start + len(stmt), offs[cur["idx"][-1]] + len(lines[cur["idx"][-1]]))})
 
     for i, line in enumerate(lines):
         m = DECL_RE.match(line)
