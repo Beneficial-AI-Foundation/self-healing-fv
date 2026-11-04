@@ -301,6 +301,10 @@ Changed:
 
   Still read as text, each failing closed (phase 2, spans from Lean's frontend, is planned separately): G0's split of a file into declarations and of a declaration into statement and body, `resolve`'s line match, `body_is_stub`, the base-plus-stubs comparison, and the banned-token scan.
 
+  Known residuals after phase 1 (re-check #5, 2026-11-04):
+  - *A bot-added unexpander or delaborator* could change the pretty-printed statements (`pp`) the report shows, never `canon`, which G1 compares: it can mislead a reader of the report, not the gate. Its only way in is a command G0 does not see as one, an indented command (phase 2).
+  - *A bot-added `macro_rules` that changes an existing tactic*, indented after a repair so that G0 reads it as proof text (say `omega` to a repo macro that is `sorry`): the metaprogram keeps no record, but its effect does, since a later unchanged proof becomes an admission and G2 sees `sorryAx` in that frozen theorem's closure and rejects (regression guard, `tests/gate/test_phase1_review.py`). Its entry, the indented command, is phase 2's.
+
 The vendored code is unverified against our target toolchains: whether it compiles across the historical Lean versions in the mined cases is an early check (§11). G5 is a separate tool (`lean4checker`), not vendored code.
 
 Interface:
