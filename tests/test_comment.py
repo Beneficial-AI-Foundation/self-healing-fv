@@ -3,6 +3,8 @@ GitHub GraphQL API. The comment must stay one that marocchino/sticky-pull-reques
 finding (its marker last, written by the same user, not minimized)."""
 from __future__ import annotations
 
+import copy
+
 import pytest
 
 from shfv import comment
@@ -54,7 +56,7 @@ def test_section_goes_into_their_comment_before_their_marker():
     assert comment.post(api, "example/toy", 7, sec(), "sorry-delta") == "updated"
     body = api.comments[1]["body"]
     assert body.startswith("## Sorry delta\n\n+1 sorry") and body.endswith(f"\n{THEIRS}")
-    assert BEGIN in body and END in body and "Nothing to repair" in body
+    assert BEGIN in body and END in body and "nothing to repair" in body
     assert api.comments[0]["body"] == "hi" and len(api.comments) == 2  # no comment of its own
 
 
@@ -97,12 +99,14 @@ def test_own_comment_mode_for_a_target_without_one():
 
 def test_section_has_no_mentions_and_fits():
     s = sec()
-    assert "@someone" not in s and "@​someone" in s and "https://run" in s and "live-toy-aaaaaaaa" in s
+    assert "@someone" not in s and "https://run" in s
     big = {**REPORT, "verdict": "escalated", "escalations": [
-        {"theorem": f"T.t{i}", "file": "A.lean", "line": 1, "outcome": "attempts-exhausted",
-         "errors": ["x" * 3000]} for i in range(40)]}
-    cut = comment.section(big, "https://run", "a", 20000)
-    assert len(cut) <= 20000 and "Cut to fit a comment" in cut and cut.rstrip().endswith("pushes nothing.</sub>")
+        {"theorem": f"T.t{i}", "file": "A.lean", "line": 1, "outcome": "statement-must-change",
+         "errors": ["@someone " + "x" * 3000], "statement": "theorem t : True"} for i in range(400)]}
+    cut = comment.section(big, "https://run", "a", 6000)
+    assert len(cut) <= 6000 and cut.rstrip().endswith("pushes nothing</sub>")
+    assert "Too long for a comment: see the full report." in cut and "**Needs a human (400):**" in cut
+    assert "@someone" not in cut
 
 
 @pytest.mark.parametrize("target,header", [("spqr", "sorry-delta"), ("libsignal-verify", OWN)])
@@ -126,11 +130,72 @@ RUN = "https://github.com/example/toy/actions/runs/123456"
 
 def test_a_mixed_result_leads_with_fixed_and_human_and_says_ci_stays_red():
     s = comment.section(PARTIAL, RUN, "live-toy-aaaaaaaa", comment.LIMIT, "example/toy")
-    lead = s.split("| | |")[0]
-    assert "Partly repaired: 1 of 2 broken proofs fixed and accepted" in lead
-    assert lead.index("Fixed by the bot") < lead.index("Needs a human") < lead.index("CI stays red")
-    assert "1 statement or definition no longer type-checks" in lead and "`b`" in lead
-    assert "the next push re-runs the bot" in lead
+    assert s.startswith("## 🔧 Repair: 🟡 partly repaired")
+    assert s.index("CI stays red") < s.index("**Fixed (1), accepted by the gate:** `a`") < s.index("**Needs a human (1):**")
+    assert "1 statement no longer type-checks" in s and "**Waiting on those (1):** `b`" in s
+    assert "Fixed 1 · needs a human 2" in s and "the next push re-runs the bot" in s
+
+
+def visible(s: str) -> list[str]:
+    """The lines a reader sees with every fold closed, blank lines dropped."""
+    return [l for l in comment.FOLD_RE.sub(r"\1\2", s).splitlines() if l.strip()]
+
+
+SEVENTEEN = {**REPORT, "verdict": "escalated",
+             "inputs": {**REPORT["inputs"], "pin_changes": {"lean": ["leanprover/lean4:v4.31.0", "leanprover/lean4:v4.35.0"],
+                                                           "aeneas": ["0855ce1b", "de16f3cf"], "VCVio": ["a", "b"]}},
+             "broken": {"proofs": ["X.p", "X.q"], "statements": [f"S.s{i}" for i in range(17)]},
+             "repairs": [{"theorem": n, "file": "rust/X.lean", "decl": n[2:], "outcome": "blocked-on", "attempts": [],
+                          "reason": "waits"} for n in ("X.p", "X.q")],
+             "escalations": [{"theorem": f"S.s{i}", "file": f"Protocols/ToVCVio/F{i % 3}.lean", "line": 10 + i,
+                              "outcome": "statement-must-change", "statement": "theorem s : True",
+                              "definition": "def s := 1" if i < 10 else None,
+                              "errors": ["unexpected token '='; expected term\nlong goal state …"]} for i in range(17)],
+             "live_analysis": {"other_errors": [{"file": "Protocols/ToVCVio/R.lean", "line": 32,
+                                                 "msg": "Unknown identifier `SPMF`\n\nNote: …"}]},
+             "totals": {"wall_seconds": 364, "attempts": 0},
+             "audit": {"outcome": "changed", "complete": False, "not_compared_n": 356, "summary": {"statements_changed": 2, "definitions_changed": 0, "removed": 0, "trusted_models_changed": 1,
+                                                                             "axioms_added": 1},
+                       "statements_changed": [{"decl": "a", "before": "x", "after": "x",
+                                               "hidden_difference": "universe levels, which the printer hides: …"},
+                                              {"decl": "b", "before": "x", "after": "y"}],
+                       "definitions_changed": [], "removed": [], "axioms_added": ["ax"], "axioms_changed": [],
+                       "added": [], "sorry_written": [], "roots_added": [],
+                       "trusted_models_changed": ["rust/T/FunsExternal.lean"]}}
+
+
+def test_a_replay_labels_the_change_s_own_changes_like_the_other_labels():
+    """Replay mode has no "(the gate did not judge these …)" clause, so the colon sits inside the bold
+    label, as in "**Fixed (2):**" (render of dalek PR 734, 2026-11-04)."""
+    r = copy.deepcopy(SEVENTEEN)
+    r["inputs"]["live"] = False
+    s = comment.section(r, RUN, "a", comment.LIMIT, "example/toy")
+    assert "**The change's own changes:** 2 statements changed" in s, s
+
+
+def test_the_comment_for_seventeen_escalations_is_short_and_plain():
+    s = comment.section(SEVENTEEN, RUN, "a", comment.LIMIT, "example/toy")
+    assert len(visible(s)) <= 15, "\n".join(visible(s))
+    head = visible(s)[1]
+    assert head.startswith("At `aaaaaaaa`, Lean v4.31.0 → v4.35.0, Aeneas 0855ce1 → de16f3c and 1 other dependency broke "
+                           "17 statements and definitions. 2 proofs depend on them. Nothing repaired · $0 · 6m04s.")
+    assert ("**Needs a human (17):** 7 statements and 10 definitions no longer type-check, all in `Protocols/ToVCVio/` "
+            "(first error: `Unknown identifier 'SPMF'`, R.lean:32)") in s
+    assert "**This PR's own changes** (the gate did not judge these; a reviewer should): 2 statements changed (1 only in " \
+           "universe levels), 1 axiom added, trusted model `FunsExternal.lean` edited; 356 declarations could not be " \
+           "compared." in s
+    # No internal labels, no goal states in the visible part, one footer line.
+    for word in ("statement-must-change", "blocked-on", "ineligible", "Tripwire", "long goal state"):
+        assert word not in "\n".join(visible(s)), word
+    assert visible(s)[-1].startswith("<sub>[Full report](") and s.count("<sub>") == 1
+
+
+def test_model_output_never_reaches_the_comment():
+    r = {**PARTIAL, "repairs": [{**PARTIAL["repairs"][0], "attempts": [{"final_message": "MODEL SAYS @admin see http://x",
+                                                                         "adapter": "a", "model": "m", "stop": "done",
+                                                                         "turns": 1, "seconds": 1}]}]}
+    s = comment.section(r, RUN, "a", comment.LIMIT, "example/toy")
+    assert "MODEL SAYS" not in s and "@admin" not in s
 
 
 def test_the_apply_command_is_one_line_that_works_as_written():

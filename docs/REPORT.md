@@ -10,7 +10,7 @@ A reference for tools, skills and agents that call `shfv repair` or `gate` and a
 
 ```
 runs/<repo>-<sha8>/<run id>/report.json    the run record
-runs/<repo>-<sha8>/<run id>/report.md      the PR comment the bot would post
+runs/<repo>-<sha8>/<run id>/report.md      the full report (a target PR's comment is its short form, shfv/brief.py)
 runs/<repo>-<sha8>/latest                  symlink to the newest run
 ```
 

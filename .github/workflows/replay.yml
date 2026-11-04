@@ -287,6 +287,12 @@ jobs:
           kill "$(cat "$STATS/sampler.pid" 2>/dev/null)" 2>/dev/null || true
           run_dir=$(readlink -f "runs/$CASE_DIR/latest" 2>/dev/null || true)
           echo "RUN_DIR=$run_dir" >> "$GITHUB_ENV"
+          # The full report on the run's summary page, one click from the PR comment (its short form).
+          # It holds no prompts or transcripts: the same text as report.md in the artifact.
+          if [ -n "$run_dir" ] && [ -f "$run_dir/report.md" ]; then
+            cat "$run_dir/report.md" >> "$GITHUB_STEP_SUMMARY"
+            printf '\n---\n\n' >> "$GITHUB_STEP_SUMMARY"
+          fi
           python3 .github/scripts/runner_stats.py summarize --samples "$STATS/samples.csv" --log "$STATS/shfv.log" \
             --start "$(cat "$STATS/start" 2>/dev/null || date +%s)" ${run_dir:+--report "$run_dir/report.json"} \
             | tee "$STATS/resources.md" >> "$GITHUB_STEP_SUMMARY"

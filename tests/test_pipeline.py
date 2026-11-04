@@ -221,6 +221,7 @@ def test_failed_attempt_is_rolled_back_completely(toy_case, monkeypatch):
     rep, agent, run = run_case(toy_case, monkeypatch, script, "rollback")
     e = {x["decl"]: x for x in rep["repairs"]}
     assert e["double_spec"]["outcome"] == "proof-hard" and not e["double_spec"]["prebuild_ok"]
+    assert e["double_spec"]["reason"] == "the last of 2 attempts did not build"  # plural, and which check
     suggestion = (run.out / "attempts" / "01-double_spec" / "suggestion.patch").read_text()
     assert "stray_helper" in suggestion  # kept as an unaccepted suggestion
     assert "stray_helper" not in rep["gate"]["diff"]  # but gone from the candidate the gate saw
