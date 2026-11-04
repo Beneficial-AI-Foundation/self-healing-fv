@@ -94,7 +94,7 @@ gh workflow run live.yml -R Beneficial-AI-Foundation/self-healing-fv -f agent=fa
 | Rule | Why |
 |---|---|
 | The PR's branch is in the calling repo | A fork's code never runs on a runner that holds the key |
-| Open, and the author is trusted: `OWNER`/`MEMBER`/`COLLABORATOR`, or `write`/`maintain`/`admin` permission on the calling repo | As for `live.yml`. GitHub's permission tables put the endpoint under Metadata read, which a `GITHUB_TOKEN` always has, so the `select` job's token should do as it is and a caller needs no extra permission (to be confirmed on a fork; if it gets a 403, the PR is skipped with that reason). A fork PR is skipped by the rule above even when its author has write access. |
+| Open, and the author is trusted: `OWNER`/`MEMBER`/`COLLABORATOR`, or `write`/`maintain`/`admin` permission on the calling repo | As for `live.yml`. GitHub's permission tables put the endpoint under Metadata read, which a `GITHUB_TOKEN` always has, so the `select` job's token should do as it is and a caller needs no extra permission (not yet seen in a run; if the call gets a 403, the PR is skipped with that reason). A fork PR is skipped by the rule above even when its author has write access. |
 | Drafts qualify (unlike `live.yml`) | The repo opted in by adding the caller, and the bot only comments; a bump with broken proofs is what people open as a draft (decided 2026-11-02) |
 | No `no-self-heal` label | The maintainers' switch for one PR. For the whole repo: the repo variable `SELF_HEAL=off`, read by the caller. |
 | Lean check failed and extraction check passed on the head; neither still running | As for `live.yml`. Still running: "waiting for …", and the run after it decides. |
