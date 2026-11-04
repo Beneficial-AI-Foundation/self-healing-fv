@@ -210,6 +210,9 @@ def test_a_changed_default_argument_is_rejected(default_env):
 KEEPS = {
     "bar": ('macro:10 p:term:10 " |keep" : term => pure p\n\n', "\n  |keep := by\n"),
     "colon-eq": ('macro:10 p:term:10 " :=keep" : term => pure p\n\n', " :=keep := by\n"),
+    # Narrow check of 6a3a595 (`:=(?=\s|$)`): Python's `\s` matches U+00A0 (no-break space), Lean's
+    # whitespace does not, so `:= keep` is one Lean token that the regex reads as `:=` + space.
+    "colon-eq-nbsp": ('macro:10 p:term:10 " := keep" : term => pure p\n\n', " := keep := by\n"),
 }
 
 
