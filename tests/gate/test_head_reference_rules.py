@@ -94,6 +94,10 @@ def test_a_stub_outside_the_broken_set_makes_the_case_ineligible():
     base, broken, cand, diff = case()
     broken["sources"]["M.lean"] += "\ntheorem U : True := by sorry\n"  # added by the change, stubbed
     broken["records"]["U"] = rec(BASE3 + ["sorryAx"], ["U"])
+    # The candidate is the broken state plus the diff, so it has U's stub too (phase 2: G0 reads
+    # Lean's ranges from the candidate's own text, which must be the patched text).
+    cand["sources"]["M.lean"] += "\ntheorem U : True := by sorry\n"
+    cand["records"]["U"] = rec(BASE3 + ["sorryAx"], ["U"])
     head_src = {"M.lean": base["sources"]["M.lean"] + "\ntheorem U : True := by\n  exact wrong\n"}
     for stubs in (STUBS + ["M.lean::U"], None):  # found by the gate itself, list or no list
         v = head(base, broken, cand, diff, stubs=stubs, head_sources=head_src)

@@ -36,6 +36,26 @@ def with_lines(s: dict) -> None:
     for name, r in s["records"].items():
         if "line" not in r and name in where:
             r["line"] = where[name]
+    ranges_from_text(s)
+
+
+def ranges_from_text(s: dict) -> None:
+    """Give each record the range of its declaration command, as StmtCanon does (`range`, phase 2:
+    G0 cuts touched files by Lean's ranges). Test-only (plan review 2026-11-04, amendment 8): these
+    synthetic snapshots have no Lean, so the range is the text parse's, from the declaration's first
+    line to its last non-blank one. The real-Lean tests (test_text_sweep, test_planted) use Lean's."""
+    from gates import leandecls
+    where = {}
+    for text in s["sources"].values():
+        lines = text.split("\n")
+        for d in leandecls.parse(text)[0]:
+            end = d["end_line"]
+            while end > d["pre_line"] and not lines[end - 1].strip():
+                end -= 1
+            where[d["name"]] = [d["pre_line"], 0, end, len(lines[end - 1].rstrip())]
+    for name, r in s["records"].items():
+        if "range" not in r and name in where:
+            r["range"] = where[name]
 
 
 def rec(axioms, sorry=(), uses=()):
