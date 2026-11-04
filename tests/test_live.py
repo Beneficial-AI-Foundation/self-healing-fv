@@ -111,12 +111,12 @@ def test_members_and_collaborators_are_trusted_without_asking(assoc):
 @pytest.mark.parametrize("p", [perm("admin"), perm("write", "maintain"), perm("write"), perm("write", "pusher")],
                          ids=["admin", "maintain", "write", "custom-role"])
 def test_private_members_with_write_access_are_trusted(assoc, p):
-    """Issue #30: the workflow's token cannot see a private org membership, so an admin of the repo
+    """Issue #30: the workflow's token cannot see a private org membership, so a repo admin
     reads as NONE. Their permission on the repo is what counts."""
-    api = FakeAPI([pr(7, HEAD, assoc=assoc, login="a-dangelo")], failing(), permissions={"a-dangelo": p})
+    api = FakeAPI([pr(7, HEAD, assoc=assoc, login="private-member")], failing(), permissions={"private-member": p})
     picked, rows = select(api)
     assert picked and rows[0]["run"]
-    assert "/repos/example/toy/collaborators/a-dangelo/permission" in api.calls
+    assert "/repos/example/toy/collaborators/private-member/permission" in api.calls
 
 
 @pytest.mark.parametrize("error,why", [(http_error(404), "(HTTP 404)"), (http_error(403), "(HTTP 403)"),
@@ -354,11 +354,11 @@ def test_pr_repair_skips_silently(kw, why):
 
 def test_pr_repair_trusts_a_private_member_by_their_permission_on_the_calling_repo():
     """Issue #30 on pr-repair.yml. A private copy calls it here, so the permission asked is the copy's."""
-    api = FakeAPI([own_pr(repo="me/copy", assoc="NONE", login="a-dangelo")], failing(),
-                  permissions={"a-dangelo": perm("admin")})
+    api = FakeAPI([own_pr(repo="me/copy", assoc="NONE", login="private-member")], failing(),
+                  permissions={"private-member": perm("admin")})
     picked, rows = select_pr(api, repo="me/copy")
     assert picked and rows[0]["run"]
-    assert "/repos/me/copy/collaborators/a-dangelo/permission" in api.calls
+    assert "/repos/me/copy/collaborators/private-member/permission" in api.calls
 
 
 @pytest.mark.parametrize("p,why", [(perm("read"), "with read permission on example/toy"),
