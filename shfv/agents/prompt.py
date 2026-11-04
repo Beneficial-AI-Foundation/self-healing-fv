@@ -88,7 +88,7 @@ Check your work with `lake build {module}` (or `lake env lean {task.file}`). {to
 
 Rules. They are checked mechanically afterwards, and any violation rejects the whole repair:
 - Change only the proof of `{task.decl}`: the text after its `:=`, which must stay (write the proof
-  as `:= by …` or `:= term`, not as `|` equations; use `match` or `cases` inside instead). Do not change its statement,
+  as `:= by …` or `:= term`, with a space after `:=`, not as `|` equations; use `match` or `cases` inside instead). Do not change its statement,
   name or attributes, and do not change any other declaration, statement, definition or proof.
   Text outside proofs is compared byte for byte: do not edit, add or remove comments, docstrings,
   blank lines (except around a helper you add) or any other command (`open`, `attribute`,
