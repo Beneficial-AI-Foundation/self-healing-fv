@@ -139,7 +139,6 @@ def plain_env(tmp_path_factory, request):
     return make_env(tmp_path_factory.mktemp("sweep-plain"), lambda t: t, [(SPEC_OLD, SPEC_STUB)], request.param)
 
 
-@pytest.mark.xfail(strict=True, raises=AssertionError, reason="Phase 2: spans")
 def test_an_indented_command_is_not_proof_text(plain_env):
     """Codex #1. Expected (G0: only proof bodies change): rejected. leandecls ends a declaration only
     at a column-0 command, so an indented command after the repaired proof is read as part of that
@@ -158,7 +157,6 @@ def guard_env(tmp_path_factory, request):
                     [(SPEC_OLD, SPEC_STUB)], request.param)
 
 
-@pytest.mark.xfail(strict=True, raises=AssertionError, reason="Phase 2: spans")
 def test_a_command_string_literal_change_is_out_of_scope(guard_env):
     """Codex #5. Expected (G0: text between declarations may not change): rejected. leandecls
     normalizes whitespace in gaps, string literals included, so `#guard "a b" = …` and
