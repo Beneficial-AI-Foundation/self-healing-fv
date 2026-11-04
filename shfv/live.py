@@ -123,7 +123,7 @@ def author_trust(api, repo: str, pr: dict) -> str | None:
     COLLABORATOR, with no API call; else write, maintain or admin permission on `repo`, asked of
     GitHub. The association alone is not enough: the workflow's token cannot see a private org
     membership, so GitHub reports such a member as NONE or CONTRIBUTOR (issue #30). The permission
-    endpoint needs only Metadata read, which every GITHUB_TOKEN has. Fails closed: if GitHub cannot
+    endpoint is listed under Metadata read, which every GITHUB_TOKEN has. Fails closed: if GitHub cannot
     answer, the author is not trusted, and the reason says why."""
     assoc = pr.get("author_association") or "unknown"
     if assoc in TRUSTED_AUTHORS:

@@ -47,7 +47,7 @@ Give the key its own spend limit with the provider (§9.3): that is the only lim
 
 | Rule | Why |
 |---|---|
-| The PR's `author_association` is `OWNER`, `MEMBER` or `COLLABORATOR` | Building Lean runs the PR's code on a runner that holds a model key (DESIGN.md §9.2) |
+| The author is trusted: the PR's `author_association` is `OWNER`, `MEMBER` or `COLLABORATOR`, or else GitHub says the author has `write`, `maintain` or `admin` permission on the repo (`GET /repos/{repo}/collaborators/{login}/permission`) | Building Lean runs the PR's code on a runner that holds a model key (DESIGN.md §9.2). The permission check is there because the workflow's token cannot see a private org membership, so a private member's association reads `NONE` (issue #30). It fails closed: if GitHub does not answer, the PR is skipped and the summary says why, e.g. "could not check author permission (HTTP 403)". Here the token is this repo's, which most likely cannot read another repo's collaborators (not yet tested), so expect only the association to count (DESIGN.md §9.3). |
 | Not a draft | |
 | The `[live] lean_check` check (`Build Lean Project`) failed or timed out on the head SHA, in every finished run of it, none still running | Something to repair. Pending: the next run looks again. |
 | The `[live] extraction_check` check (`Check Aeneas Extraction`) passed on the same head SHA | The bot uses the extracted code as committed, which is right only if it matches the Rust (S1). Otherwise the PR is skipped and the summary says why. |
@@ -94,7 +94,7 @@ gh workflow run live.yml -R Beneficial-AI-Foundation/self-healing-fv -f agent=fa
 | Rule | Why |
 |---|---|
 | The PR's branch is in the calling repo | A fork's code never runs on a runner that holds the key |
-| Open, author `OWNER`/`MEMBER`/`COLLABORATOR` | As for `live.yml` |
+| Open, and the author is trusted: `OWNER`/`MEMBER`/`COLLABORATOR`, or `write`/`maintain`/`admin` permission on the calling repo | As for `live.yml`. GitHub's permission tables put the endpoint under Metadata read, which a `GITHUB_TOKEN` always has, so the `select` job's token should do as it is and a caller needs no extra permission (to be confirmed on a fork; if it gets a 403, the PR is skipped with that reason). A fork PR is skipped by the rule above even when its author has write access. |
 | Drafts qualify (unlike `live.yml`) | The repo opted in by adding the caller, and the bot only comments; a bump with broken proofs is what people open as a draft (decided 2026-11-02) |
 | No `no-self-heal` label | The maintainers' switch for one PR. For the whole repo: the repo variable `SELF_HEAL=off`, read by the caller. |
 | Lean check failed and extraction check passed on the head; neither still running | As for `live.yml`. Still running: "waiting for …", and the run after it decides. |
