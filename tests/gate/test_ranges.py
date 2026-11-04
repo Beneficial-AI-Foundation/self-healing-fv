@@ -91,6 +91,24 @@ def test_any_other_prefix_on_the_repaired_theorem_is_out_of_scope(env, prefix):
     assert v is not None and v["verdict"] == "rejected" and "G0" in v["failed_checks"], (v["verdict"], v["failed_checks"])
 
 
+HB_ATTR = '@[deprecated "slow: needs maxHeartbeats 5 here" (since := "2026-01-01")]\n'
+
+
+@pytest.fixture(scope="module", params=[False, True], ids=["base", "head"])
+def attr_env(tmp_path_factory, request):
+    from .test_text_sweep import SPEC_OLD
+    return make_env(tmp_path_factory.mktemp("ranges-attr"), lambda t: t.replace(SPEC_OLD, HB_ATTR + SPEC_OLD),
+                    [(HB_ATTR + SPEC_OLD, HB_ATTR + SPEC_STUB)], request.param)
+
+
+def test_maxheartbeats_inside_an_attribute_string_cannot_change(attr_env):
+    """Gate-review's pre-read of 765397c: the textual G0 masks `maxHeartbeats N` anywhere in a prefix,
+    so it ignores this change inside the repaired theorem's attribute string. The range G0 compares
+    the repaired theorem up to `:=` byte for byte and rejects it."""
+    rc, v = run(attr_env, "hb-attr", edit_specs((HB_ATTR + SPEC_STUB, HB_ATTR.replace("Heartbeats 5", "Heartbeats 6") + SPEC_VALID)))
+    g0_rejects(v, "outside its proof")
+
+
 def test_a_raise_before_a_theorem_that_is_not_broken_is_out_of_scope(env):
     rc, v = run(env, "heartbeats-unbroken", edit_specs((SPEC_STUB, SPEC_VALID),
                                                        ("theorem triple_spec", "set_option maxHeartbeats 400000 in\ntheorem triple_spec")))

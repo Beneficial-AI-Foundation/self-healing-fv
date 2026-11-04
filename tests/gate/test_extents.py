@@ -144,6 +144,55 @@ def test_a_raise_may_change_n_but_not_its_comment():
     assert viol  # an added raise must be the plain line
 
 
+def test_a_written_record_without_a_range_cannot_be_trusted_and_a_generated_one_is_skipped():
+    """Re-check #6: `line` and `range` both come from Lean's declaration range. A record with a line
+    but no range is inconsistent (unavailable); one with neither was never written (a native axiom
+    before 4.30, a generated auxiliary) and is part of no extent."""
+    _, problems = extents.extents(K, {**KR, "hidden": {"kind": "theorem", "line": 3, "range": None}})
+    assert problems and "has no range" in problems[0]
+    ext, problems = extents.extents(K, {**KR, "a._native.native_decide.ax_1": {"kind": "axiom", "line": None, "range": None}})
+    assert not problems and len(ext) == 3
+
+
+def test_blank_lines_may_differ_only_next_to_an_added_declaration():
+    """Re-check #6 (Codex): with a declaration added, a blank line inside another command's
+    multi-line string literal in the same gap must still count."""
+    k = K.replace("-- note", '#check "a\n\nb"')
+    kr = recs(k, {"a": ("theorem a",), "b": ("theorem b",), "c": ("theorem c",)})
+
+    def go(c):
+        return extents.check("M.lean", k, c, kr, recs(c, {"a": ("theorem a",), "h": ("theorem h",),
+                                                        "b": ("theorem b",), "c": ("theorem c",)}), {"b"})
+    assert go(k.replace('#check "a\n\nb"\n', '#check "a\n\nb"\n\n\ntheorem h : True := trivial\n\n'))[0] == []
+    viol, _, _ = go(k.replace('#check "a\n\nb"\n', '#check "a\n\n\nb"\n\ntheorem h : True := trivial\n'))
+    assert viol and "between declarations" in viol[0]["msg"]
+
+
+def test_only_the_repaired_proof_may_change_not_its_docstring_or_statement_text():
+    """Re-check #6: the repaired theorem's extent up to `:=` is compared byte for byte; the proof
+    starts at `:=` (a `by` block or a term) or `|` (equations)."""
+    k = K.replace("theorem b", "/-- doc -/\n@[simp] theorem b")
+    kr = recs(k, {"a": ("theorem a",), "b": ("/-- doc -/", "@[simp] theorem b"), "c": ("theorem c",)})
+
+    def go(c, last):
+        return extents.check("M.lean", k, c, kr, recs(c, {"a": ("theorem a",), "b": ("/-- doc", last),
+                                                        "c": ("theorem c",)}), {"b"})
+    stub = "@[simp] theorem b : True := by sorry"
+    assert go(k.replace(stub, "@[simp] theorem b : True := by\n  trivial"), "  trivial")[0] == []        # `:= by`
+    assert go(k.replace(stub, "@[simp] theorem b : True := trivial"), "@[simp] theorem b")[0] == []    # a term
+    assert go(k.replace(stub, "@[simp] theorem b : True\n  | _ => trivial"), "  | _")[0] == []          # equations
+    viol, _, _ = go(k.replace("/-- doc -/", "/-- docs -/").replace(stub, "@[simp] theorem b : True := by\n  trivial"), "  trivial")
+    assert viol and "outside its proof" in viol[0]["msg"]
+    viol, _, _ = go(k.replace(stub, "@[simp] theorem b : True /- c -/ := by\n  trivial"), "  trivial")
+    assert viol and "outside its proof" in viol[0]["msg"]
+    viol, _, _ = go(k.replace(stub, "@[simp] theorem b : True ∧ True := by\n  trivial"), "  trivial")
+    assert viol and "outside its proof" in viol[0]["msg"]
+    kk = K.replace("by sorry", "by trivial")
+    viol, why, _ = extents.check("M.lean", kk, kk, recs(kk, {"a": ("theorem a",), "b": ("theorem b",), "c": ("theorem c",)}),
+                                 recs(kk, {"a": ("theorem a",), "b": ("theorem b",), "c": ("theorem c",)}), {"b"})
+    assert why and "not a `:= by sorry` stub" in why[0]  # K's repaired theorem must be a stub
+
+
 def test_removing_reordering_or_changing_another_declaration_is_rejected():
     c = K.replace("theorem c : True := trivial\n", "")
     viol, _, _ = run(c, recs(c, {"a": ("theorem a",), "b": ("theorem b",)}))

@@ -153,6 +153,30 @@ RANGES_WANT = {"withDoc": (1, 2), "byBlock": (4, 5), "trailingComment": (8, 9), 
                "withWhere.helper": (13, 13), "ack": (15, 19), "half": (21, 22), "evenA": (25, 25), "oddA": (26, 26),
                "twoA": (31, 31), "twoB": (31, 31), "withOpt": (34, 34), "withOpen": (37, 37), "inNoncomp": (40, 40)}
 RANGES_PUBLIC_WANT = {"inPublic": (44, 44)}
+# Where a repaired proof starts (re-check #6): the range G0 compares a repaired theorem up to its
+# `:=` byte for byte (from K's `:= by sorry` stub) and lets only the proof change, which starts at
+# `:=` (a `by` block or a term) or `|` (equations). K are the stubs, C the proofs, D a C whose
+# docstring changed (rejected).
+BODY_K = """\
+/-- Doc. -/
+@[simp] theorem byForm : 1 + 1 = 2 := by sorry
+
+theorem termForm : 2 + 2 = 4 := by sorry
+
+theorem eqnForm : ∀ n : Nat, n + 0 = n := by sorry
+"""
+BODY_C = """\
+/-- Doc. -/
+@[simp] theorem byForm : 1 + 1 = 2 := by
+  rfl
+
+theorem termForm : 2 + 2 = 4 := rfl
+
+theorem eqnForm : ∀ n : Nat, n + 0 = n
+  | 0 => rfl
+  | _ + 1 => rfl
+"""
+BODY_D = BODY_C.replace("/-- Doc. -/", "/-- Docs. -/")
 
 
 def version(toolchain: str) -> tuple[int, int]:
@@ -167,7 +191,7 @@ def check(toolchain: str) -> dict:
         root = Path(d)
         (root / "lean-toolchain").write_text(f"leanprover/lean4:{toolchain}\n")
         mod = version(toolchain) >= MODULE_FROM
-        libs = ["Probe", "Top", "Meta", "Ranges"] + (["MProbe"] if mod else [])
+        libs = ["Probe", "Top", "Meta", "Ranges", "BodyK", "BodyC", "BodyD"] + (["MProbe"] if mod else [])
         (root / "lakefile.toml").write_text(f'name = "probe"\ndefaultTargets = {json.dumps(libs)}\n'
                                             + "".join(f'\n[[lean_lib]]\nname = "{n}"\n' for n in libs))
         (root / "Probe.lean").write_text(PROBE)
@@ -176,6 +200,8 @@ def check(toolchain: str) -> dict:
         (root / "Top.lean").write_text(TOP)
         (root / "Meta.lean").write_text(META)
         (root / "Ranges.lean").write_text(RANGES + (RANGES_PUBLIC if mod else ""))
+        for name, text in (("BodyK", BODY_K), ("BodyC", BODY_C), ("BodyD", BODY_D)):
+            (root / f"{name}.lean").write_text(text)
         (root / "Bad.lean").write_text(BAD)
         b = subprocess.run(["lake", "build"], cwd=root, capture_output=True, text=True)
         if b.returncode != 0:
@@ -213,6 +239,15 @@ def check(toolchain: str) -> dict:
         rrecs = {r["name"]: r for r in map(json.loads, (l for l in y.stdout.splitlines() if l.startswith("{")))}
         row["ranges"] = {n: (r["range"][0], r["range"][2]) if r.get("range") else None for n, r in rrecs.items()}
         row["ranges_want"] = {**RANGES_WANT, **(RANGES_PUBLIC_WANT if mod else {})}
+        body = {}
+        for name in ("BodyK", "BodyC", "BodyD"):
+            z = subprocess.run(["lake", "env", "lean", "--run", str(STMTCANON), "--import", name, "--module", name],
+                               cwd=root, capture_output=True, text=True)
+            body[name] = {r["name"]: r for r in map(json.loads, (l for l in z.stdout.splitlines() if l.startswith("{")))}
+        from gates import extents
+        repaired = {"byForm", "termForm", "eqnForm"}
+        row["body_c"] = extents.check("Body.lean", BODY_K, BODY_C, body["BodyK"], body["BodyC"], repaired)[:2]
+        row["body_d"] = extents.check("Body.lean", BODY_K, BODY_D, body["BodyK"], body["BodyD"], repaired)[:2]
         (root / "files.txt").write_text(f"{root / 'Top.lean'}\n{root / 'Bad.lean'}\n")
         p = subprocess.run(["lake", "env", "lean", "--run", str(DEPS), str(root / "files.txt")],
                            cwd=root, capture_output=True, text=True)
@@ -251,6 +286,10 @@ def problems(row: dict) -> list[str]:
         r = row["module"]["uses_private"]
         if "_private.MProbe.0.mnd2._native.native_decide.ax_9" not in (r["axioms"] or []) or r["native"]:
             out.append(f"module crafted: axioms {r['axioms']}, native {r['native']}")
+    if row.get("body_c") != ([], []):
+        out.append(f"repaired proofs (`:= by`, term, equations): {row.get('body_c')}")
+    if not (row.get("body_d") or [[]])[0] or not any("outside its proof" in v["msg"] for v in row["body_d"][0]):
+        out.append(f"a changed docstring on a repaired theorem was not rejected: {row.get('body_d')}")
     wrong = {n: (row.get("ranges") or {}).get(n) for n, want in (row.get("ranges_want") or {}).items()
              if (row.get("ranges") or {}).get(n) != want}
     if wrong:

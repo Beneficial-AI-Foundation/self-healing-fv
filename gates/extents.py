@@ -72,6 +72,12 @@ def extents(text: str, records: dict[str, dict]) -> tuple[list[dict], list[str]]
     for n, r in records.items():
         rg = r.get("range")
         if rg is None:
+            # `line` and `range` both come from Lean's declaration range: a record with a line but no
+            # range is inconsistent, so the ranges cannot be trusted (re-check #6). One with neither
+            # was never written in source (a tactic's or the compiler's: native axioms before 4.30,
+            # generated auxiliaries) and is part of no extent.
+            if r.get("line") is not None:
+                problems.append(f"`{n}` is written in the source (line {r['line']}) but has no range")
             continue
         sl, sc, el, ec = rg
         if not (1 <= sl <= el <= len(lines)) or sc > len(lines[sl - 1]) or ec > len(lines[el - 1]) or \
@@ -135,6 +141,49 @@ def mask_heartbeats(k_gap: str, c_gap: str) -> tuple[str, str, int | None]:
     elif km and not km.group(4).strip():
         del kl[ki]
     return "\n".join(kl), "\n".join(cl), n
+
+
+def rtrim_blank(s: str) -> str:
+    """`s` without the whitespace-only lines at its end (the last line's own text kept as is)."""
+    lines = s.split("\n")
+    while len(lines) > 1 and not lines[-1].strip():
+        lines.pop()
+    return "\n".join(lines)
+
+
+def ltrim_blank(s: str) -> str:
+    """`s` without the whitespace-only lines at its start."""
+    lines = s.split("\n")
+    while len(lines) > 1 and not lines[0].strip():
+        lines.pop(0)
+    return "\n".join(lines)
+
+
+def insertion_matches(k_gap: str, pieces: list[str]) -> bool:
+    """Does a gap of C with added declarations (its `pieces` around them) match K's gap, allowing
+    only blank lines directly next to an added declaration (re-check #6: comparing the non-blank
+    lines of the whole gap let a blank line inside another command's multi-line string literal come
+    or go)? What is before the first added declaration and after the last must be K's gap's start and
+    end byte for byte, up to blank lines at the insertion point; between added declarations, only
+    blank lines."""
+    if any(p.strip() for p in pieces[1:-1]):
+        return False
+    first, last = rtrim_blank(pieces[0]), ltrim_blank(pieces[-1])
+    if len(first) + len(last) > len(k_gap) or not k_gap.startswith(first) or not k_gap.endswith(last):
+        return False
+    return not k_gap[len(first):len(k_gap) - len(last)].strip()
+
+
+STUB_TAIL = ":= by sorry"
+BODY_START = re.compile(r"\s*(?::=|\|)")
+
+
+def repaired_head(k_extent: str) -> str | None:
+    """The part of a repaired theorem's extent before its proof, from K, where the theorem is a stub
+    by construction (`… := by sorry`): docstring, attributes, modifiers and statement, up to (not
+    including) the `:=`. None if K's extent is not such a stub."""
+    t = k_extent.rstrip()
+    return t[:-len(STUB_TAIL)].rstrip() if t.endswith(STUB_TAIL) else None
 
 
 def first_difference(a: str, b: str) -> str:
@@ -205,17 +254,25 @@ def check(path: str, k_text: str, c_text: str, k_records: dict[str, dict], c_rec
             elif hb is not None:
                 raises.append({"file": path, "decl": nxt[0], "maxHeartbeats": hb})
         b = "\n".join(pcs)
-        if len(pcs) > 1:  # added declarations sat here: whitespace-only lines may differ, nothing else
-            same = [l for l in a.split("\n") if l.strip()] == [l for l in b.split("\n") if l.strip()]
-        else:
-            same = a == b
+        # Added declarations sat here: only blank lines next to them may differ (insertion_matches).
+        same = insertion_matches(a, pcs) if len(pcs) > 1 else a == b
         if not same:
             where = f"before `{nxt[0]}`" if nxt else "at the end of the file"
             v(f"changes text between declarations {where}: {first_difference(a, b)}", decl=nxt[0] if nxt else None)
+    why: list[str] = []
     for x in kept:
-        if any(n in repaired for n in x["key"]):
-            continue
         k = kmap[x["key"]]
-        if k_text[k["start"]:k["end"]] != c_text[x["start"]:x["end"]]:
+        kt, ct = k_text[k["start"]:k["end"]], c_text[x["start"]:x["end"]]
+        if any(n in repaired for n in x["key"]):
+            # Only the proof may change (re-check #6): its docstring, attributes, modifiers and
+            # statement, up to the `:=`, byte for byte. The proof then starts with `:=` (a `by` block
+            # or a term) or `|` (equations).
+            hd = repaired_head(kt)
+            if hd is None:
+                why.append(f"{path}: the repaired theorem `{x['key'][0]}` is not a `:= by sorry` stub in K")
+            elif not ct.startswith(hd) or not BODY_START.match(ct[len(hd):]):
+                v(f"changes the repaired theorem `{x['key'][0]}` outside its proof (docstring, attributes or "
+                  f"statement text): {first_difference(hd, ct[:len(hd)])}", decl=x["key"][0])
+        elif kt != ct:
             v(f"changes declaration `{x['key'][0]}`, which is not a repaired theorem (Lean's ranges)", decl=x["key"][0])
-    return viol, [], raises
+    return viol, why, raises
