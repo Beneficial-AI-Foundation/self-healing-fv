@@ -17,7 +17,8 @@ def native_base(cand_axioms):
 
 
 def test_native_code_as_at_the_base_is_accepted_and_flagged_when_the_replay_completes():
-    v = verdict(*native_base(normalize_axioms(BASE3 + ["T._native.native_decide.ax_1_2"])))
+    per_use = "T._native.native_decide.ax_1_2"  # native by provenance, as StmtCanon would list it
+    v = verdict(*native_base(normalize_axioms(BASE3 + [per_use], [per_use])))
     assert v["verdict"] == "accepted", v
     assert v["native_code"] == ["T"] and v["checks"]["G2"]["info"]["native_code"] == ["T"]
     assert v["kernel_replay_incomplete"] == [] and v["checks"]["G5"]["ok"]

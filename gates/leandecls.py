@@ -95,6 +95,16 @@ def norm(s: str) -> str:
     return " ".join(s.split())
 
 
+def is_record_of(record: str, written: str) -> bool:
+    """Is `record` (a full name, as StmtCanon writes it) the record of a declaration written as
+    `written`? Its name, without a `_private.<Mod>.0.` prefix, is the written name or ends with it
+    after a dot (namespaces). Scope naming (`scope.resolve`) and line coverage (`inventory.missing`)
+    both ask this, so a record on a line never stands for another declaration on that line."""
+    user = record.split(".0.", 1)[1] if record.startswith("_private.") and ".0." in record else record
+    written = written.removeprefix("_root_.")
+    return bool(written) and (user == written or user.endswith("." + written))
+
+
 def parse(src: str) -> tuple[list[dict], list[str]]:
     """Split comment-stripped `src` into top-level declarations and the gaps between them.
 
@@ -123,6 +133,10 @@ def parse(src: str) -> tuple[list[dict], list[str]]:
         decls.append({"key": key, "kind": cur["kind"], "name": name, "prefix": norm(pre),
                       "statement": norm(stmt), "body": norm(body),
                       "line": cur["idx"][0] + 1,  # 1-based, where the keyword and name are (scope.resolve)
+                      "end_line": cur["idx"][-1] + 1,
+                      # First line of the prefix (attributes, `set_option … in`), which G0 freezes; the
+                      # declaration's own line if it has none (inventory.missing).
+                      "pre_line": (cur["pre"][0] if cur["pre"] else cur["idx"][0]) + 1,
                       # Raw offsets of the body in `src` (from its `:=`/`|`/`where` to the declaration's
                       # last line), for byte-exact comparisons (scope.raw_stub_problem).
                       "body_span": (start + len(stmt), offs[cur["idx"][-1]] + len(lines[cur["idx"][-1]]))})

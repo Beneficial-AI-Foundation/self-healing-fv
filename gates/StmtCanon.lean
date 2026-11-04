@@ -116,11 +116,7 @@ def isNumbered (s pre : String) : Bool :=
     range: Lean records source ranges for declarations written in source, not
     for the auxiliaries it generates. Without an environment (`userRoot`),
     the name alone decides. -/
-def isAuxiliary (n : Name) (env? : Option Environment := none) : Bool :=
-  let user := (privateToUserName? n).getD n
-  let written := match env? with
-    | some env => (declRangeExt.find? env n).isSome
-    | none => false
+def nameAuxiliary (user : Name) (written : Bool) : Bool :=
   user.isInaccessibleUserName ||
   user.components.any fun c =>
     let s := c.toString (escape := false)  -- `«_aux_…»` must compare as `_aux_…`
@@ -135,12 +131,115 @@ def isAuxiliary (n : Name) (env? : Option Environment := none) : Bool :=
      "injEq", "ctorIdx", "congr_simp", "induct", "mutual_induct", "induct_unfolding",
      "fun_cases", "splitter"].contains s
 
-/-- The user-facing declaration an auxiliary constant belongs to (`foo._unary` → `foo`). -/
-partial def userRoot (n : Name) : Name :=
-  if !isAuxiliary n then n else
+/-- `a` lies within `o` (positions compared as (line, column)). -/
+def rangeWithin (o a : DeclarationRange) : Bool :=
+  let le (x y : Position) : Bool := x.line < y.line || (x.line == y.line && x.column ≤ y.column)
+  le o.pos a.pos && le a.endPos o.endPos
+
+/-- Expressions a constant depends on, as in Lean's `collectAxioms`. -/
+def depExprs : ConstantInfo → Array Expr
+  | .defnInfo v   => #[v.type, v.value]
+  | .thmInfo v    => #[v.type, v.value]
+  | .opaqueInfo v => #[v.type, v.value]
+  | ci            => #[ci.type]
+
+/-- A per-use axiom of `native_decide`/`bv_decide` by provenance, not by name (self-healing-fv,
+    2026-11-03; DESIGN.md §4.5): the shape `Lean.Meta.nativeEqTrue` gives it (Lean ≥ 4.30) and
+    nothing else. All of: (1) named `<owner>._native.<tactic>.ax…`; (2) its type is exactly
+    `@Eq Bool e Bool.true`, `e` closed; (3) `<owner>` is a declaration of the same module, with a
+    range; (4) the axiom has no range, or one inside the owner's (from 4.30-rc2 it gets the tactic
+    call's range); (5) no declaration of the module uses it but the owner and its auxiliaries.
+    A written or macro-made axiom of the same name and type fails (3) or (4): an ordinary axiom. -/
+def isNativeAux (env : Environment) (n : Name) : Bool := Id.run do
+  let some (.axiomInfo ax) := env.find? n | return false
+  let comps := n.components
+  let some i := comps.findIdx? (fun c => c.toString (escape := false) == "_native") | return false
+  if i == 0 || i + 3 != comps.length then return false
+  if !(comps[i+2]!.toString (escape := false)).startsWith "ax" then return false
+  let named := (comps.take i).foldl (fun acc c => acc ++ c) Name.anonymous
+  -- The axiom can carry the private prefix of its module when the owner is public (SPQR, Lean 4.31,
+  -- `bv_decide`: `_private.Spqr.Specs.Util.Inz.0.spqr.util.inz_spec._native.bv_decide.ax_1_14` for
+  -- `spqr.util.inz_spec`); the owner is then the user name, and (3)–(5) apply to it.
+  let owner := if env.contains named then named else (privateToUserName? named).getD named
+  match ax.type.getAppFnArgs with
+  | (``Eq, #[α, e, rhs]) =>
+    if α != mkConst ``Bool || rhs != mkConst ``Bool.true || e.hasLooseBVars || e.hasFVar || e.hasMVar then
+      return false
+  | _ => return false
+  let some oi := env.getModuleIdxFor? owner | return false
+  if env.getModuleIdxFor? n != some oi then return false
+  let some orng := declRangeExt.find? env owner | return false
+  if let some arng := declRangeExt.find? env n then
+    if !rangeWithin orng.range arng.range then return false
+  for c in env.header.moduleData[oi.toNat]!.constNames do
+    if c == n || owner.isPrefixOf c || named.isPrefixOf c then continue
+    if let some ci := env.find? c then
+      if (depExprs ci).any (fun e => e.getUsedConstants.contains n) then return false
+  return true
+
+/-- Native code by provenance: the core `Lean.ofReduceBool`/`Lean.ofReduceNat`, if Lean itself
+    declares them (`core`, from `coreNative`), or a per-use axiom of `native_decide`/`bv_decide`
+    (`isNativeAux`). -/
+def isNativeAxiom (env : Environment) (core : Std.HashSet Name) (n : Name) : Bool :=
+  core.contains n || isNativeAux env n
+
+/-- Which of `Lean.ofReduceBool`/`Lean.ofReduceNat` Lean itself declares: in an `Init.*`/`Lean.*`
+    module whose `.olean` is in the toolchain's own library, and that is not an audited (project)
+    module. A module name alone is not enough (re-check #5, 2026-11-04, Codex): Lean 4.35 has neither
+    constant, so a project module `Lean.Evil` could declare `axiom Lean.ofReduceBool : False` and
+    get the native allowance. Names unchecked (single backtick), so this compiles where they are
+    missing. -/
+def coreNative (env : Environment) (sysroot : System.FilePath) (audited : Std.HashSet Name) :
+    IO (Std.HashSet Name) := do
+  let lib := (← getLibDir sysroot).toString
+  let mut core : Std.HashSet Name := {}
+  for n in [`Lean.ofReduceBool, `Lean.ofReduceNat] do
+    let some idx := env.getModuleIdxFor? n | continue
+    let m := env.header.moduleNames[idx.toNat]!
+    unless ((`Init).isPrefixOf m || (`Lean).isPrefixOf m) && !audited.contains m do continue
+    let some ol ← (try some <$> findOLean m catch _ => pure none) | continue
+    if ol.toString.startsWith (lib ++ System.FilePath.pathSeparator.toString) then
+      core := core.insert n
+  return core
+
+/-- Types of Lean's metaprogram helpers: what `macro`/`macro_rules`/`notation`/`infix`, `elab`,
+    `syntax`/`declare_syntax_cat`, `app_unexpander` and `delab` define (probe on Lean 4.24 and 4.35,
+    2026-11-04, `tests/gate/test_lean_helpers.py`). Named unchecked (single backtick). -/
+def metaprogramTypes : List Name :=
+  [`Lean.Macro, `Lean.Elab.Term.TermElab, `Lean.Elab.Command.CommandElab, `Lean.Elab.Tactic.Tactic,
+   `Lean.PrettyPrinter.Unexpander, `Lean.PrettyPrinter.Delaborator.Delab, `Lean.ParserDescr,
+   `Lean.TrailingParserDescr, `Lean.Parser.Parser, `Lean.Parser.TrailingParser, `Lean.Parser.Category]
+
+/-- Is `n` an auxiliary, not a user-facing declaration? With the environment (self-healing-fv,
+    2026-11-03; probe on Lean 4.21–4.35 in DESIGN.md §4.5), a constant with a declaration range is
+    decided by what it is, never by its name (re-check #5, 2026-11-04: dropping by name let a written
+    `_aux_<Mod>___h` or `✝` theorem, or a `where` helper so named, go unchecked). It is auxiliary only
+    if it is a definition whose type is a metaprogram type (`metaprogramTypes`: the macro, elab,
+    unexpander, delaborator and syntax helpers Lean generates, and such definitions written by hand),
+    or a per-use native axiom by provenance (`isNativeAux`). A theorem or another axiom with a range
+    always keeps its record, whatever its name. A macro-scoped definition (`initialize`'s
+    `initFn._@.<Mod>.<hash>._hygCtx._hyg.<n>`, dalek PR 734: 1, SPQR PR 679: 8) is kept and frozen;
+    leaving those out is DESIGN.md §11 question 26. Constants without a range, and calls without an
+    environment, use the name rules above. -/
+def isAuxiliary (n : Name) (env? : Option Environment := none) : Bool :=
+  let user := (privateToUserName? n).getD n
+  match env? with
+  | some env =>
+    if (declRangeExt.find? env n).isSome then
+      match env.find? n with
+      | some (.defnInfo v) => metaprogramTypes.contains (v.type.getAppFn.constName?.getD .anonymous)
+      | some (.axiomInfo _) => isNativeAux env n
+      | _ => false
+    else nameAuxiliary user false
+  | none => nameAuxiliary user false
+
+/-- The user-facing declaration an auxiliary constant belongs to (`foo._unary` → `foo`). With the
+    environment a written constant is its own root, so `a.proof_1` and `a.proof_2` stay apart. -/
+partial def userRoot (n : Name) (env? : Option Environment := none) : Name :=
+  if !isAuxiliary n env? then n else
   match n with
-  | .str p _ => if p.isAnonymous then n else userRoot p
-  | .num p _ => if p.isAnonymous then n else userRoot p
+  | .str p _ => if p.isAnonymous then n else userRoot p env?
+  | .num p _ => if p.isAnonymous then n else userRoot p env?
   | .anonymous => n
 
 /-- All non-auxiliary constants declared in `mod`, in declaration order. -/
@@ -164,13 +263,6 @@ def unionSet (a b : Std.HashSet Name) : Std.HashSet Name :=
 def Info.union (a b : Info) : Info :=
   { axioms := unionSet a.axioms b.axioms, sorries := unionSet a.sorries b.sorries,
     uses := unionSet a.uses b.uses }
-
-/-- Expressions a constant depends on, as in Lean's `collectAxioms`. -/
-def depExprs : ConstantInfo → Array Expr
-  | .defnInfo v   => #[v.type, v.value]
-  | .thmInfo v    => #[v.type, v.value]
-  | .opaqueInfo v => #[v.type, v.value]
-  | ci            => #[ci.type]
 
 /-- Successors of `c` in the dependency graph, and the facts `c` contributes itself. -/
 def direct (env : Environment) (audited : Std.HashSet Name) (c : Name) : Array Name × Info := Id.run do
@@ -308,7 +400,7 @@ def naiveClosure (audited : Std.HashSet Name) (root : Name) : MetaM Info := do
 def truncate (s : String) (n : Nat := 4000) : String :=
   if s.length ≤ n then s else (s.toList.take n).foldl String.push "" ++ " …"
 
-def auditDecl (audited : Std.HashSet Name) (declName : Name) (reference := false) :
+def auditDecl (audited : Std.HashSet Name) (core : Std.HashSet Name) (declName : Name) (reference := false) :
     StateRefT Tarjan MetaM Json := do
   let env ← getEnv
   match env.find? declName with
@@ -318,7 +410,7 @@ def auditDecl (audited : Std.HashSet Name) (declName : Name) (reference := false
       else modifyGet fun s => (closure env audited declName).run s
     let pp ← ppExpr ci.type
     let roots (s : Std.HashSet Name) : Std.HashSet Name :=
-      s.fold (init := {}) fun acc n => acc.insert (userRoot n)
+      s.fold (init := {}) fun acc n => acc.insert (userRoot n env)
     let mut fields : List (String × Json) := [
       ("name", toString declName), ("found", true),
       ("kind", kindOf ci), ("module", moduleOf env declName),
@@ -332,6 +424,10 @@ def auditDecl (audited : Std.HashSet Name) (declName : Name) (reference := false
         | none => Json.null),
       ("canon", canonDump ci.type), ("pp", truncate (toString pp)),
       ("axioms", namesJson info.axioms),
+      -- Which of them are native code, by provenance (`isNativeAxiom`); the gate maps only these
+      -- to `Lean.ofReduceBool` (snapshot.normalize_axioms), never by name.
+      ("native_axioms", namesJson (info.axioms.fold (init := {}) fun s a =>
+        if isNativeAxiom env core a then s.insert a else s)),
       ("sorry_sources", namesJson (roots info.sorries)),
       ("uses", namesJson ((roots info.uses).erase declName))]
     if let some b := bodyCanon env audited declName then
@@ -346,7 +442,8 @@ def splitNames (s : String) : Array Name :=
   ((s.splitOn ",").filter (· ≠ "")).toArray.map String.toName
 
 unsafe def main (args : List String) : IO Unit := do
-  initSearchPath (← findSysroot)
+  let sysroot ← findSysroot
+  initSearchPath sysroot
   let mut imports : Array Name := #[]
   let mut modules : Array Name := #[]
   let mut rest := args
@@ -369,11 +466,12 @@ unsafe def main (args : List String) : IO Unit := do
       throw <| IO.userError s!"--module {m}: not in the imported environment"
     decls := decls ++ moduleDecls env m
   let audited : Std.HashSet Name := modules.foldl (init := {}) fun s m => s.insert m
+  let core ← coreNative env sysroot audited
   let act : CoreM Unit := do
     let tarjan ← IO.mkRef ({} : Tarjan)
     for d in decls do
       let j ← try
-        let (j, s) ← MetaM.run' ((auditDecl audited d reference).run (← tarjan.get))
+        let (j, s) ← MetaM.run' ((auditDecl audited core d reference).run (← tarjan.get))
         tarjan.set s
         pure j
       catch ex =>

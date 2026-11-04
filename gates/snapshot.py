@@ -22,6 +22,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -30,7 +31,6 @@ from . import kernel, leandecls, patch, proc, version
 STMTCANON = Path(__file__).resolve().parent / "StmtCanon.lean"
 DIAG_RE = re.compile(r"^(error|warning): (?:\./)?(\S+?\.lean)(?::(\d+):(\d+))?: ?(.*)$")
 FAILED_RE = re.compile(r"^✖ \[\d+/\d+\] (?:Building|Compiling|Running) (\S+)")
-IMPORT_RE = re.compile(r"^(?:public\s+|private\s+)?(?:meta\s+)?import\s+(\S+)", re.M)
 
 
 def src_dirs(cfg: dict) -> dict[str, str]:
@@ -58,7 +58,7 @@ def search_dirs(tree: Path) -> list[str] | None:
     return out or None
 
 
-def module_dirs(tree: Path, cfg: dict) -> dict[str, str]:
+def module_dirs(tree: Path, cfg: dict, imports: dict | None = None) -> dict[str, str]:
     """{top-level module name: source directory} for the project's modules that are not at the
     project root, found by walking the root modules' imports as Lean resolves them: each module in
     the first search directory that has its file (search_dirs), or where `[lean] src_dirs` says.
@@ -78,7 +78,8 @@ def module_dirs(tree: Path, cfg: dict) -> dict[str, str]:
                                      f"{found[top] or '.'} and {d or '.'}")
                 return f
         return None
-    _walk(cfg, find)
+    imports = lean_imports(tree, cfg) if imports is None else imports
+    _walk(cfg, find, lambda f: imports.get(str(f.relative_to(tree)), f"no import record for {f}"))
     return {k: v for k, v in sorted(found.items()) if v}
 
 
@@ -98,10 +99,43 @@ def module_of(path: str, dirs: dict[str, str] | None = None) -> str:
     return path[:-len(".lean")].replace("/", ".")
 
 
-def _walk(cfg: dict, find) -> dict[str, list[str]]:
+DEPS = Path(__file__).resolve().parent / "Deps.lean"
+
+
+def lean_imports(tree: Path, cfg: dict) -> dict[str, list[str] | str]:
+    """{source path relative to `tree`: its imported modules, or the error}, for every `.lean` file of
+    the project outside `.lake`, read by Lean's own header parser (gates/Deps.lean; gate sweep #9,
+    2026-11-03: the regex wanted `import` at column 0, so an indented `import` or `import all M`
+    left a built module unaudited). One Lean process for all files. If it cannot run, no import
+    closure is computed: the snapshot fails, and the gate cannot decide."""
+    files = sorted(str(p.relative_to(tree)) for p in tree.rglob("*.lean")
+                   if ".lake" not in p.relative_to(tree).parts and "lake-packages" not in p.relative_to(tree).parts)
+    with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as lst:
+        lst.write("\n".join(str(tree / f) for f in files) + "\n")
+    try:
+        p = proc.run(["lake", "env", "lean", "--run", str(DEPS), lst.name], tree, dict(os.environ),
+                     timeout=60 * cfg["lean"].get("stmtcanon_timeout_minutes", 30))
+    finally:
+        os.unlink(lst.name)
+    if p.returncode != 0 or p.timed_out:
+        raise RuntimeError(f"reading imports with Lean (gates/Deps.lean) failed: {(p.stderr or p.stdout)[-800:]}")
+    out: dict[str, list[str] | str] = {}
+    for line in p.stdout.splitlines():
+        if line.startswith("{"):
+            r = json.loads(line)
+            rel = str(Path(r["file"]).relative_to(tree))
+            out[rel] = r["imports"] if "imports" in r else f"header does not parse: {r['error']}"[:600]
+    missing = [f for f in files if f not in out]
+    if missing:
+        raise RuntimeError(f"reading imports with Lean gave no result for {len(missing)} file(s), e.g. {missing[0]}")
+    return out
+
+
+def _walk(cfg: dict, find, imports_of) -> dict[str, list[str]]:
     """Import closure of the root modules over the files `find(module)` returns: {module: imports}.
     Imports with no file in the project are dependencies (Mathlib, Aeneas, ...). A root module
-    with no file is an error, never an empty library."""
+    with no file is an error, never an empty library; so is a file in the closure whose header
+    Lean cannot parse (`imports_of` returns the error), never a module without imports."""
     out: dict[str, list[str]] = {}
     todo = list(cfg["lean"]["root_modules"])
     for mod in todo:
@@ -113,17 +147,23 @@ def _walk(cfg: dict, find) -> dict[str, list[str]]:
         f = None if mod in out else find(mod)
         if f is None:
             continue
-        imports = IMPORT_RE.findall(leandecls.strip_comments(f.read_text(errors="replace")))
+        imports = imports_of(f)
+        if isinstance(imports, str):
+            raise RuntimeError(f"module {mod} ({f}): {imports}")
         out[mod] = imports
         todo += imports
     return out
 
 
-def project_modules(tree: Path, cfg: dict, dirs: dict[str, str] | None = None) -> dict[str, list[str]]:
+def project_modules(tree: Path, cfg: dict, dirs: dict[str, str] | None = None,
+                    imports: dict | None = None) -> dict[str, list[str]]:
     """Import closure of the root modules over the project's own files: {module: imports}.
-    `dirs` is module_dirs(tree, cfg), computed if not given."""
-    dirs = module_dirs(tree, cfg) if dirs is None else dirs
-    return _walk(cfg, lambda mod: f if (f := tree / module_file(mod, dirs)).is_file() else None)
+    `dirs` is module_dirs(tree, cfg), computed if not given. Imports come from Lean (lean_imports),
+    read once if not given."""
+    imports = lean_imports(tree, cfg) if imports is None else imports
+    dirs = module_dirs(tree, cfg, imports) if dirs is None else dirs
+    return _walk(cfg, lambda mod: f if (f := tree / module_file(mod, dirs)).is_file() else None,
+                 lambda f: imports.get(str(f.relative_to(tree)), f"no import record for {f}"))
 
 
 def protected(cfg: dict, path: str) -> str | None:
@@ -174,15 +214,23 @@ def _stmtcanon_batch(tree: Path, cfg: dict, modules: list[str]) -> proc.Result:
 NATIVE = "Lean.ofReduceBool"
 
 
-def normalize_axioms(axioms: list[str]) -> list[str]:
+CORE_NATIVE = {"Lean.ofReduceBool", "Lean.ofReduceNat"}
+
+
+def normalize_axioms(axioms: list[str], native: list[str] | None = None) -> list[str]:
     """Proofs by native code (`native_decide`, `bv_decide`) rest on `Lean.ofReduceBool` in older
     Lean; newer Lean (SymCrypt, v4.31) instead adds one auxiliary axiom per use, named
     `T._native.native_decide.ax_1_2` or `T._native.bv_decide.ax_1_32`. Both mean "trusted because
-    compiled code returned true". Map the per-use axioms to `Lean.ofReduceBool`, so the trust
-    checks compare that category rather than names that change whenever a proof is edited. Its
-    siblings (`Lean.ofReduceNat`, any `Lean.ofReduce*`) trust compiled code the same way and map to
-    it too, so every native-code rule covers them."""
-    return sorted({NATIVE if "._native." in a or a.startswith("Lean.ofReduce") else a for a in axioms})
+    compiled code returned true". Map them to `Lean.ofReduceBool`, so the trust checks compare that
+    category rather than names that change whenever a proof is edited; `Lean.ofReduceNat` trusts
+    compiled code the same way and maps to it too.
+
+    Which axioms are native is decided by provenance, not by name (gate sweep #8, 2026-11-03: a
+    macro-declared `axiom a._native.cheat : False` used to count as native code). `native`:
+    StmtCanon's `native_axioms` for the record (StmtCanon.isNativeAxiom); exactly those map. Without
+    it (callers that have no record), only the two core names do."""
+    known = set(native) if native is not None else CORE_NATIVE
+    return sorted({NATIVE if a in known else a for a in axioms})
 
 
 def stmtcanon(tree: Path, cfg: dict, modules: list[str]) -> tuple[dict[str, dict], dict]:
@@ -214,7 +262,7 @@ def stmtcanon(tree: Path, cfg: dict, modules: list[str]) -> tuple[dict[str, dict
                 continue
             r = json.loads(line)
             if "axioms" in r:
-                r["axioms"] = normalize_axioms(r["axioms"])
+                r["axioms"] = normalize_axioms(r["axioms"], r.get("native_axioms", []))
             if r["name"] in records:
                 info["duplicate_lines"] += 1
                 continue
@@ -284,16 +332,17 @@ def inputs_hash(cfg: dict, tree: Path, dirs: dict[str, str] | None = None) -> st
     return h.hexdigest()[:16]
 
 
-def present_roots(tree: Path, cfg: dict) -> tuple[dict, list[str]]:
+def present_roots(tree: Path, cfg: dict, imports: dict | None = None) -> tuple[dict, list[str]]:
     """(cfg without the root modules that have no file in `tree`, those root modules). For the
     base of a live change that adds a library (libsignal-verify PR 17 adds `Protocols`): with the
     head as the gate's reference (§4.9), the base is not the frozen set, so a library it does not
     have yet is left out of its snapshot and named in `absent_roots`, and its build target with
     it. compare refuses such a snapshot wherever it would be the reference."""
     absent = []
+    imports = lean_imports(tree, cfg) if imports is None else imports
     for r in cfg["lean"]["root_modules"]:
         try:
-            module_dirs(tree, {**cfg, "lean": {**cfg["lean"], "root_modules": [r]}})
+            module_dirs(tree, {**cfg, "lean": {**cfg["lean"], "root_modules": [r]}}, imports)
         except FileNotFoundError:
             absent.append(r)
     if len(absent) == len(cfg["lean"]["root_modules"]):
@@ -335,9 +384,10 @@ def snapshot(cfg: dict, tree: Path, *, clean: bool = False, apply_diff: Path | N
     result["workspace_project"] = workspace_project(cfg)
     tree = tree / workspace_project(cfg)  # from here on, `tree` is the Lake project
     result["absent_roots"] = []
+    imports = lean_imports(tree, cfg)  # Lean's header parser, once for the whole snapshot
     if allow_absent_roots:  # config_sha256 above stays the full config's
-        cfg, result["absent_roots"] = present_roots(tree, cfg)
-    result["src_dirs"] = dirs = module_dirs(tree, cfg)
+        cfg, result["absent_roots"] = present_roots(tree, cfg, imports)
+    result["src_dirs"] = dirs = module_dirs(tree, cfg, imports)
     if clean and (tree / ".lake" / "build").exists():
         raise RuntimeError(f"{tree}: --clean, but the project build output .lake/build exists")
     tc = tree / "lean-toolchain"
@@ -345,7 +395,7 @@ def snapshot(cfg: dict, tree: Path, *, clean: bool = False, apply_diff: Path | N
     result["inputs_sha256"] = inputs_hash(cfg, tree, dirs)
 
     result["build"] = build = run_build(tree, cfg, log, dirs)
-    mods = project_modules(tree, cfg, dirs)
+    mods = project_modules(tree, cfg, dirs, imports)
     extracted = {module_of(p, dirs) for p in cfg["protected"]["extracted"]}
     audited = sorted(m for m in mods if m not in extracted)
     failed = set(build["failed_modules"]) & set(mods)

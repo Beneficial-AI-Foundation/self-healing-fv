@@ -183,6 +183,15 @@ def preconditions(cfg: dict, base: dict, broken: dict, cand: dict, reference: st
         # Component acceptance: the candidate fails in X by construction, and its records still decide.
         out.append("fingerprinting the candidate failed" + (" (timed out)" if cand.get("stmtcanon", {}).get("timeout")
                                                             else ""))
+    elif cand.get("stmtcanon", {}).get("ok", False):
+        # Coverage of the candidate, in the modules it built: every declaration written there, the
+        # bot's additions included, has a record, and every theorem or axiom Lean has there is one
+        # the parse sees (gate re-check #4, 2026-11-03: an added theorem StmtCanon dropped went
+        # unchecked by G2). A module that did not build is G3's to judge, not this check's.
+        unbuilt = {m for m, s in cand.get("modules", {}).items() if s != "observed"}
+        n, cmiss = inventory.missing(cand, set(excluded) | unbuilt)
+        if cmiss:
+            out.append(f"candidate: coverage fails for {len(cmiss)} declaration(s), e.g. {cmiss[0]}")
     return out
 
 
