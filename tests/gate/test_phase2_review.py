@@ -204,15 +204,24 @@ def test_a_changed_default_argument_is_rejected(default_env):
 # macro whose syntax begins with `|` and that elaborates to its argument, statement text can be
 # added after the head with the same fingerprint, so G1 cannot see it either. Low impact (the
 # elaborated statement is unchanged by construction), but out of scope.
-KEEP = 'macro:10 p:term:10 " |keep" : term => pure p\n\n'
+# Re-check #6 final (731144d, `:=` only): the same trick with a token that starts with `:=`. Lean's
+# tokenizer takes the longest token, so `:=keep` (declared by a repo macro) is one token, not `:=`
+# followed by `keep`; both G0s match the `:=` prefix of it.
+KEEPS = {
+    "bar": ('macro:10 p:term:10 " |keep" : term => pure p\n\n', "\n  |keep := by\n"),
+    "colon-eq": ('macro:10 p:term:10 " :=keep" : term => pure p\n\n', " :=keep := by\n"),
+}
 
 
-def test_statement_text_after_the_head_is_out_of_scope(tmp_path):
-    """Expected: rejected (text added to the statement, outside the proof). At 32131ee: accepted."""
+@pytest.mark.parametrize("variant", list(KEEPS), ids=list(KEEPS))
+def test_statement_text_after_the_head_is_out_of_scope(tmp_path, variant):
+    """Expected: rejected (text added to the statement, outside the proof). At 32131ee: `bar`
+    accepted. At 731144d: `bar` rejected (only `:=` may follow the head), `colon-eq` accepted."""
+    macro, cont_head = KEEPS[variant]
     root = tmp_path
-    e = make_env(root, lambda t: t.replace("/-- A spec predicate", KEEP + "/-- A spec predicate")
+    e = make_env(root, lambda t: t.replace("/-- A spec predicate", macro + "/-- A spec predicate")
                  if "/-- A spec predicate" in t else t)
-    cont = SPEC_VALID.replace(" := by\n", "\n  |keep := by\n", 1)
+    cont = SPEC_VALID.replace(" := by\n", cont_head, 1)
     rc, v = run_bytes(e, "keep", edit(e, (SPEC_STUB, cont)))
     assert v is not None
     cand = json.loads((root / "keep.C.json").read_text())
