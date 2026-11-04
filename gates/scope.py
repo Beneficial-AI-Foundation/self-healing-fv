@@ -28,6 +28,15 @@ HEARTBEATS_RE = re.compile(r"\bmaxHeartbeats\s+(\d+)")
 ADDABLE = ("theorem", "lemma")
 
 
+def without_heartbeats(prefix: str) -> str:
+    """A declaration's prefix without its `set_option maxHeartbeats N in` (the one prefix change
+    allowed on a repaired theorem, §4.3). Only the whole option goes: after `maxHeartbeats N` is
+    removed, `set_option` and `in` must be adjacent (any whitespace), so `synthInstance.maxHeartbeats`
+    leaves `set_option synthInstance. in` and still counts as a change. Until 2026-11-04 this matched
+    a single space only, and adding a raise where the stub had none was rejected."""
+    return re.sub(r"\bset_option\s+in\b", "", HEARTBEATS_RE.sub("", prefix)).strip()
+
+
 def spacing_key(s: str) -> str:
     """Statement text with whitespace next to punctuation dropped (Lean ignores it)."""
     return re.sub(r" ?([^\w\s.'!?]) ?", r"\1", s)
@@ -199,8 +208,7 @@ def check(cfg: dict, base: dict, broken: dict, diff: str) -> dict:
                   before=d["statement"], after=n["statement"], **where)
             is_broken = (path, k) in broken_keys
             if n["prefix"] != d["prefix"]:
-                hb_only = HEARTBEATS_RE.sub("", n["prefix"]).replace("set_option in", "").strip() == \
-                    HEARTBEATS_RE.sub("", d["prefix"]).replace("set_option in", "").strip()
+                hb_only = without_heartbeats(n["prefix"]) == without_heartbeats(d["prefix"])
                 if not (is_broken and hb_only):
                     v(f"changes the attributes or options of `{k}`", before=d["prefix"], after=n["prefix"], **where)
             if n["body"] != d["body"]:

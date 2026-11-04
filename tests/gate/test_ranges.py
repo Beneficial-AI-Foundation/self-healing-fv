@@ -73,14 +73,28 @@ def test_an_added_helper_with_blank_lines_around_it_is_accepted(env):
     accepted(v)
 
 
-def test_raising_heartbeats_right_before_the_repaired_theorem_passes_the_range_check(env):
-    """The range check allows it and reports the raise. (The textual G0 still rejects adding a new
-    `set_option maxHeartbeats N in` where the stub had none: its prefix comparison leaves
-    `set_option  in` with two spaces. That predates phase 2 and is reported, not changed here.)"""
+def test_a_new_plain_raise_right_before_the_repaired_theorem_is_accepted(env):
+    """Both G0s allow it and report it. The textual G0 used to reject adding a raise where the stub had
+    none (its prefix comparison left `set_option  in`, two spaces); fixed 2026-11-04 (hub, for Dana)."""
     rc, v = run(env, "heartbeats", edit_specs((SPEC_STUB, "set_option maxHeartbeats 400000 in\n" + SPEC_VALID)))
-    assert v is not None
-    assert not [x for x in v["checks"]["G0"]["violations"] if "between declarations" in x["msg"]]
+    accepted(v)
     assert [h["maxHeartbeats"] for h in v["checks"]["G0"]["info"].get("range_heartbeats", [])] == [400000]
+
+
+@pytest.mark.parametrize("prefix", ["set_option maxHeartbeats 0 in\n", "set_option synthInstance.maxHeartbeats 400 in\n",
+                                    "set_option maxRecDepth 1000 in\n", "open Nat in\n"],
+                         ids=["heartbeats-0", "synthInstance", "maxRecDepth", "open-in"])
+def test_any_other_prefix_on_the_repaired_theorem_is_out_of_scope(env, prefix):
+    """Only `set_option maxHeartbeats N in`, N > 0. `synthInstance.maxHeartbeats` is another option:
+    removing `maxHeartbeats N` from it leaves `set_option synthInstance. in`, still a change."""
+    rc, v = run(env, f"prefix-{prefix.split()[1].split('.')[0]}", edit_specs((SPEC_STUB, prefix + SPEC_VALID)))
+    assert v is not None and v["verdict"] == "rejected" and "G0" in v["failed_checks"], (v["verdict"], v["failed_checks"])
+
+
+def test_a_raise_before_a_theorem_that_is_not_broken_is_out_of_scope(env):
+    rc, v = run(env, "heartbeats-unbroken", edit_specs((SPEC_STUB, SPEC_VALID),
+                                                       ("theorem triple_spec", "set_option maxHeartbeats 400000 in\ntheorem triple_spec")))
+    g0_rejects(v, "triple_spec")
 
 
 def test_raising_heartbeats_before_an_added_helper_is_out_of_scope(env):
@@ -89,9 +103,3 @@ def test_raising_heartbeats_before_an_added_helper_is_out_of_scope(env):
                 edit_specs((SPEC_STUB, "set_option maxHeartbeats 400000 in\n" + HELPER + "\n" + SPEC_WITH_HELPER)))
     g0_rejects(v, "changes text between declarations")
 
-
-def test_an_open_in_prefix_on_the_repaired_theorem_is_out_of_scope(env):
-    """`open … in` lies outside the theorem's range, like `set_option … in`; only a maxHeartbeats
-    raise is allowed there."""
-    rc, v = run(env, "open-in", edit_specs((SPEC_STUB, "open Nat in\n" + SPEC_VALID)))
-    assert v is not None and v["verdict"] == "rejected" and "G0" in v["failed_checks"], v["failed_checks"]
