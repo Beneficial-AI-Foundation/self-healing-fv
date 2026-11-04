@@ -75,7 +75,7 @@ import hashlib
 import re
 from collections import Counter
 
-from . import inventory, leandecls, patch, scope, version
+from . import extents, inventory, leandecls, patch, scope, version
 from .snapshot import config_hash, module_file, module_of, protected
 
 BASE3 = {"propext", "Classical.choice", "Quot.sound"}
@@ -195,6 +195,40 @@ def preconditions(cfg: dict, base: dict, broken: dict, cand: dict, reference: st
     return out
 
 
+def ranges_g0(g0: dict, broken: dict, cand: dict, diff: str, repaired: set[str]) -> list[str]:
+    """G0 by Lean's declaration ranges (`extents`, DESIGN.md §4.5 phase 2), on each file the diff
+    touches: its violations join G0's; returns why the gate cannot decide. Runs only on a diff the
+    textual G0 could read and apply. The candidate's sources must be the patched text the ranges were
+    made from, and both snapshots must carry ranges for the file's module."""
+    try:
+        new = patch.apply(broken["sources"], diff)
+    except patch.PatchError:
+        return []  # the textual G0 already reports a diff that does not apply
+    out: list[str] = []
+    for path, text in sorted(new.items()):
+        if cand.get("sources", {}).get(path) != text:
+            out.append(f"{path}: the candidate snapshot's text is not the patched text (Lean's ranges would not match)")
+            continue
+        old = broken["sources"].get(path)
+        if old is None:
+            continue  # the textual G0 reports a file outside the audited sources
+        mod = module_of(path, broken.get("src_dirs"))
+        if broken.get("modules", {}).get(mod) != "observed" or cand.get("modules", {}).get(mod) != "observed":
+            continue  # not built in K (excluded region) or in C (a new failure): G3/G4 reject the edit
+        krec = {n: r for n, r in broken["records"].items() if r.get("module") == mod}
+        crec = {n: r for n, r in cand["records"].items() if r.get("module") == mod}
+        if not any("range" in r for r in krec.values()) or not any("range" in r for r in crec.values()):
+            out.append(f"{path}: the snapshots carry no declaration ranges for {mod}")
+            continue
+        viol, why, raises = extents.check(path, old, text, krec, crec, repaired)
+        out += why
+        if viol:
+            g0["violations"] += viol
+            g0["ok"] = False
+        g0["info"].setdefault("range_heartbeats", []).extend(raises)
+    return out
+
+
 def compare(cfg: dict, base: dict, broken: dict, cand: dict, diff: str, reference: str = "base",
             stubs: list[str] | None = None, head_sources: dict[str, str] | None = None,
             tampered: list[str] | None = None, acceptance: str = "complete") -> dict:
@@ -234,6 +268,7 @@ def compare(cfg: dict, base: dict, broken: dict, cand: dict, diff: str, referenc
     checks["G0"] = g0
     bset = g0["info"]["broken_set"]
     repaired = {b["name"] for b in bset if b["name"]}
+    unavailable += ranges_g0(g0, broken, cand, diff, repaired)
     for b in bset:
         if in_x(b["file"]):
             continue  # component: in the excluded region, never accepted, so its record is not needed

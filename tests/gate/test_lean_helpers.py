@@ -100,6 +100,85 @@ where _aux_Meta___w : True := trivial
 def plainDef : Nat := 1
 """
 META_RECORDS = {"_aux_Meta___h", "madeByMacro", "plain", "plain._aux_Meta___w", "plainDef"}
+# Declaration ranges (phase 2, plan review 2026-11-04, amendments 2 and 5): G0 cuts touched files by
+# StmtCanon's `range`. Each expected (start line, end line): the docstring is inside; a `by` block
+# ends at its last tactic, so an indented command and a trailing comment fall outside; `where`,
+# `termination_by` and `decreasing_by` are inside; `set_option … in` and `open … in` prefixes and
+# section lines are outside; a macro making two theorems gives both the call's range.
+RANGES = """\
+/-- A doc comment. -/
+@[simp] theorem withDoc : 1 + 1 = 2 := rfl
+
+theorem byBlock : 2 + 2 = 4 := by
+  rfl
+  #check Nat
+
+theorem trailingComment : 3 + 3 = 6 := by
+  rfl
+  -- a comment after the last tactic
+
+theorem withWhere : True := helper
+where helper : True := trivial
+
+def ack : Nat → Nat → Nat
+  | 0, n => n + 1
+  | m + 1, 0 => ack m 1
+  | m + 1, n + 1 => ack m (ack (m + 1) n)
+termination_by m n => (m, n)
+
+def half (n : Nat) : Nat := if h : n < 2 then 0 else half (n - 2) + 1
+decreasing_by omega
+
+mutual
+theorem evenA : True := trivial
+theorem oddA : True := trivial
+end
+
+macro "mk_two " a:ident b:ident : command => `(theorem $a : True := trivial
+theorem $b : True := trivial)
+mk_two twoA twoB
+
+set_option maxHeartbeats 400000 in
+theorem withOpt : True := trivial
+
+open Nat in
+theorem withOpen : True := trivial
+
+noncomputable section
+theorem inNoncomp : True := trivial
+end
+"""
+RANGES_PUBLIC = "\npublic section\ntheorem inPublic : True := trivial\nend\n"  # from 4.30 (module system)
+RANGES_WANT = {"withDoc": (1, 2), "byBlock": (4, 5), "trailingComment": (8, 9), "withWhere": (12, 13),
+               "withWhere.helper": (13, 13), "ack": (15, 19), "half": (21, 22), "evenA": (25, 25), "oddA": (26, 26),
+               "twoA": (31, 31), "twoB": (31, 31), "withOpt": (34, 34), "withOpen": (37, 37), "inNoncomp": (40, 40)}
+RANGES_PUBLIC_WANT = {"inPublic": (44, 44)}
+# Where a repaired proof starts (re-check #6): the range G0 compares a repaired theorem up to its
+# `:=` byte for byte (from K's `:= by sorry` stub) and lets only the proof change, which starts at
+# `:=` (a `by` block, a term, or `fun` with alternatives), never `|` (hub decision after gate-review's
+# delta). K are the stubs, C the proofs (accepted), D a C whose docstring changed and E a C with
+# `|` equations (both rejected).
+BODY_K = """\
+/-- Doc. -/
+@[simp] theorem byForm : 1 + 1 = 2 := by sorry
+
+theorem termForm : 2 + 2 = 4 := by sorry
+
+theorem eqnForm : ∀ n : Nat, n + 0 = n := by sorry
+"""
+BODY_C = """\
+/-- Doc. -/
+@[simp] theorem byForm : 1 + 1 = 2 := by
+  rfl
+
+theorem termForm : 2 + 2 = 4 := rfl
+
+theorem eqnForm : ∀ n : Nat, n + 0 = n := fun
+  | 0 => rfl
+  | _ + 1 => rfl
+"""
+BODY_D = BODY_C.replace("/-- Doc. -/", "/-- Docs. -/")
+BODY_E = BODY_C.replace("n + 0 = n := fun\n", "n + 0 = n\n")
 
 
 def version(toolchain: str) -> tuple[int, int]:
@@ -114,7 +193,7 @@ def check(toolchain: str) -> dict:
         root = Path(d)
         (root / "lean-toolchain").write_text(f"leanprover/lean4:{toolchain}\n")
         mod = version(toolchain) >= MODULE_FROM
-        libs = ["Probe", "Top", "Meta"] + (["MProbe"] if mod else [])
+        libs = ["Probe", "Top", "Meta", "Ranges", "BodyK", "BodyC", "BodyD", "BodyE"] + (["MProbe"] if mod else [])
         (root / "lakefile.toml").write_text(f'name = "probe"\ndefaultTargets = {json.dumps(libs)}\n'
                                             + "".join(f'\n[[lean_lib]]\nname = "{n}"\n' for n in libs))
         (root / "Probe.lean").write_text(PROBE)
@@ -122,6 +201,9 @@ def check(toolchain: str) -> dict:
             (root / "MProbe.lean").write_text(MPROBE)
         (root / "Top.lean").write_text(TOP)
         (root / "Meta.lean").write_text(META)
+        (root / "Ranges.lean").write_text(RANGES + (RANGES_PUBLIC if mod else ""))
+        for name, text in (("BodyK", BODY_K), ("BodyC", BODY_C), ("BodyD", BODY_D), ("BodyE", BODY_E)):
+            (root / f"{name}.lean").write_text(text)
         (root / "Bad.lean").write_text(BAD)
         b = subprocess.run(["lake", "build"], cwd=root, capture_output=True, text=True)
         if b.returncode != 0:
@@ -152,6 +234,23 @@ def check(toolchain: str) -> dict:
         if x.returncode != 0:
             row["error"] = row.get("error") or f"StmtCanon (Meta): {(x.stderr or x.stdout).strip()[-400:]}"
         row["meta_records"] = sorted(json.loads(l)["name"] for l in x.stdout.splitlines() if l.startswith("{"))
+        y = subprocess.run(["lake", "env", "lean", "--run", str(STMTCANON), "--import", "Ranges", "--module", "Ranges"],
+                           cwd=root, capture_output=True, text=True)
+        if y.returncode != 0:
+            row["error"] = row.get("error") or f"StmtCanon (Ranges): {(y.stderr or y.stdout).strip()[-400:]}"
+        rrecs = {r["name"]: r for r in map(json.loads, (l for l in y.stdout.splitlines() if l.startswith("{")))}
+        row["ranges"] = {n: (r["range"][0], r["range"][2]) if r.get("range") else None for n, r in rrecs.items()}
+        row["ranges_want"] = {**RANGES_WANT, **(RANGES_PUBLIC_WANT if mod else {})}
+        body = {}
+        for name in ("BodyK", "BodyC", "BodyD", "BodyE"):
+            z = subprocess.run(["lake", "env", "lean", "--run", str(STMTCANON), "--import", name, "--module", name],
+                               cwd=root, capture_output=True, text=True)
+            body[name] = {r["name"]: r for r in map(json.loads, (l for l in z.stdout.splitlines() if l.startswith("{")))}
+        from gates import extents
+        repaired = {"byForm", "termForm", "eqnForm"}
+        row["body_c"] = extents.check("Body.lean", BODY_K, BODY_C, body["BodyK"], body["BodyC"], repaired)[:2]
+        row["body_d"] = extents.check("Body.lean", BODY_K, BODY_D, body["BodyK"], body["BodyD"], repaired)[:2]
+        row["body_e"] = extents.check("Body.lean", BODY_K, BODY_E, body["BodyK"], body["BodyE"], repaired)[:2]
         (root / "files.txt").write_text(f"{root / 'Top.lean'}\n{root / 'Bad.lean'}\n")
         p = subprocess.run(["lake", "env", "lean", "--run", str(DEPS), str(root / "files.txt")],
                            cwd=root, capture_output=True, text=True)
@@ -190,6 +289,16 @@ def problems(row: dict) -> list[str]:
         r = row["module"]["uses_private"]
         if "_private.MProbe.0.mnd2._native.native_decide.ax_9" not in (r["axioms"] or []) or r["native"]:
             out.append(f"module crafted: axioms {r['axioms']}, native {r['native']}")
+    if row.get("body_c") != ([], []):
+        out.append(f"repaired proofs (`:= by`, term, `:= fun` alternatives): {row.get('body_c')}")
+    if not (row.get("body_d") or [[]])[0] or not any("outside its proof" in v["msg"] for v in row["body_d"][0]):
+        out.append(f"a changed docstring on a repaired theorem was not rejected: {row.get('body_d')}")
+    if not (row.get("body_e") or [[]])[0] or not any("outside its proof" in v["msg"] for v in row["body_e"][0]):
+        out.append(f"a repaired proof written as `|` equations was not rejected: {row.get('body_e')}")
+    wrong = {n: (row.get("ranges") or {}).get(n) for n, want in (row.get("ranges_want") or {}).items()
+             if (row.get("ranges") or {}).get(n) != want}
+    if wrong:
+        out.append(f"ranges (start, end line): got {wrong}, want {[(n, row['ranges_want'][n]) for n in wrong]}")
     if set(row.get("meta_records") or []) != META_RECORDS:
         out.append(f"metaprogram helpers: records {row.get('meta_records')}, want {sorted(META_RECORDS)}")
     if "Probe" not in (row["deps_top"] or []) or not row["deps_bad_error"]:
