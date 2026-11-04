@@ -2,6 +2,8 @@
 gap rules. The real-Lean versions are test_ranges.py and test_lean_helpers.py (ranges on 8 toolchains)."""
 from __future__ import annotations
 
+import pytest
+
 from gates import extents
 
 K = """theorem a : True := trivial
@@ -200,6 +202,28 @@ def test_only_the_repaired_proof_may_change_not_its_docstring_or_statement_text(
     viol, why, _ = extents.check("M.lean", kk, kk, recs(kk, {"a": ("theorem a",), "b": ("theorem b",), "c": ("theorem c",)}),
                                  recs(kk, {"a": ("theorem a",), "b": ("theorem b",), "c": ("theorem c",)}), {"b"})
     assert why and "not a `:= by sorry` stub" in why[0]  # K's repaired theorem must be a stub
+
+
+@pytest.mark.parametrize("ch", [" ", " "], ids=["nbsp", "line-separator"])
+def test_unicode_spaces_are_not_lean_whitespace(ch):
+    """Gate-review's narrow check of 6a3a595: Python's `\\s` and `str.strip()` take U+00A0 and U+2028,
+    Lean's whitespace is only space, tab, CR and LF. Each is text here, never a blank line or the
+    whitespace after `:=`."""
+    def go(c):
+        names = {"a": ("theorem a",), "b": ("theorem b",), "c": ("theorem c",)}
+        if "theorem h" in c:
+            names["h"] = ("theorem h",)
+        return run(c, recs(c, names))
+    # As an "added blank line" next to an added declaration.
+    viol, _, _ = go(K.replace("-- note\n", f"-- note\n{ch}\ntheorem h : True := trivial\n"))
+    assert viol and "between declarations" in viol[0]["msg"]
+    # Inside a gap with nothing added.
+    viol, _, _ = go(K.replace("-- note\n", f"-- note\n{ch}\n"))
+    assert viol and "between declarations" in viol[0]["msg"]
+    # After `:=`: a repo token `:=<ch>keep`.
+    c = K.replace("theorem b : True := by sorry", f"theorem b : True :={ch}keep := by\n  trivial")
+    viol, _, _ = run(c, recs(c, {"a": ("theorem a",), "b": ("theorem b", "  trivial"), "c": ("theorem c",)}))
+    assert viol and "outside its proof" in viol[0]["msg"]
 
 
 def test_removing_reordering_or_changing_another_declaration_is_rejected():

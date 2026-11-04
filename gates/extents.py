@@ -33,15 +33,23 @@ import re
 
 from .leandecls import MODIFIERS
 
+# Lean's whitespace: space, tab, CR, LF. Python's `\s` and `str.strip()` also take U+00A0 and other
+# Unicode spaces, which Lean does not (gate-review, narrow check of 6a3a595): a repo token
+# `:=<U+00A0>keep` passed as `:=` and whitespace. Every whitespace decision here uses these;
+# lines split on `\n` only (not `splitlines()`, which also splits on U+2028, \x0b, \x0c, \x85 ...).
+LEAN_WS = " \t\r\n"
+WS = r"[ \t\r\n]"
+NOT_WS = r"[^ \t\r\n]"
+
 # `set_option maxHeartbeats N in`, optionally with a trailing line comment (group 2, kept verbatim).
 HEARTBEATS_LINE = re.compile(r"^([ \t]*set_option[ \t]+maxHeartbeats[ \t]+)(\d+)([ \t]+in)([ \t]*(?:--.*)?)$")
-DOC = re.compile(r"/--.*?-/\s*", re.S)
-ATTR = re.compile(r"@\[(?:[^\[\]]|\[[^\[\]]*\])*\]\s*")
-MODS = re.compile(r"(?:" + MODIFIERS + r")\s+")
+DOC = re.compile(r"/--.*?-/" + WS + "*", re.S)
+ATTR = re.compile(r"@\[(?:[^\[\]]|\[[^\[\]]*\])*\]" + WS + "*")
+MODS = re.compile(r"(?:" + MODIFIERS + r")" + WS + "+")
 DECL_KW = re.compile(r"(?:theorem|lemma|def|abbrev|instance|structure|class|inductive|coinductive|axiom|opaque|"
                      r"example)\b")
 ADDED_KW = re.compile(r"(?:theorem|lemma)\b")
-TOKEN = re.compile(r"[A-Za-z_#«][^\s]*")
+TOKEN = re.compile(r"[A-Za-z_#«]" + NOT_WS + "*")
 
 
 def offsets(text: str) -> list[int]:
@@ -86,7 +94,8 @@ def extents(text: str, records: dict[str, dict]) -> tuple[list[dict], list[str]]
             continue
         s, e = starts[sl - 1] + sc, starts[el - 1] + ec
         h = head(text[s:e])
-        if text[s].isspace() or not (DECL_KW.match(h) or TOKEN.match(h)):
+        if text[s] in LEAN_WS or not (DECL_KW.match(h) or TOKEN.match(h)):
+            # (`.strip()` below only formats the message)
             problems.append(f"`{n}`: its range does not start at a declaration (line {sl}: {lines[sl - 1].strip()[:60]!r})")
             continue
         spans.append((s, e, n))
@@ -120,7 +129,7 @@ def heartbeats_line(gap: str) -> tuple[list[str], int, re.Match | None]:
     `set_option maxHeartbeats N in` (with or without a trailing comment), if it is one."""
     lines = gap.split("\n")
     i = len(lines) - 1
-    while i >= 0 and not lines[i].strip():
+    while i >= 0 and not lines[i].strip(LEAN_WS):
         i -= 1
     return lines, i, (HEARTBEATS_LINE.match(lines[i]) if i >= 0 else None)
 
@@ -136,9 +145,9 @@ def mask_heartbeats(k_gap: str, c_gap: str) -> tuple[str, str, int | None]:
     if km and cm:
         kl[ki] = km.group(1) + "N" + km.group(3) + km.group(4)
         cl[ci] = cm.group(1) + "N" + cm.group(3) + cm.group(4)
-    elif cm and not cm.group(4).strip():
+    elif cm and not cm.group(4).strip(LEAN_WS):
         del cl[ci]
-    elif km and not km.group(4).strip():
+    elif km and not km.group(4).strip(LEAN_WS):
         del kl[ki]
     return "\n".join(kl), "\n".join(cl), n
 
@@ -146,7 +155,7 @@ def mask_heartbeats(k_gap: str, c_gap: str) -> tuple[str, str, int | None]:
 def rtrim_blank(s: str) -> str:
     """`s` without the whitespace-only lines at its end (the last line's own text kept as is)."""
     lines = s.split("\n")
-    while len(lines) > 1 and not lines[-1].strip():
+    while len(lines) > 1 and not lines[-1].strip(LEAN_WS):
         lines.pop()
     return "\n".join(lines)
 
@@ -154,7 +163,7 @@ def rtrim_blank(s: str) -> str:
 def ltrim_blank(s: str) -> str:
     """`s` without the whitespace-only lines at its start."""
     lines = s.split("\n")
-    while len(lines) > 1 and not lines[0].strip():
+    while len(lines) > 1 and not lines[0].strip(LEAN_WS):
         lines.pop(0)
     return "\n".join(lines)
 
@@ -166,12 +175,12 @@ def insertion_matches(k_gap: str, pieces: list[str]) -> bool:
     or go)? What is before the first added declaration and after the last must be K's gap's start and
     end byte for byte, up to blank lines at the insertion point; between added declarations, only
     blank lines."""
-    if any(p.strip() for p in pieces[1:-1]):
+    if any(p.strip(LEAN_WS) for p in pieces[1:-1]):
         return False
     first, last = rtrim_blank(pieces[0]), ltrim_blank(pieces[-1])
     if len(first) + len(last) > len(k_gap) or not k_gap.startswith(first) or not k_gap.endswith(last):
         return False
-    return not k_gap[len(first):len(k_gap) - len(last)].strip()
+    return not k_gap[len(first):len(k_gap) - len(last)].strip(LEAN_WS)
 
 
 STUB_TAIL = ":= by sorry"
@@ -181,22 +190,22 @@ STUB_TAIL = ":= by sorry"
 # `match`/`cases`, or `:= fun … => match …`. The `:=` must be the whole token, followed by whitespace
 # (gate-review's final check): Lean's tokenizer takes the longest token, so a repo macro `" :=keep"`
 # would otherwise pass as `:=keep := by …`.
-BODY_START = re.compile(r"\s*:=(?=\s|$)")
+BODY_START = re.compile(WS + r"*:=(?=" + WS + r"|$)")
 
 
 def repaired_head(k_extent: str) -> str | None:
     """The part of a repaired theorem's extent before its proof, from K, where the theorem is a stub
     by construction (`… := by sorry`): docstring, attributes, modifiers and statement, up to (not
     including) the `:=`. None if K's extent is not such a stub."""
-    t = k_extent.rstrip()
-    return t[:-len(STUB_TAIL)].rstrip() if t.endswith(STUB_TAIL) else None
+    t = k_extent.rstrip(LEAN_WS)
+    return t[:-len(STUB_TAIL)].rstrip(LEAN_WS) if t.endswith(STUB_TAIL) else None
 
 
 def first_difference(a: str, b: str) -> str:
     al, bl = a.split("\n"), b.split("\n")
     for x, y in zip(al, bl):
         if x != y:
-            return f"{x.strip()[:80]!r} → {y.strip()[:80]!r}"
+            return f"{x.strip()[:80]!r} → {y.strip()[:80]!r}"  # display only
     return f"{len(al)} → {len(bl)} lines"
 
 

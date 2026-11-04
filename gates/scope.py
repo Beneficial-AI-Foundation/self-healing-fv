@@ -34,7 +34,7 @@ def without_heartbeats(prefix: str) -> str:
     removed, `set_option` and `in` must be adjacent (any whitespace), so `synthInstance.maxHeartbeats`
     leaves `set_option synthInstance. in` and still counts as a change. Until 2026-11-04 this matched
     a single space only, and adding a raise where the stub had none was rejected."""
-    return re.sub(r"\bset_option\s+in\b", "", HEARTBEATS_RE.sub("", prefix)).strip()
+    return re.sub(r"\bset_option[ \t\r\n]+in\b", "", HEARTBEATS_RE.sub("", prefix)).strip(" \t\r\n")
 
 
 def spacing_key(s: str) -> str:
@@ -221,10 +221,15 @@ def check(cfg: dict, base: dict, broken: dict, diff: str) -> dict:
                     # The repaired proof starts at `:=`, never `|` (hub decision, 2026-11-04): the
                     # text split starts a body at a line-leading `|`, so a repo term macro could carry
                     # statement text there. Equations go in `:= by` with `match`/`cases`.
-                    # The whole `:=` token, then whitespace (Lean's longest-token rule: `:=keep`).
-                    if not re.match(r":=(?=\s|$)", n["body"].lstrip()):
+                    # The whole `:=` token, then Lean's whitespace (space, tab, CR, LF; not Python's
+                    # `\s`, which takes U+00A0): Lean's longest-token rule, `:=keep`, `:=<U+00A0>keep`.
+                    body = n["body"].lstrip(" \t\r\n")
+                    if body.startswith("|"):
                         v(f"writes the repaired proof of `{k}` without `:=` (as `|` equations); write it as "
                           "`:= by` with `match` or `cases`", **where)
+                    elif not re.match(r":=(?=[ \t\r\n]|$)", body):
+                        v(f"the repaired proof of `{k}` does not start with the `:=` token followed by "
+                          "whitespace", **where)
             if n["body"] != d["body"] or n["prefix"] != d["prefix"]:
                 for label in banned(n["prefix"] + "\n" + n["body"]):
                     v(f"adds {label} in `{k}`", **where)
