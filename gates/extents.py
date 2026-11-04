@@ -175,7 +175,11 @@ def insertion_matches(k_gap: str, pieces: list[str]) -> bool:
 
 
 STUB_TAIL = ":= by sorry"
-BODY_START = re.compile(r"\s*(?::=|\|)")
+# The repaired proof starts at `:=` only (hub decision, 2026-11-04, after gate-review's delta of
+# re-check #6): with `|` allowed, a repo term macro (`macro:10 p:term:10 " |keep" : term => pure p`)
+# could add text to the statement after the head. A repair can write equations as `:= by` with
+# `match`/`cases`, or `:= fun … => match …`.
+BODY_START = re.compile(r"\s*:=")
 
 
 def repaired_head(k_extent: str) -> str | None:
@@ -266,7 +270,7 @@ def check(path: str, k_text: str, c_text: str, k_records: dict[str, dict], c_rec
         if any(n in repaired for n in x["key"]):
             # Only the proof may change (re-check #6): its docstring, attributes, modifiers and
             # statement, up to the `:=`, byte for byte. The proof then starts with `:=` (a `by` block
-            # or a term) or `|` (equations).
+            # or a term), never `|` (BODY_START).
             hd = repaired_head(kt)
             if hd is None:
                 why.append(f"{path}: the repaired theorem `{x['key'][0]}` is not a `:= by sorry` stub in K")

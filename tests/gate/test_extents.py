@@ -170,7 +170,8 @@ def test_blank_lines_may_differ_only_next_to_an_added_declaration():
 
 def test_only_the_repaired_proof_may_change_not_its_docstring_or_statement_text():
     """Re-check #6: the repaired theorem's extent up to `:=` is compared byte for byte; the proof
-    starts at `:=` (a `by` block or a term) or `|` (equations)."""
+    starts at `:=` (a `by` block or a term), never `|` (hub decision after gate-review's delta: a
+    repo term macro could otherwise carry statement text after the head)."""
     k = K.replace("theorem b", "/-- doc -/\n@[simp] theorem b")
     kr = recs(k, {"a": ("theorem a",), "b": ("/-- doc -/", "@[simp] theorem b"), "c": ("theorem c",)})
 
@@ -180,7 +181,10 @@ def test_only_the_repaired_proof_may_change_not_its_docstring_or_statement_text(
     stub = "@[simp] theorem b : True := by sorry"
     assert go(k.replace(stub, "@[simp] theorem b : True := by\n  trivial"), "  trivial")[0] == []        # `:= by`
     assert go(k.replace(stub, "@[simp] theorem b : True := trivial"), "@[simp] theorem b")[0] == []    # a term
-    assert go(k.replace(stub, "@[simp] theorem b : True\n  | _ => trivial"), "  | _")[0] == []          # equations
+    viol, _, _ = go(k.replace(stub, "@[simp] theorem b : True\n  | _ => trivial"), "  | _")           # equations
+    assert viol and "outside its proof" in viol[0]["msg"]
+    viol, _, _ = go(k.replace(stub, "@[simp] theorem b : True\n  |keep := by\n  trivial"), "  trivial")  # a `|` macro
+    assert viol and "outside its proof" in viol[0]["msg"]
     viol, _, _ = go(k.replace("/-- doc -/", "/-- docs -/").replace(stub, "@[simp] theorem b : True := by\n  trivial"), "  trivial")
     assert viol and "outside its proof" in viol[0]["msg"]
     viol, _, _ = go(k.replace(stub, "@[simp] theorem b : True /- c -/ := by\n  trivial"), "  trivial")

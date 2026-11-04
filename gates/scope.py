@@ -218,6 +218,12 @@ def check(cfg: dict, base: dict, broken: dict, diff: str) -> dict:
                     v(f"changes the proof of `{k}`, which is not broken", **where)
                 else:
                     info["changed_bodies"].append(where)
+                    # The repaired proof starts at `:=`, never `|` (hub decision, 2026-11-04): the
+                    # text split starts a body at a line-leading `|`, so a repo term macro could carry
+                    # statement text there. Equations go in `:= by` with `match`/`cases`.
+                    if not n["body"].lstrip().startswith(":="):
+                        v(f"writes the repaired proof of `{k}` without `:=` (as `|` equations); write it as "
+                          "`:= by` with `match` or `cases`", **where)
             if n["body"] != d["body"] or n["prefix"] != d["prefix"]:
                 for label in banned(n["prefix"] + "\n" + n["body"]):
                     v(f"adds {label} in `{k}`", **where)
