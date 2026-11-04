@@ -178,8 +178,10 @@ STUB_TAIL = ":= by sorry"
 # The repaired proof starts at `:=` only (hub decision, 2026-11-04, after gate-review's delta of
 # re-check #6): with `|` allowed, a repo term macro (`macro:10 p:term:10 " |keep" : term => pure p`)
 # could add text to the statement after the head. A repair can write equations as `:= by` with
-# `match`/`cases`, or `:= fun … => match …`.
-BODY_START = re.compile(r"\s*:=")
+# `match`/`cases`, or `:= fun … => match …`. The `:=` must be the whole token, followed by whitespace
+# (gate-review's final check): Lean's tokenizer takes the longest token, so a repo macro `" :=keep"`
+# would otherwise pass as `:=keep := by …`.
+BODY_START = re.compile(r"\s*:=(?=\s|$)")
 
 
 def repaired_head(k_extent: str) -> str | None:

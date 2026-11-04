@@ -185,6 +185,11 @@ def test_only_the_repaired_proof_may_change_not_its_docstring_or_statement_text(
     assert viol and "outside its proof" in viol[0]["msg"]
     viol, _, _ = go(k.replace(stub, "@[simp] theorem b : True\n  |keep := by\n  trivial"), "  trivial")  # a `|` macro
     assert viol and "outside its proof" in viol[0]["msg"]
+    # The whole `:=` token, then whitespace (gate-review's final check: Lean's longest token).
+    viol, _, _ = go(k.replace(stub, "@[simp] theorem b : True :=keep := by\n  trivial"), "  trivial")
+    assert viol and "outside its proof" in viol[0]["msg"]
+    viol, _, _ = go(k.replace(stub, "@[simp] theorem b : True :=by\n  trivial"), "  trivial")
+    assert viol
     viol, _, _ = go(k.replace("/-- doc -/", "/-- docs -/").replace(stub, "@[simp] theorem b : True := by\n  trivial"), "  trivial")
     assert viol and "outside its proof" in viol[0]["msg"]
     viol, _, _ = go(k.replace(stub, "@[simp] theorem b : True /- c -/ := by\n  trivial"), "  trivial")

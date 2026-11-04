@@ -221,7 +221,8 @@ def check(cfg: dict, base: dict, broken: dict, diff: str) -> dict:
                     # The repaired proof starts at `:=`, never `|` (hub decision, 2026-11-04): the
                     # text split starts a body at a line-leading `|`, so a repo term macro could carry
                     # statement text there. Equations go in `:= by` with `match`/`cases`.
-                    if not n["body"].lstrip().startswith(":="):
+                    # The whole `:=` token, then whitespace (Lean's longest-token rule: `:=keep`).
+                    if not re.match(r":=(?=\s|$)", n["body"].lstrip()):
                         v(f"writes the repaired proof of `{k}` without `:=` (as `|` equations); write it as "
                           "`:= by` with `match` or `cases`", **where)
             if n["body"] != d["body"] or n["prefix"] != d["prefix"]:
