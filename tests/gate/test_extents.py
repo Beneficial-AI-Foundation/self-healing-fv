@@ -124,6 +124,26 @@ def test_heartbeats_only_directly_before_the_repaired_theorem():
     assert viol  # before an added theorem: a gap change
 
 
+def test_a_raise_may_change_n_but_not_its_comment():
+    """dalek PR 734 (re-gate, 2026-11-04): `set_option maxHeartbeats 800000 in -- heavy step*` raised
+    to 1600000, the comment kept. Only N may change; a comment may not come, go or change with it."""
+    k = K.replace("theorem b", "set_option maxHeartbeats 800000 in -- heavy step\ntheorem b")
+    kr = recs(k, {"a": ("theorem a",), "b": ("theorem b",), "c": ("theorem c",)})
+
+    def go(c):
+        return extents.check("M.lean", k, c, kr, recs(c, {"a": ("theorem a",), "b": ("theorem b",), "c": ("theorem c",)}), {"b"})
+    viol, _, raises = go(k.replace("800000", "1600000"))
+    assert not viol and raises[0]["maxHeartbeats"] == 1600000
+    viol, _, _ = go(k.replace("800000 in -- heavy step", "1600000 in -- heavier"))
+    assert viol
+    viol, _, _ = go(k.replace("set_option maxHeartbeats 800000 in -- heavy step\n", ""))
+    assert viol  # the comment would go with it
+    viol, _, _ = run(K.replace("theorem b", "set_option maxHeartbeats 400000 in -- new\ntheorem b"),
+                     recs(K.replace("theorem b", "set_option maxHeartbeats 400000 in -- new\ntheorem b"),
+                          {"a": ("theorem a",), "b": ("theorem b",), "c": ("theorem c",)}))
+    assert viol  # an added raise must be the plain line
+
+
 def test_removing_reordering_or_changing_another_declaration_is_rejected():
     c = K.replace("theorem c : True := trivial\n", "")
     viol, _, _ = run(c, recs(c, {"a": ("theorem a",), "b": ("theorem b",)}))

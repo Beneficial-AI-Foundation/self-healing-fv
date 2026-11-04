@@ -33,7 +33,8 @@ import re
 
 from .leandecls import MODIFIERS
 
-HEARTBEATS_LINE = re.compile(r"^[ \t]*set_option[ \t]+maxHeartbeats[ \t]+(\d+)[ \t]+in[ \t]*$")
+# `set_option maxHeartbeats N in`, optionally with a trailing line comment (group 2, kept verbatim).
+HEARTBEATS_LINE = re.compile(r"^([ \t]*set_option[ \t]+maxHeartbeats[ \t]+)(\d+)([ \t]+in)([ \t]*(?:--.*)?)$")
 DOC = re.compile(r"/--.*?-/\s*", re.S)
 ATTR = re.compile(r"@\[(?:[^\[\]]|\[[^\[\]]*\])*\]\s*")
 MODS = re.compile(r"(?:" + MODIFIERS + r")\s+")
@@ -108,15 +109,32 @@ def gaps(text: str, ext: list[dict]) -> list[str]:
     return out + [text[pos:]]
 
 
-def strip_heartbeats(gap: str) -> tuple[str, int | None]:
-    """`gap` without a last non-blank line `set_option maxHeartbeats N in`, and N."""
+def heartbeats_line(gap: str) -> tuple[list[str], int, re.Match | None]:
+    """`gap`'s lines, the index of its last non-blank line, and that line's match as
+    `set_option maxHeartbeats N in` (with or without a trailing comment), if it is one."""
     lines = gap.split("\n")
     i = len(lines) - 1
     while i >= 0 and not lines[i].strip():
         i -= 1
-    if i >= 0 and (m := HEARTBEATS_LINE.match(lines[i])):
-        return "\n".join(lines[:i] + lines[i + 1:]), int(m.group(1))
-    return gap, None
+    return lines, i, (HEARTBEATS_LINE.match(lines[i]) if i >= 0 else None)
+
+
+def mask_heartbeats(k_gap: str, c_gap: str) -> tuple[str, str, int | None]:
+    """The two gaps before a repaired theorem, with the one allowed difference taken out, and the
+    candidate's N. Both end with the line: its N is masked, the rest (a trailing comment included)
+    must still match. Only one does: that line is dropped if it is plain (`set_option maxHeartbeats N
+    in`, nothing after), so a raise can be added or removed but no comment can come or go with it."""
+    kl, ki, km = heartbeats_line(k_gap)
+    cl, ci, cm = heartbeats_line(c_gap)
+    n = int(cm.group(2)) if cm else None
+    if km and cm:
+        kl[ki] = km.group(1) + "N" + km.group(3) + km.group(4)
+        cl[ci] = cm.group(1) + "N" + cm.group(3) + cm.group(4)
+    elif cm and not cm.group(4).strip():
+        del cl[ci]
+    elif km and not km.group(4).strip():
+        del kl[ki]
+    return "\n".join(kl), "\n".join(cl), n
 
 
 def first_difference(a: str, b: str) -> str:
@@ -180,8 +198,7 @@ def check(path: str, k_text: str, c_text: str, k_records: dict[str, dict], c_rec
         nxt = kept[i]["key"] if i < len(kept) else None
         if nxt and any(n in repaired for n in nxt):
             # Only the text directly before the repaired theorem, not before an added declaration.
-            a, _ = strip_heartbeats(a)
-            last, hb = strip_heartbeats(pcs[-1])
+            a, last, hb = mask_heartbeats(a, pcs[-1])
             pcs = pcs[:-1] + [last]
             if hb == 0:
                 v(f"sets `maxHeartbeats 0` before `{nxt[0]}`", decl=nxt[0])
