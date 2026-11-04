@@ -4,8 +4,9 @@ commits of a target repo, e.g. an open pull request.
   live_record  the case record of a live change: merge-base, head, PR, pins and causes, and no
                human fix. After setup the pipeline runs the same code as for a historical case.
   select       which open PRs of the configured targets the silent workflow should run on
-               (.github/workflows/live.yml): authored by members, Lean check failing on the
-               head, extraction check green on the same head, and not run before for that head.
+               (.github/workflows/live.yml): authored by someone trusted (`author_trust`), Lean
+               check failing on the head, extraction check green on the same head, and not run
+               before for that head.
   select_pr    whether one PR qualifies, for pr-repair.yml, which a target repo calls on its own
                PRs: the same rules, plus a same-repo branch, no opt-out label, and a change to a
                pin or the extracted code.
@@ -20,6 +21,7 @@ import os
 import subprocess
 import sys
 import tomllib
+import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
@@ -30,6 +32,8 @@ sys.path.insert(0, str(ROOT / "mining"))
 from mine_history import REPO_CONFIGS, Git, Miner, change_causes  # noqa: E402
 
 TRUSTED_AUTHORS = ("OWNER", "MEMBER", "COLLABORATOR")  # GitHub's author_association (§9.2)
+TRUSTED_PERMISSIONS = ("admin", "maintain", "write")  # else, the author's permission on the repo
+UNCHECKED = "an org member can make their membership public as a workaround"
 OPT_OUT = "no-self-heal"  # the label that keeps pr-repair.yml off a PR
 LEAN_FAILED = ("failure", "timed_out")
 API = "https://api.github.com"
@@ -113,6 +117,37 @@ def github_api(token: str | None) -> Callable[[str], object]:
     return get
 
 
+def author_trust(api, repo: str, pr: dict) -> str | None:
+    """Why the PR's author is not trusted to have their code built on a runner that holds the model
+    key (DESIGN.md §9.2), or None if they are. Trusted: `author_association` OWNER, MEMBER or
+    COLLABORATOR, with no API call; else write, maintain or admin permission on `repo`, asked of
+    GitHub. The association alone is not enough: the workflow's token cannot see a private org
+    membership, so GitHub reports such a member as NONE or CONTRIBUTOR (issue #30). The permission
+    endpoint is listed under Metadata read, which every GITHUB_TOKEN has. Fails closed: if GitHub cannot
+    answer, the author is not trusted, and the reason says why."""
+    assoc = pr.get("author_association") or "unknown"
+    if assoc in TRUSTED_AUTHORS:
+        return None
+    login = (pr.get("user") or {}).get("login")
+    if not login:
+        return f"author is {assoc.lower()}; could not check author permission (no login); {UNCHECKED}"
+    try:
+        got = api(f"/repos/{repo}/collaborators/{urllib.parse.quote(login, safe='')}/permission")
+        permission, role = got.get("permission"), got.get("role_name")
+    except urllib.error.HTTPError as e:
+        return f"author {login} is {assoc.lower()}; could not check author permission (HTTP {e.code}); {UNCHECKED}"
+    except (urllib.error.URLError, OSError, ValueError, AttributeError) as e:  # network, timeout, bad JSON
+        why = str(getattr(e, "reason", None) or type(e).__name__).replace("\n", " ")[:100]
+        return f"author {login} is {assoc.lower()}; could not check author permission ({why}); {UNCHECKED}"
+    # `permission` maps maintain to write and triage to read; `role_name` names the actual role
+    # (maintain, triage, or a custom role), so it goes into the reason. Only `permission` decides.
+    if permission in TRUSTED_PERMISSIONS:
+        return None
+    has = permission if permission not in (None, "none") else "no"
+    access = f" (role {role})" if role and role != permission else ""
+    return f"author {login} is {assoc.lower()} with {has} permission{access} on {repo}, not write, maintain or admin"
+
+
 def check_state(api, repo: str, sha: str, name: str) -> str:
     """The state of check `name` on commit `sha`: missing, pending, failed, passed or other.
     A check can run more than once on a commit (e.g. on push and on pull_request): any run still
@@ -189,8 +224,8 @@ def select(api, self_repo: str, targets: dict[str, dict], max_runs: int = 2) -> 
             head = pr["head"]["sha"]
             row = {"target": name, "pr": pr["number"], "head": head[:8], "title": pr["title"][:80]}
             decisions.append(row)
-            if pr.get("author_association") not in TRUSTED_AUTHORS:
-                row["skip"] = f"author is {pr.get('author_association', 'unknown').lower()}, not a member or collaborator"
+            if why := author_trust(api, repo, pr):
+                row["skip"] = why
             elif pr.get("draft"):
                 row["skip"] = "draft"
             elif already_run(api, self_repo, name, head):
@@ -248,8 +283,8 @@ def select_pr(api, target: str, cfg: dict, repo: str, number: int, self_repo: st
         row["skip"] = "the PR's branch is in another repo (a fork): its code never runs with the key"
     elif pr.get("state") != "open":
         row["skip"] = "closed"
-    elif pr.get("author_association") not in TRUSTED_AUTHORS:
-        row["skip"] = f"author is {pr.get('author_association', 'unknown').lower()}, not a member or collaborator"
+    elif why := author_trust(api, repo, pr):
+        row["skip"] = why
     elif OPT_OUT in {lb["name"] for lb in pr.get("labels", [])}:
         row["skip"] = f"labelled {OPT_OUT}"
     elif already_run(api, self_repo, target, head):
@@ -273,10 +308,10 @@ def summary(runs: list[dict], decisions: list[dict]) -> str:
     out = ["## Live selection", "", f"{len(runs)} to run." if runs else "Nothing to run.", ""]
     if decisions:
         out += ["| Target | PR | Head | Title | Decision |", "|---|---|---|---|---|"]
-        for d in decisions:
-            title = str(d["title"]).replace("|", "\\|").replace("@", "@​")
-            out.append(f"| {d['target']} | {d['pr'] or '–'} | `{d['head']}` | {title} | "
-                       f"{'**run**' if d.get('run') else d.get('skip', '')} |")
+        cell = lambda s: str(s).replace("|", "\\|").replace("@", "@​")  # noqa: E731  table-safe, no mention
+        for d in decisions:  # a skip names a login and a role (a custom role's name is free text)
+            out.append(f"| {d['target']} | {d['pr'] or '–'} | `{d['head']}` | {cell(d['title'])} | "
+                       f"{'**run**' if d.get('run') else cell(d.get('skip', ''))} |")
     return "\n".join(out) + "\n"
 
 
