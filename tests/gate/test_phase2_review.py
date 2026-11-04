@@ -230,3 +230,26 @@ def test_statement_text_after_the_head_is_out_of_scope(tmp_path, variant):
     cand = json.loads((root / "keep.C.json").read_text())
     assert cand["build"]["ok"], cand["build"].get("errors")
     assert v["verdict"] in ("rejected", "gate-unavailable"), (v["verdict"], v["accepted_theorems"])
+
+
+# Check of ac943a4: DECL_KW/ADDED_KW end with Python's `\b`, which sees U+00A0 as a word boundary;
+# Lean does not. A repo command macro whose atom is `theorem<U+00A0>mk` makes theorems, and an added
+# call of it starts with `theorem`, so it passes "an added declaration is written theorem/lemma (not a
+# macro call)". The made theorem is a record, so G2 still checks it (axioms, sorry, used by a repair).
+MK = 'macro "theorem mk " n:ident : command => `(theorem $n : True := trivial)\n\n'
+HELPER_CALL = "theorem mk helper_mk\n\n"
+
+
+def test_an_added_macro_call_is_not_written_as_a_theorem(tmp_path):
+    """Expected (phase 2: an added extent must be written `theorem`/`lemma`, not a macro call):
+    rejected or gate-unavailable. Holds at ac943a4 (regression guard): the `\\b` lets the call pass as
+    `theorem`, but the source parse then sees a `theorem` with no name it can read, and coverage
+    (phase 1) finds no record of it: gate-unavailable."""
+    e = make_env(tmp_path, lambda t: t.replace("/-- A spec predicate", MK + "/-- A spec predicate")
+                 if "/-- A spec predicate" in t else t)
+    repair = SPEC_VALID.replace(":= by\n", ":= by\n  have _h := helper_mk\n", 1)
+    rc, v = run_bytes(e, "mk", edit(e, (SPEC_STUB, HELPER_CALL + repair)))
+    assert v is not None
+    cand = json.loads((tmp_path / "mk.C.json").read_text())
+    assert cand["build"]["ok"], cand["build"].get("errors")
+    assert v["verdict"] in ("rejected", "gate-unavailable"), (v["verdict"], v["accepted_theorems"])
