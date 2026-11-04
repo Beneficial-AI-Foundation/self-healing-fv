@@ -89,8 +89,12 @@ Check your work with `lake build {module}` (or `lake env lean {task.file}`). {to
 Rules. They are checked mechanically afterwards, and any violation rejects the whole repair:
 - Change only the proof of `{task.decl}`: the text after its `:=`. Do not change its statement,
   name or attributes, and do not change any other declaration, statement, definition or proof.
-- You may add helper lemmas (`theorem`/`lemma`) in the same file, placed before `{task.decl}`.
-  Every helper must be used by the repaired proof.
+  Text outside proofs is compared byte for byte: do not edit, add or remove comments, docstrings,
+  blank lines (except around a helper you add) or any other command (`open`, `attribute`,
+  `#check`, ...) outside the proof, and do not leave a comment after the proof's last tactic (it
+  counts as outside the proof).
+- You may add helper lemmas (`theorem`/`lemma`) in the same file, placed before `{task.decl}` and
+  separated from it by a blank line. Every helper must be used by the repaired proof.
 - Never use `sorry`, `admit`, `axiom`, `native_decide`, `opaque`, `@[extern]`, `@[implemented_by]`,
   `set_option debug.*`, `maxHeartbeats 0`, or metaprogramming (`run_tac`, `#eval`, ...).
   You may raise the limit with `set_option maxHeartbeats N in` directly before the theorem
