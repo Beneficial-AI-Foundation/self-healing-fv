@@ -46,6 +46,8 @@ instance helpers are dropped; `_private` names are kept). Emits one JSON line pe
   { "name", "kind", "module",
     "written":    whether the declaration has a source range (false: added by a tactic),
     "line":       the line of its name in its module's source (null if none); not fingerprinted,
+    "range":      [start line, start col, end line, end col] of the whole declaration command
+                  (null if none); not fingerprinted,
     "canon":     canonical α-invariant dump of the elaborated type (authoritative),
     "body_canon": definitions only: canonical dump of the value and of its auxiliary definitions,
     "pp", "pp_body": pretty-printed type / value (display only),
@@ -421,6 +423,13 @@ def auditDecl (audited : Std.HashSet Name) (core : Std.HashSet Name) (declName :
       -- broken theorem by file and line, not by its short name; DESIGN.md §4.5). Not fingerprinted.
       ("line", match declRangeExt.find? env declName with
         | some r => toJson r.selectionRange.pos.line
+        | none => Json.null),
+      -- The whole declaration command, docstring and attributes included, as Lean's parser ended it
+      -- ([start line, start column, end line, end column]; lines from 1, columns in codepoints). G0
+      -- cuts touched files into declarations and the text between them by these (DESIGN.md §4.5,
+      -- phase 2). Not fingerprinted.
+      ("range", match declRangeExt.find? env declName with
+        | some r => toJson [r.range.pos.line, r.range.pos.column, r.range.endPos.line, r.range.endPos.column]
         | none => Json.null),
       ("canon", canonDump ci.type), ("pp", truncate (toString pp)),
       ("axioms", namesJson info.axioms),

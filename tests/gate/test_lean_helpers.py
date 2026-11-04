@@ -100,6 +100,59 @@ where _aux_Meta___w : True := trivial
 def plainDef : Nat := 1
 """
 META_RECORDS = {"_aux_Meta___h", "madeByMacro", "plain", "plain._aux_Meta___w", "plainDef"}
+# Declaration ranges (phase 2, plan review 2026-11-04, amendments 2 and 5): G0 cuts touched files by
+# StmtCanon's `range`. Each expected (start line, end line): the docstring is inside; a `by` block
+# ends at its last tactic, so an indented command and a trailing comment fall outside; `where`,
+# `termination_by` and `decreasing_by` are inside; `set_option … in` and `open … in` prefixes and
+# section lines are outside; a macro making two theorems gives both the call's range.
+RANGES = """\
+/-- A doc comment. -/
+@[simp] theorem withDoc : 1 + 1 = 2 := rfl
+
+theorem byBlock : 2 + 2 = 4 := by
+  rfl
+  #check Nat
+
+theorem trailingComment : 3 + 3 = 6 := by
+  rfl
+  -- a comment after the last tactic
+
+theorem withWhere : True := helper
+where helper : True := trivial
+
+def ack : Nat → Nat → Nat
+  | 0, n => n + 1
+  | m + 1, 0 => ack m 1
+  | m + 1, n + 1 => ack m (ack (m + 1) n)
+termination_by m n => (m, n)
+
+def half (n : Nat) : Nat := if h : n < 2 then 0 else half (n - 2) + 1
+decreasing_by omega
+
+mutual
+theorem evenA : True := trivial
+theorem oddA : True := trivial
+end
+
+macro "mk_two " a:ident b:ident : command => `(theorem $a : True := trivial
+theorem $b : True := trivial)
+mk_two twoA twoB
+
+set_option maxHeartbeats 400000 in
+theorem withOpt : True := trivial
+
+open Nat in
+theorem withOpen : True := trivial
+
+noncomputable section
+theorem inNoncomp : True := trivial
+end
+"""
+RANGES_PUBLIC = "\npublic section\ntheorem inPublic : True := trivial\nend\n"  # from 4.30 (module system)
+RANGES_WANT = {"withDoc": (1, 2), "byBlock": (4, 5), "trailingComment": (8, 9), "withWhere": (12, 13),
+               "withWhere.helper": (13, 13), "ack": (15, 19), "half": (21, 22), "evenA": (25, 25), "oddA": (26, 26),
+               "twoA": (31, 31), "twoB": (31, 31), "withOpt": (34, 34), "withOpen": (37, 37), "inNoncomp": (40, 40)}
+RANGES_PUBLIC_WANT = {"inPublic": (44, 44)}
 
 
 def version(toolchain: str) -> tuple[int, int]:
@@ -114,7 +167,7 @@ def check(toolchain: str) -> dict:
         root = Path(d)
         (root / "lean-toolchain").write_text(f"leanprover/lean4:{toolchain}\n")
         mod = version(toolchain) >= MODULE_FROM
-        libs = ["Probe", "Top", "Meta"] + (["MProbe"] if mod else [])
+        libs = ["Probe", "Top", "Meta", "Ranges"] + (["MProbe"] if mod else [])
         (root / "lakefile.toml").write_text(f'name = "probe"\ndefaultTargets = {json.dumps(libs)}\n'
                                             + "".join(f'\n[[lean_lib]]\nname = "{n}"\n' for n in libs))
         (root / "Probe.lean").write_text(PROBE)
@@ -122,6 +175,7 @@ def check(toolchain: str) -> dict:
             (root / "MProbe.lean").write_text(MPROBE)
         (root / "Top.lean").write_text(TOP)
         (root / "Meta.lean").write_text(META)
+        (root / "Ranges.lean").write_text(RANGES + (RANGES_PUBLIC if mod else ""))
         (root / "Bad.lean").write_text(BAD)
         b = subprocess.run(["lake", "build"], cwd=root, capture_output=True, text=True)
         if b.returncode != 0:
@@ -152,6 +206,13 @@ def check(toolchain: str) -> dict:
         if x.returncode != 0:
             row["error"] = row.get("error") or f"StmtCanon (Meta): {(x.stderr or x.stdout).strip()[-400:]}"
         row["meta_records"] = sorted(json.loads(l)["name"] for l in x.stdout.splitlines() if l.startswith("{"))
+        y = subprocess.run(["lake", "env", "lean", "--run", str(STMTCANON), "--import", "Ranges", "--module", "Ranges"],
+                           cwd=root, capture_output=True, text=True)
+        if y.returncode != 0:
+            row["error"] = row.get("error") or f"StmtCanon (Ranges): {(y.stderr or y.stdout).strip()[-400:]}"
+        rrecs = {r["name"]: r for r in map(json.loads, (l for l in y.stdout.splitlines() if l.startswith("{")))}
+        row["ranges"] = {n: (r["range"][0], r["range"][2]) if r.get("range") else None for n, r in rrecs.items()}
+        row["ranges_want"] = {**RANGES_WANT, **(RANGES_PUBLIC_WANT if mod else {})}
         (root / "files.txt").write_text(f"{root / 'Top.lean'}\n{root / 'Bad.lean'}\n")
         p = subprocess.run(["lake", "env", "lean", "--run", str(DEPS), str(root / "files.txt")],
                            cwd=root, capture_output=True, text=True)
@@ -190,6 +251,10 @@ def problems(row: dict) -> list[str]:
         r = row["module"]["uses_private"]
         if "_private.MProbe.0.mnd2._native.native_decide.ax_9" not in (r["axioms"] or []) or r["native"]:
             out.append(f"module crafted: axioms {r['axioms']}, native {r['native']}")
+    wrong = {n: (row.get("ranges") or {}).get(n) for n, want in (row.get("ranges_want") or {}).items()
+             if (row.get("ranges") or {}).get(n) != want}
+    if wrong:
+        out.append(f"ranges (start, end line): got {wrong}, want {[(n, row['ranges_want'][n]) for n in wrong]}")
     if set(row.get("meta_records") or []) != META_RECORDS:
         out.append(f"metaprogram helpers: records {row.get('meta_records')}, want {sorted(META_RECORDS)}")
     if "Probe" not in (row["deps_top"] or []) or not row["deps_bad_error"]:
