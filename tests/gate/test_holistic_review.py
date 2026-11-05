@@ -158,7 +158,7 @@ CASES = {
     "heartbeats-raise-on-added-helper": ("lf", rep((SPEC_STUB,
         HB + "theorem sum_pair (a b : Nat) : List.sum [a, b] = a + b := by simp\n\n"
         "theorem double_spec (x : Nat) : double x = 2 * x := by\n  unfold double\n  rw [sum_pair]\n  omega\n")),
-        "rejected", "G0"),
+        "accepted"),  # since 2026-11-05: a plain raise may go before an added theorem
     # CRLF: snapshots read sources with universal newlines, so the gate sees LF only (as Lean does).
     "crlf-heartbeats-raise": ("crlf", lambda t: t.replace(crlf(SPEC_STUB), crlf(HB + SPEC_VALID), 1), "accepted"),
     "crlf-proof-written-with-lf": ("crlf", lambda t: t.replace(crlf(SPEC_STUB), SPEC_VALID, 1), "accepted"),
@@ -237,7 +237,7 @@ CODEX_CASES = {
     # Codex 8: unlimited heartbeats spelled `00` inside the proof pass the `maxHeartbeats 0` ban.
     "heartbeats-00-in-proof": ("lf", rep((SPEC_STUB,
         "theorem double_spec (x : Nat) : double x = 2 * x := by\n  set_option maxHeartbeats 00 in\n"
-        "  unfold double\n  simp\n  omega\n")), "accepted"),
+        "  unfold double\n  simp\n  omega\n")), "rejected", "G0"),  # since 2026-11-05: banned
     # Codex 5: a multi-line string in a proof whose line reads as a declaration (not an honest shape).
     "multiline-string-in-proof": ("lf", rep((SPEC_STUB,
         "theorem double_spec (x : Nat) : double x = 2 * x := by\n  let _s := \"note:\n theorem imaginary : False := bad\n\"\n"

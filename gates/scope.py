@@ -20,7 +20,11 @@ BANNED = [
     (r"\bopaque\b", "opaque"), (r"@\[[^\]]*\bextern\b", "@[extern]"),
     (r"\bimplemented_by\b", "@[implemented_by]"), (r"\bcsimp\b", "@[csimp]"),
     (r"^\s*import\b|\bimport\s+[A-Z]", "import"), (r"\bdebug\.", "debug.* option"),
-    (r"\bmaxHeartbeats\s+0\b", "maxHeartbeats 0"), (r"\bunsafe\b", "unsafe"),
+    # Any value but a positive decimal: `0`, and also `00` and `0x0`, which passed `maxHeartbeats\s+0\b`
+    # (holistic review, Codex). Comments are stripped before the scan; a hex or binary limit is rejected
+    # too (fail closed: an honest raise is written in decimal).
+    (r"\bmaxHeartbeats\s+(?!0*[1-9][0-9]*(?![0-9A-Za-z_.']))", "maxHeartbeats 0"),
+    (r"\bunsafe\b", "unsafe"),
     (r"\baddDecl\b|\bskipKernelTC\b|\btrustCompiler\b|\bofReduce\w*", "kernel bypass"),
     (r"\brun_cmd\b|\brun_tac\b|\brun_elab\b|#eval\b", "metaprogram (run_cmd/run_tac/#eval)"),
 ]

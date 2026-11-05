@@ -115,9 +115,11 @@ def test_a_raise_before_a_theorem_that_is_not_broken_is_out_of_scope(env):
     g0_rejects(v, "triple_spec")
 
 
-def test_raising_heartbeats_before_an_added_helper_is_out_of_scope(env):
-    """Only directly before a repaired theorem (plan review 2026-11-04, amendment 3)."""
+def test_raising_heartbeats_before_an_added_helper_is_allowed(env):
+    """Out of scope until 2026-11-05 (plan review 2026-11-04, amendment 3: only directly before a
+    repaired theorem); the assurance pass found it rejected good repairs, so the plain line may now go
+    before an added theorem too (tests/gate/test_heartbeats_added.py has the rejected forms)."""
     rc, v = run(env, "heartbeats-helper",
                 edit_specs((SPEC_STUB, "set_option maxHeartbeats 400000 in\n" + HELPER + "\n" + SPEC_WITH_HELPER)))
-    g0_rejects(v, "changes text between declarations")
+    assert v["checks"]["G0"]["ok"], v["checks"]["G0"]["violations"]
 

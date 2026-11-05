@@ -98,9 +98,11 @@ Rules. They are checked mechanically afterwards, and any violation rejects the w
   separated from it by a blank line. Every helper must be used by the repaired proof.
 - Never use `sorry`, `admit`, `axiom`, `native_decide`, `opaque`, `@[extern]`, `@[implemented_by]`,
   `set_option debug.*`, `maxHeartbeats 0`, or metaprogramming (`run_tac`, `#eval`, ...).
-  You may raise the limit with `set_option maxHeartbeats N in` directly before the theorem
-  (it is reported to the reviewers). When you raise maxHeartbeats, change only the number; keep
-  any comment on that line as it is.
+  You may raise the limit with `set_option maxHeartbeats N in` (N a positive decimal number) on its
+  own line directly before the theorem, or before a helper you add (it is reported to the
+  reviewers). A line you add is exactly that, with no comment. When you raise an existing
+  maxHeartbeats line, change only the number; keep any comment on that line as it is. Put a helper
+  and its own raise before the theorem's raise, never between the theorem and its raise.
 - Do not edit any other file: not the extracted code (`Funs.lean`, `Types.lean`), the external
   models, the lakefile, the toolchain or the manifest.
 - If you conclude that the statement can no longer be proved as written, do not change it.

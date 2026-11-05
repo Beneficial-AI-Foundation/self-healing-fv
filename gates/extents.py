@@ -11,7 +11,8 @@ outside every range is gap text, and must not change:
 
 - Gaps compare byte for byte. The only allowed differences: blank lines where the candidate added a
   declaration, and a `set_option maxHeartbeats N in` line (N > 0) directly before a repaired theorem
-  (it lies outside the theorem's range).
+  or an added one (it lies outside the theorem's range). Before a repaired theorem only N may change
+  on an existing line; an added line is the plain one, with no comment.
 - Extents pair by the names of the records whose range is the extent. One the candidate removed or
   reordered is a violation. One that is not a repaired theorem's must be byte-identical.
 - An extent only the candidate has is an added declaration: its records must all be theorems, and its
@@ -43,7 +44,9 @@ WS = r"[ \t\r\n]"
 NOT_WS = r"[^ \t\r\n]"
 
 # `set_option maxHeartbeats N in`, optionally with a trailing line comment (group 2, kept verbatim).
-HEARTBEATS_LINE = re.compile(r"^([ \t]*set_option[ \t]+maxHeartbeats[ \t]+)(\d+)([ \t]+in)([ \t]*(?:--.*)?)$")
+# N is ASCII digits only (Python's `\d` also takes other scripts' digits); a hex or binary numeral is
+# not a heartbeats line, so it stays gap text and must match.
+HEARTBEATS_LINE = re.compile(r"^([ \t]*set_option[ \t]+maxHeartbeats[ \t]+)([0-9]+)([ \t]+in)([ \t]*(?:--.*)?)$")
 ATTR = re.compile(r"@\[(?:[^\[\]]|\[[^\[\]]*\])*\]" + WS + "*")
 MODS = re.compile(r"(?:" + MODIFIERS + r")" + WS + "+")
 DECL_KW = re.compile(r"(?:theorem|lemma|def|abbrev|instance|structure|class|inductive|coinductive|axiom|opaque|"
@@ -290,18 +293,37 @@ def check(path: str, k_text: str, c_text: str, k_records: dict[str, dict], c_rec
     # Gaps, in order. C's gap before kept extent i is the text since the previous kept extent, in
     # pieces around any added extents (cut out); more than one piece means declarations were added.
     kg = gaps(k_text, kx)
-    cg, pieces, pos = [], [], 0
+    cg, pieces, added, pos = [], [], [], 0
     for x in cx:
         pieces.append(c_text[pos:x["start"]])
         pos = x["end"]
         if x["key"] in kset:
-            cg.append(pieces)
-            pieces = []
-    cg.append(pieces + [c_text[pos:]])
+            cg.append((pieces, added))
+            pieces, added = [], []
+        else:
+            added.append(x["key"][0])
+    cg.append((pieces + [c_text[pos:]], added))
     raises = []
     kmap = {x["key"]: x for x in kx}
-    for i, (a, pcs) in enumerate(zip(kg, cg)):
+    for i, (a, (pcs, names)) in enumerate(zip(kg, cg)):
         nxt = kept[i]["key"] if i < len(kept) else None
+        # A raise directly before an added theorem (piece j precedes added theorem names[j]): allowed
+        # under the same rule as before a repaired theorem, the plain line with N > 0 (the assurance
+        # pass, 2026-11-05: a helper's own raise rejected every repair). It is taken out and reported
+        # against that theorem; any other form names the theorem it sits before.
+        pcs = list(pcs)
+        for j, name in enumerate(names):
+            lines, li, m = heartbeats_line(pcs[j])
+            if not m:
+                continue
+            n = int(m.group(2))
+            if n > 0 and not m.group(4).strip(LEAN_WS):
+                raises.append({"file": path, "decl": name, "maxHeartbeats": n})
+            else:
+                v(f"`{lines[li].strip()[:80]}` before the added theorem `{name}`: only the plain line "
+                  "`set_option maxHeartbeats N in` (N > 0, no comment) may be added there", decl=name)
+            del lines[li]
+            pcs[j] = "\n".join(lines)
         if nxt and any(n in repaired for n in nxt):
             # Only the text directly before the repaired theorem, not before an added declaration.
             a, last, hb = mask_heartbeats(a, pcs[-1])
@@ -315,6 +337,8 @@ def check(path: str, k_text: str, c_text: str, k_records: dict[str, dict], c_rec
         same = insertion_matches(a, pcs) if len(pcs) > 1 else a == b
         if not same:
             where = f"before `{nxt[0]}`" if nxt else "at the end of the file"
+            if names:
+                where += f" (where {', '.join(f'`{n}`' for n in names[:3])} {'was' if len(names) == 1 else 'were'} added)"
             v(f"changes text between declarations {where}: {first_difference(a, b)}", decl=nxt[0] if nxt else None)
     why: list[str] = []
     for x in kept:

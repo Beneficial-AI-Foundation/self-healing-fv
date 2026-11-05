@@ -69,10 +69,10 @@ def test_a_helper_between_the_docstring_and_the_theorem_is_rejected(env):
     assert vd == "rejected" and "G0" in failed, (vd, failed, msgs)
 
 
-def test_a_raise_before_an_added_helper_is_rejected(env):
-    """Prompt: a raise goes "directly before the theorem"; silent about helpers. A raise is allowed
-    only before a repaired theorem."""
+def test_a_raise_before_an_added_helper_is_accepted(env):
+    """Rejected until 2026-11-05 (a raise was allowed only before a repaired theorem); now the plain
+    line may go before an added theorem too (tests/gate/test_heartbeats_added.py)."""
     rc, v = run(env, "raise-helper",
                 edit_specs((STUB_DOC, "set_option maxHeartbeats 400000 in\n" + HELPER + "\n" + DOC + SPEC_WITH_HELPER)))
     vd, failed, msgs = verdict(v)
-    assert vd == "rejected" and "G0" in failed, (vd, failed, msgs)
+    assert vd == "accepted", (vd, failed, msgs)

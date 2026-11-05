@@ -121,9 +121,16 @@ def test_heartbeats_only_directly_before_the_repaired_theorem():
     c = K.replace("theorem b", "set_option maxHeartbeats 0 in\ntheorem b")
     viol, _, _ = run(c, recs(c, {"a": ("theorem a",), "b": ("theorem b",), "c": ("theorem c",)}))
     assert viol and "maxHeartbeats 0" in viol[0]["msg"]
+    # Before an added theorem (since 2026-11-05): the plain line is allowed and reported against it ...
     c = K.replace("-- note\n", "-- note\nset_option maxHeartbeats 400000 in\ntheorem h : True := trivial\n")
-    viol, _, _ = run(c, recs(c, {"a": ("theorem a",), "h": ("theorem h",), "b": ("theorem b",), "c": ("theorem c",)}))
-    assert viol  # before an added theorem: a gap change
+    viol, _, raises = run(c, recs(c, {"a": ("theorem a",), "h": ("theorem h",), "b": ("theorem b",), "c": ("theorem c",)}))
+    assert not viol and raises == [{"file": "M.lean", "decl": "h", "maxHeartbeats": 400000}]
+    # ... and anything else there is a violation that names it.
+    for line in ("set_option maxHeartbeats 0 in", "set_option maxHeartbeats 00 in", "set_option maxHeartbeats 0x0 in",
+                 "set_option maxHeartbeats 400000 in -- slow", "set_option maxRecDepth 4000 in"):
+        c = K.replace("-- note\n", f"-- note\n{line}\ntheorem h : True := trivial\n")
+        viol, _, _ = run(c, recs(c, {"a": ("theorem a",), "h": ("theorem h",), "b": ("theorem b",), "c": ("theorem c",)}))
+        assert viol and any("`h`" in x["msg"] for x in viol), (line, viol)
 
 
 def test_a_raise_may_change_n_but_not_its_comment():
