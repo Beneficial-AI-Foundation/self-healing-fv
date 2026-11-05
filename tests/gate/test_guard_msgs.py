@@ -91,6 +91,15 @@ def env(tmp_path_factory):
     return make(tmp_path_factory.mktemp("guards"))
 
 
+def test_the_whitespace_option_is_the_same_shape(tmp_path):
+    """libsignal-verify PR 51 writes `#guard_msgs (whitespace := lax) in`, with the list wrapped."""
+    lax = ("/-- info: 'uses_spec' depends on axioms:\n [propext,\n Quot.sound] -/\n"
+           "#guard_msgs (whitespace := lax) in\n#print axioms uses_spec\n")
+    e = make(tmp_path, specs_guard=lax)
+    assert ("Toy/Specs.lean", "uses_spec") in {(g["file"], g["printed"]) for g in e["K"]["guards"]["blanked"]}
+    assert e["K"]["modules"]["Toy.Specs"] == "observed", e["K"]["modules"]
+
+
 def test_the_stubbed_state_builds_with_its_stub_only_checks_blanked(env):
     k = env["K"]
     blanked = {(g["file"], g["printed"]) for g in k["guards"]["blanked"]}
@@ -127,7 +136,7 @@ def test_complete_acceptance_rejects_a_candidate_whose_check_still_fails(env):
     # Expects another declaration's output.
     ("another-name", check("uses_spec").replace("info: 'uses_spec'", "info: 'uses_two'")),
     # Not the one shape handled: options on the check.
-    ("other-shape", check("uses_spec").replace("#guard_msgs in", "#guard_msgs (whitespace := lax) in")),
+    ("other-shape", check("uses_spec").replace("#guard_msgs in", "#guard_msgs (drop info) in")),
 ])
 def test_a_check_that_differs_otherwise_is_not_blanked(tmp_path, label, specs_guard):
     e = make(tmp_path, specs_guard=specs_guard)
@@ -182,6 +191,19 @@ def msg(expected: list[str], actual: list[str]) -> str:
 def test_only_an_added_sorryax_counts(actual, ok):
     c, why = guards.sorry_only(SRC, LINE, msg(["info: 'M.t' depends on axioms: [propext, Quot.sound]"], actual))
     assert (c is not None) == ok, why
+
+
+def test_whitespace_inside_a_quoted_name_is_kept():
+    """Codex's review (2026-11-05): `«a b»` and `«a  b»` are different axioms; collapsing whitespace
+    everywhere made a replaced axiom read as "only `sorryAx` added"."""
+    src = SRC.replace("[propext, Quot.sound]", "[«a b»]")
+    c, why = guards.sorry_only(src, LINE, msg([], ["info: 'M.t' depends on axioms: [«a  b», sorryAx]"]))
+    assert c is None, why
+    c, why = guards.sorry_only(src, LINE, msg([], ["info: 'M.t' depends on axioms: [«a b»,", "  sorryAx]"]))
+    assert c is not None, why
+    src = SRC.replace("[propext, Quot.sound]", "[«a,b»]")  # a comma inside a quoted name is not a separator
+    assert guards.sorry_only(src, LINE, msg([], ["info: 'M.t' depends on axioms: [«a,b», sorryAx]"]))[0] is not None
+    assert guards.sorry_only(src, LINE, msg([], ["info: 'M.t' depends on axioms: [«a», «b», sorryAx]"]))[0] is None
 
 
 def test_the_other_forms_of_the_message():

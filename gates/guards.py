@@ -30,7 +30,10 @@ import re
 from .extents import comment_end
 
 HEADER = "Docstring on `#guard_msgs` does not match generated message:"
-GUARD_LINE = re.compile(r"^#guard_msgs[ \t]+in[ \t]*$")
+# `#guard_msgs in`, or with the whitespace option only (`(whitespace := lax)`, libsignal-verify writes it;
+# it changes how whitespace is compared, which `sorry_only` ignores anyway). Any other option (a message
+# filter such as `drop info`, `ordering`) is not this shape.
+GUARD_LINE = re.compile(r"^#guard_msgs(?:[ \t]*\([ \t]*whitespace[ \t]*:=[ \t]*(?:exact|normalized|lax)[ \t]*\))?[ \t]+in[ \t]*$")
 PRINT_LINE = re.compile(r"^#print[ \t]+axioms[ \t]+(\S+)[ \t]*$")
 # One message of `#print axioms`, whitespace collapsed (Lean wraps long lists).
 AXIOMS_MSG = re.compile(r"^info: '(.+)' (?:depends on axioms: \[([^\[\]]*)\]|does not depend on any axioms)$")
@@ -51,12 +54,38 @@ def actual_output(msg: str) -> str | None:
     return rest.strip("\n")
 
 
+def collapse(text: str) -> str | None:
+    """`text` with each run of Lean whitespace outside `«…»` made one space (Lean wraps long lists), and
+    the text inside `«…»` kept byte for byte: `«a b»` and `«a  b»` are different names (Codex review,
+    2026-11-05). Commas inside `«…»` become a mark no name has, so splitting on `,` is safe. None if a
+    `«` is not closed."""
+    out, i, n = [], 0, len(text)
+    while i < n:
+        c = text[i]
+        if c == "«":
+            j = text.find("»", i)
+            if j == -1:
+                return None
+            out.append(text[i:j + 1].replace(",", "\0"))
+            i = j + 1
+        elif c in " \t\r\n":
+            while i < n and text[i] in " \t\r\n":
+                i += 1
+            out.append(" ")
+        else:
+            out.append(c)
+            i += 1
+    return "".join(out).strip(" ")
+
+
 def parse_axioms(text: str) -> tuple[str, list[str]] | None:
     """(printed name, axioms in Lean's order) of exactly one `#print axioms` message, or None."""
-    m = AXIOMS_MSG.match(" ".join(text.split()))
+    t = collapse(text)
+    m = AXIOMS_MSG.match(t) if t is not None else None
     if not m:
         return None
-    return m.group(1), [a.strip() for a in m.group(2).split(",")] if m.group(2) and m.group(2).strip() else []
+    axioms = [a.strip(" ").replace("\0", ",") for a in m.group(2).split(",")] if m.group(2) and m.group(2).strip() else []
+    return m.group(1).replace("\0", ","), axioms
 
 
 def check_at(src: str, line: int) -> dict | None:
