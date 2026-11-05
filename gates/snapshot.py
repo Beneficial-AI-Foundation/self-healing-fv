@@ -26,11 +26,16 @@ import tempfile
 import time
 from pathlib import Path
 
-from . import kernel, leandecls, patch, proc, version
+from . import guards, kernel, leandecls, patch, proc, version
 
 STMTCANON = Path(__file__).resolve().parent / "StmtCanon.lean"
 DIAG_RE = re.compile(r"^(error|warning): (?:\./)?(\S+?\.lean)(?::(\d+):(\d+))?: ?(.*)$")
 FAILED_RE = re.compile(r"^✖ \[\d+/\d+\] (?:Building|Compiling|Running) (\S+)")
+# Lines Lake writes itself, which end a multi-line message: another diagnostic, a job line, a trace,
+# its summary. (A message's own lines, e.g. `info: 'X' depends on axioms: …`, carry no file position.)
+# (`info:` without a position is not Lake's: `#guard_msgs` without its diff prints Lean's messages so.)
+LAKE_LINE = re.compile(r"^(?:info: (?:\./)?\S+\.lean:\d+:\d+:|(?:error|warning|trace): |[✔✖⚠ℹ] \[\d+/\d+\]|"
+                       r"Some required targets|Build completed)")
 
 
 def src_dirs(cfg: dict) -> dict[str, str]:
@@ -183,25 +188,84 @@ def run_build(tree: Path, cfg: dict, log: Path | None, dirs: dict[str, str] | No
     out, rc = p.stdout + p.stderr + ("\nTIMEOUT" if p.timed_out else ""), p.returncode
     if log:
         log.write_text(out)
-    errors, failed = [], set()
+    errors, failed, cur = [], set(), None
     for line in out.splitlines():
         m = DIAG_RE.match(line)
         if m and m.group(1) == "error":
-            errors.append({"file": m.group(2), "line": int(m.group(3) or 0), "msg": m.group(5)[:500]})
+            cur = {"file": m.group(2), "line": int(m.group(3) or 0), "msg": m.group(5)[:500], "full": m.group(5)}
+            errors.append(cur)
             failed.add(module_of(m.group(2), dirs))
+        elif cur is not None and not LAKE_LINE.match(line):
+            cur["full"] += "\n" + line  # a multi-line message (`#guard_msgs` prints its diff; gates/guards.py)
+        else:
+            cur = None
         m = FAILED_RE.match(line)
         if m:
             failed.add(m.group(1))
     seen, uniq = set(), []
     for e in errors:  # Lake repeats each error in its final summary
+        e["full"] = e["full"].rstrip("\n")[:20000]
         k = (e["file"], e["line"], e["msg"])
         if k not in seen:
             seen.add(k); uniq.append(e)
-    return {"ok": rc == 0, "returncode": rc, "seconds": round(time.time() - t0), "errors": uniq[:200],
+    return {"ok": rc == 0, "returncode": rc, "seconds": round(time.time() - t0), "errors": uniq[:200], "errors_n": len(uniq),
             "failed_modules": sorted(failed), "timeout": rc == -1, "tail": "" if rc == 0 else out[-3000:]}
 
 
-IMPORT_CONFLICT_RE = re.compile(r"import .* failed, environment already contains|environment already contains")
+GUARD_ROUNDS = 3  # importers of a blanked module build only once it does, and may have checks of their own
+
+
+def blankable(tree: Path, build: dict, dirs: dict[str, str], audited: list[str], done: dict) -> dict[str, list[dict]]:
+    """{file: its checks} for each audited module, not yet blanked, that failed with errors that are
+    all `#guard_msgs` checks differing only by `sorryAx` (gates/guards.py), decided from the module's
+    source in `tree` (the original, never the blanked copy) and Lean's messages. Nothing if the error
+    list was cut short: an error not seen could be a real one."""
+    if build.get("errors_n", 0) > len(build.get("errors", [])):
+        return {}
+    out = {}
+    for m in sorted(set(build["failed_modules"]) & set(audited)):
+        f = module_file(m, dirs)
+        if f in done:
+            continue
+        errs = [e for e in build["errors"] if module_of(e["file"], dirs) == m]
+        src = (tree / f).read_text() if (tree / f).is_file() else None
+        if not errs or src is None:
+            continue
+        found = [guards.sorry_only(src, e["line"], e.get("full", e["msg"]))[0] for e in errs]
+        if all(found):
+            out[f] = [{**c, "file": f, "module": m, "line": e["line"]} for c, e in zip(found, errs)]
+    return out
+
+
+def guard_rebuild(ws: Path, project: str, cfg: dict, build: dict, dirs: dict[str, str], audited: list[str],
+                  log: Path | None) -> tuple[dict, Path | None, list[dict]]:
+    """Issue #37, part 2 (DESIGN.md §4.5): when modules fail only by `#guard_msgs` checks whose
+    output gains `sorryAx` (a stub they rest on), build a copy-on-write copy of the workspace, build
+    output included so only those modules and their importers rebuild, with exactly those checks
+    blanked (gates/guards.py). (the build of the copy, the copy or None, the blanked checks). The
+    caller fingerprints the copy, keeps the original's sources and build, and removes the copy;
+    compare decides whether each blanked check is explained by stubs."""
+    done: dict[str, list[dict]] = {}
+    shadow = None
+    for _ in range(GUARD_ROUNDS):
+        new = blankable(ws / project, build, dirs, audited, done)
+        if not new:
+            break
+        done.update(new)
+        if shadow is None:
+            shadow = Path(tempfile.mkdtemp(prefix=".gate-guards-", dir=ws.parent)) / ws.name
+            r = subprocess.run([*CP_COW, str(ws), str(shadow)], capture_output=True)
+            if r.returncode != 0:
+                shutil.copytree(ws, shadow, symlinks=True)
+        for f, cs in new.items():
+            (shadow / project / f).write_text(guards.blank((ws / project / f).read_text(), cs))
+        build = run_build(shadow / project, cfg, log.with_name(log.stem + ".guards" + log.suffix) if log else None, dirs)
+    checks = [{k: c[k] for k in ("module", "file", "line", "target", "printed", "axioms", "expected")}
+              for cs in done.values() for c in cs]
+    return build, shadow, checks
+
+
+IMPORT_CONFLICT_RE =re.compile(r"import .* failed, environment already contains|environment already contains")
 
 
 def _stmtcanon_batch(tree: Path, cfg: dict, modules: list[str]) -> proc.Result:
@@ -382,6 +446,7 @@ def snapshot(cfg: dict, tree: Path, *, clean: bool = False, apply_diff: Path | N
         tree = workdir
     result["tree"] = str(tree)
     result["workspace_project"] = workspace_project(cfg)
+    ws = tree  # the workspace (Lake project at ws / workspace_project)
     tree = tree / workspace_project(cfg)  # from here on, `tree` is the Lake project
     result["absent_roots"] = []
     imports = lean_imports(tree, cfg)  # Lean's header parser, once for the whole snapshot
@@ -398,6 +463,28 @@ def snapshot(cfg: dict, tree: Path, *, clean: bool = False, apply_diff: Path | N
     mods = project_modules(tree, cfg, dirs, imports)
     extracted = {module_of(p, dirs) for p in cfg["protected"]["extracted"]}
     audited = sorted(m for m in mods if m not in extracted)
+    # `#guard_msgs` checks that fail only by `sorryAx` (gates/guards.py): the modules are built and
+    # fingerprinted from a copy with exactly those checks blanked; `build` above stays what Lake said
+    # of the tree as it is, and `guards` lists every blanked check for compare to explain (or not).
+    shadow = None
+    if not build["ok"]:
+        build, shadow, blanked = guard_rebuild(ws, workspace_project(cfg), cfg, build, dirs, audited, log)
+        if blanked:
+            result["guards"] = {"blanked": blanked, "build": {k: build.get(k) for k in
+                                                             ("ok", "returncode", "seconds", "failed_modules", "errors")}}
+    built_tree = shadow / workspace_project(cfg) if shadow is not None else tree
+    try:
+        return _fingerprint(result, cfg, tree, built_tree, build, mods, extracted, audited, dirs,
+                            changed_paths if apply_diff is not None else None, t0)
+    finally:
+        if shadow is not None:
+            shutil.rmtree(shadow.parent, ignore_errors=True)
+
+
+def _fingerprint(result: dict, cfg: dict, tree: Path, built_tree: Path, build: dict, mods: dict, extracted: set,
+                 audited: list[str], dirs: dict[str, str], changed_paths: list[str] | None, t0: float) -> dict:
+    """The module statuses, records and kernel replay from `built_tree` (the tree, or its copy with
+    blanked checks), and the sources from `tree` itself."""
     failed = set(build["failed_modules"]) & set(mods)
     importers: dict[str, set[str]] = {}
     for m, imps in mods.items():
@@ -416,17 +503,17 @@ def snapshot(cfg: dict, tree: Path, *, clean: bool = False, apply_diff: Path | N
     result["modules"] = status
     result["extracted_modules"] = sorted(extracted & set(mods))
     observed = [m for m in audited if status[m] == "observed"]
-    records, info = stmtcanon(tree, cfg, observed) if observed else ({}, {"ok": True, "records": 0})
+    records, info = stmtcanon(built_tree, cfg, observed) if observed else ({}, {"ok": True, "records": 0})
     result["stmtcanon"] = info
     result["records"] = records
     result["sources"] = {module_file(m, dirs): (tree / module_file(m, dirs)).read_text() for m in audited}
-    if apply_diff is not None:
+    if changed_paths is not None:
         # G5: kernel replay of the modules the diff changed (the rest is rebuilt from unchanged
         # sources). Needs every changed module built: a green build, or (component acceptance, §4.3)
         # one that fails only elsewhere; whether that is allowed is compare's G3, not this.
         replay_mods = sorted({module_of(p, dirs) for p in changed_paths if p.endswith(".lean")} & set(mods))
         built = build["ok"] or (not unknown and all(status.get(m) == "observed" for m in replay_mods))
-        result["kernel_replay"] = kernel.replay(tree, replay_mods, cfg) if built else \
+        result["kernel_replay"] = kernel.replay(built_tree, replay_mods, cfg) if built else \
             {"ran": False, "error": "a module the diff changed did not build", "modules": {}}
         result["kernel_replay"]["required_modules"] = replay_mods
     result["seconds"] = round(time.time() - t0)

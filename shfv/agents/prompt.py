@@ -103,6 +103,8 @@ Rules. They are checked mechanically afterwards, and any violation rejects the w
   reviewers). A line you add is exactly that, with no comment. When you raise an existing
   maxHeartbeats line, change only the number; keep any comment on that line as it is. Put a helper
   and its own raise before the theorem's raise, never between the theorem and its raise.
+- A `#guard_msgs` check on `#print axioms` whose output differs only by an added `sorryAx` waits
+  on theorems that are still stubbed; leave it as it is (the gate re-checks it).
 - Do not edit any other file: not the extracted code (`Funs.lean`, `Types.lean`), the external
   models, the lakefile, the toolchain or the manifest.
 - If you conclude that the statement can no longer be proved as written, do not change it.
