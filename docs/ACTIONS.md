@@ -85,9 +85,9 @@ gh workflow run live.yml -R Beneficial-AI-Foundation/self-healing-fv -f agent=fa
 
 [`.github/workflows/pr-repair.yml`](../.github/workflows/pr-repair.yml) is the reusable workflow a target repo calls on its own PRs (DESIGN.md §9). Unlike `live.yml`, the run belongs to the target: its token, its `ANTHROPIC_API_KEY` secret, its caches and its artifacts. It is not running anywhere yet.
 
-**When it runs:** when the target's Lean workflow or its extraction workflow completes on a PR's head (`workflow_run` on both: either may finish last, and the run after the last one sees both results), and on manual dispatch with a PR number. Every PR, no label. A new run for the same PR cancels the running one.
+**When it runs:** when the target's Lean workflow or its extraction workflow completes on a PR's head (`workflow_run` on both: either may finish last, and the run after the last one sees both results), and on manual dispatch with a PR number. The caller's `if` lets through only a failed (or timed-out) Lean run and a passed extraction run, so the trigger is visible in the target repo; `select` then checks both on the head. Every PR, no label. A new run for the same PR cancels the running one; the caller's concurrency is job-level, so a run its `if` skips cancels nothing.
 
-**Push and pull_request runs both count.** A target whose checks run on `push` and on `pull_request` (libsignal-verify, SPQR) runs each check twice on a PR's head, and either run may finish last. The caller must act on both: `workflow_run.pull_requests` names the PR for a push to its branch too. A caller that acts only on `pull_request` completions does nothing when a push run finishes last, and its skipped run still cancels the running one through `concurrency` (seen in the fork smoke test, 2026-11-02).
+**Push and pull_request runs both count.** A target whose checks run on `push` and on `pull_request` (libsignal-verify, SPQR) runs each check twice on a PR's head, and either run may finish last. The caller must act on both: `workflow_run.pull_requests` names the PR for a push to its branch too. A caller that acts only on `pull_request` completions does nothing when a push run finishes last, and its skipped run still cancelled the running one through workflow-level `concurrency` (seen in the fork smoke test, 2026-11-02); the caller below sets it on the job.
 
 **Whether a PR qualifies** (`shfv live-select --pr`, `select_pr` in `shfv/live.py`). All of these, else the run ends in about a minute, the reason goes into its summary and its `decisions-…` artifact, and **nothing is posted on the PR**:
 
@@ -132,9 +132,6 @@ on:
   workflow_dispatch:
     inputs:
       pr: {description: "PR number", required: true}
-concurrency:
-  group: self-heal-${{ github.event.workflow_run.pull_requests[0].number || inputs.pr }}
-  cancel-in-progress: true
 permissions:
   contents: read
   pull-requests: write
@@ -142,7 +139,18 @@ permissions:
   actions: read
 jobs:
   self-heal:
-    if: vars.SELF_HEAL != 'off' && (github.event_name == 'workflow_dispatch' || github.event.workflow_run.pull_requests[0].number)
+    # Only a failed (or timed-out) Lean build, or a passed extraction (it may finish after the Lean
+    # build), on a PR; or a manual dispatch. The select job then checks both on the PR's head.
+    if: >-
+      vars.SELF_HEAL != 'off' && (github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.pull_requests[0].number &&
+      ((github.event.workflow_run.name == 'Lean Verification' &&
+      (github.event.workflow_run.conclusion == 'failure' || github.event.workflow_run.conclusion == 'timed_out')) ||
+      (github.event.workflow_run.name == 'Aeneas extraction' && github.event.workflow_run.conclusion == 'success'))))
+    # Job-level, so a run whose job the `if` skips does not cancel a running repair.
+    concurrency:
+      group: self-heal-${{ github.event.workflow_run.pull_requests[0].number || inputs.pr }}
+      cancel-in-progress: true
     uses: Beneficial-AI-Foundation/self-healing-fv/.github/workflows/pr-repair.yml@<commit sha>
     with:
       target: spqr
@@ -154,7 +162,7 @@ jobs:
 
 `workflow_run` fires only from the workflow file on the default branch, so it acts once merged. A public repo can call only a public reusable workflow, so this repo must be public first; a private copy of a target in the org can call it now, if this repo's Settings → Actions → General → Access allows repositories in the organization, with a `SHFV_TOKEN` secret that can read this repo (for the checkouts).
 
-**Telemetry:** `shfv collect --repo <owner/name> --target <target>` reads the caller's runs through the API and appends one row per run to `data/live/<target>.jsonl`: the decision (skips too), and for a run that repaired, verdict, outcomes, cost, time and versions. It flags runs that crashed (no decisions, or picked with no report) and `gate-unavailable`, and names a failed run's outcome. A run whose job the caller's `if` skipped (a check completed with no PR, or `SELF_HEAL=off`) gets a row saying so, unflagged. It needs a token even for a public repo, since artifact downloads require one: `GH_TOKEN=$(gh auth token) uv run shfv collect …`.
+**Telemetry:** `shfv collect --repo <owner/name> --target <target>` reads the caller's runs through the API and appends one row per run to `data/live/<target>.jsonl`: the decision (skips too), and for a run that repaired, verdict, outcomes, cost, time and versions. It flags runs that crashed (no decisions, or picked with no report) and `gate-unavailable`, and names a failed run's outcome. A run whose job the caller's `if` skipped (a check completed with no PR, a Lean run that did not fail, an extraction run that did not pass, or `SELF_HEAL=off`) gets a row saying so, unflagged. It needs a token even for a public repo, since artifact downloads require one: `GH_TOKEN=$(gh auth token) uv run shfv collect …`.
 - **The bot's patches are kept.** The artifacts expire after 90 days, and the main shadow-mode question is whether the bot's fix matched what the human merged. So each run's `repair.patch` is saved as `data/live/<target>/patches/<pr>-<head8>-<run id>.patch`. The row records `patch_path` and `patch_sha256`, and has what that comparison needs: target, PR, its head and base (`pr_head`, `base_commit`, `base_tip`), and every theorem with its outcome.
 - **No row without its patch.** A run whose report has a repair but whose artifact has no matching `repair.patch` stops the collection.
 - **Never rewritten.** Collecting again adds only new runs, and never rewrites a patch file.
