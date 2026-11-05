@@ -166,6 +166,12 @@ jobs:
 
 For the pilot, collection is manual: run it weekly (at the latest every 90 days, before artifacts expire) and commit `data/live/`.
 
+## Lean setup
+
+The job installs elan with no toolchain, then after the clone installs the toolchains in their own step, **Install the Lean toolchain**: the change commit's `lean-toolchain` (or `leanprover/lean4:stable` if it has none), which becomes elan's default, and the base commit's if it differs. Each download gets 3 attempts, 15 s and then 30 s apart ([`.github/scripts/install_toolchain.sh`](../.github/scripts/install_toolchain.sh)), and the step ends with `lake --version`. A download that still fails stops the job in that step, with elan's full output, instead of on first use in a later step. Before, a failed download only showed up in Doctor as `✗ lake: … could not canonicalize path '…/.elan/toolchains'`. A replay's fix commit is still installed on first use if its toolchain differs from the change commit's.
+
+Then **Doctor** runs `shfv doctor` (CLI.md section 1). A failed check prints the last 20 lines of the command's stderr (its stdout if stderr is empty) under the ✗ line.
+
 ## What a run produces
 
 - **Job summary** (the run's page): the runner (cores, memory, disk), resource use per pipeline stage, any OOM kills, disk use at the end, and `report.md`.
