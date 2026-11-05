@@ -13,7 +13,8 @@ and flags each route by which the answer could be reached:
                 `lean_run_code`, in an edit, or in a command; Lean code runs at build time
 
 Outside paths that cannot hold the answer (the attempt's own run folder, Lean toolchain sources,
-/tmp scratch, system paths) are counted, not flagged. `lean_run_code` calls are counted too and
+/tmp scratch, system paths, and the tool output Claude Code saved for this attempt's own session) are
+counted, not flagged. `lean_run_code` calls are counted too and
 flagged only when their code does IO. This is a textual scan: it sees what the agent asked for, not
 files a tool opened by itself (Lean imports, `lake`).
 """
@@ -25,7 +26,7 @@ import re
 import shlex
 from pathlib import Path
 
-VERSION = 1
+VERSION = 2  # 2: the own session's saved tool output is not flagged
 
 NETWORK = re.compile(r"\b(curl|wget|gh|nc|ssh|scp|rsync|ftp|aria2c)\b|https?://|\bgit\s+(clone|fetch|pull|ls-remote|remote)\b"
                      r"|\b(pip|pip3|npm|npx|cargo)\s+(install|add|fetch)\b|\blake\s+(update|exe\s+cache)\b")
@@ -39,6 +40,7 @@ DENIED = re.compile(r"haven't granted|requires approval|permission|not allowed|d
 TOOLCHAIN = (".elan", ".cache", ".local/share/uv", ".rustup", ".cargo")
 TMP = ("/tmp", "/private/tmp", "/var/folders", "/private/var/folders")
 FLAG_ROUTES = ("outside-read", "history", "network", "lean-io")
+SESSION_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]{7,}$")  # Claude Code's session ids are UUIDs
 
 
 def within(p: str, root: str | None) -> bool:
@@ -50,8 +52,12 @@ class Scope:
 
     def __init__(self, workspace: Path, context: Path | None, cwd: Path | None = None,
                  runs_root: Path | None = None, repo: Path | None = None, bot_repo: Path | None = None,
-                 home: Path | None = None):
+                 home: Path | None = None, session: str | None = None):
         n = lambda p: os.path.normpath(str(p)) if p else None
+        # The attempt's own Claude Code session (the transcript's init event): a tool output too large
+        # for the context is saved under ~/.claude/projects/<cwd slug>/<session>/tool-results/, and the
+        # agent reads it back. It holds only what this session's own tools returned.
+        self.session = session if session and SESSION_ID.match(session) else None
         self.workspace, self.context = n(workspace), n(context)
         self.cwd = n(cwd or workspace)
         self.run_dir = n(Path(self.workspace).parent)        # <work>/<case>/run-<id>/
@@ -72,6 +78,10 @@ class Scope:
             rel = p[len(self.home) + 1:]
             if rel.startswith(TOOLCHAIN):
                 return "toolchain"
+            parts = rel.split("/")
+            if (self.session and len(parts) >= 5 and parts[:2] == [".claude", "projects"]
+                    and parts[3] == self.session and parts[4] == "tool-results"):
+                return "own-session-output"
             if rel.startswith((".claude", ".codex")):
                 return "agent-history"
             return "home"
@@ -80,7 +90,7 @@ class Scope:
         return "system"
 
 
-HARMLESS = {"own-run-folder", "toolchain", "tmp", "system"}  # cannot hold the human fix
+HARMLESS = {"own-run-folder", "own-session-output", "toolchain", "tmp", "system"}  # cannot hold the human fix
 
 
 def resolve(token: str, cwd: str, home: str) -> str:
@@ -145,10 +155,11 @@ def unwrap(command: str) -> str:
     return command
 
 
-def tool_calls(transcript: Path) -> tuple[list[dict], str | None]:
+def tool_calls(transcript: Path) -> tuple[list[dict], str | None, str | None]:
     """Normalize both harnesses' transcripts to tool calls: {tool, command | paths | code, result,
-    output}. Returns (calls, the session's working directory if the transcript records it)."""
-    calls, pending, cwd = [], {}, None
+    output}. Returns (calls, the session's working directory, its Claude Code session id), the last
+    two if the transcript records them (Claude Code's init event; the first one's session id)."""
+    calls, pending, cwd, session = [], {}, None, None
     for line in transcript.open(errors="replace"):
         try:
             e = json.loads(line)
@@ -159,6 +170,7 @@ def tool_calls(transcript: Path) -> tuple[list[dict], str | None]:
         t = e.get("type")
         if t == "system" and e.get("subtype") == "init":
             cwd = e.get("cwd")
+            session = session or (e.get("session_id") if isinstance(e.get("session_id"), str) else None)
         elif t in ("assistant", "user"):  # Claude Code stream-json
             content = (e.get("message") or {}).get("content")
             for part in content if isinstance(content, list) else []:
@@ -192,7 +204,7 @@ def tool_calls(transcript: Path) -> tuple[list[dict], str | None]:
                               "result": "failed" if it.get("error") else "ok"})
             elif kind == "web_search":
                 calls.append({"tool": "web_search", "network": json.dumps(it)[:300], "result": "ok"})
-    return calls, cwd
+    return calls, cwd, session
 
 
 def mcp_paths(args: dict) -> list[str]:
@@ -263,8 +275,8 @@ def check_call(c: dict, scope: Scope) -> list[dict]:
 
 
 def scan_attempt(transcript: Path, scope_for: callable) -> tuple[list[dict], int]:
-    calls, cwd = tool_calls(transcript)
-    scope = scope_for(cwd)
+    calls, cwd, session = tool_calls(transcript)
+    scope = scope_for(cwd, session)
     return [e for c in calls for e in check_call(c, scope)], len(calls)
 
 
@@ -278,8 +290,8 @@ def scan_run(attempts: list[tuple[str, Path | None]], diffs: dict[str, str], wor
     """The `tripwire` field of report.json: every attempt's transcript and every edit.
 
     attempts: (label, transcript path); diffs: label → diff text (the attempts' edits)."""
-    def scope_for(cwd: str | None) -> Scope:
-        return Scope(workspace, context, Path(cwd) if cwd else None, runs_root, repo, bot_repo)
+    def scope_for(cwd: str | None, session: str | None = None) -> Scope:
+        return Scope(workspace, context, Path(cwd) if cwd else None, runs_root, repo, bot_repo, session=session)
 
     events, n_calls, missing = [], 0, []
     for label, t in attempts:
@@ -347,7 +359,7 @@ def infer_workspace(attempt_dirs: list[Path]) -> tuple[Path | None, Path | None]
             return ctx.parent / "candidate", ctx
     for d in attempt_dirs:
         if (d / "transcript.jsonl").exists():
-            _, cwd = tool_calls(d / "transcript.jsonl")
+            _, cwd, _ = tool_calls(d / "transcript.jsonl")
             if cwd and "candidate" in Path(cwd).parts:
                 parts = Path(cwd).parts
                 ws = Path(*parts[:parts.index("candidate") + 1])
