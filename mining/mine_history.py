@@ -234,7 +234,12 @@ BOUNDARY_RE = re.compile(
     r"^(@\[|set_option\b|namespace\b|end\b|section\b|noncomputable section|open\b|variable\b|"
     r"attribute\b|#|universe\b|mutual\b|import\b|"
     # Lean module system (e.g. SPQR after #651): `module`, `public section`, `public import`.
-    r"module\b|(?:public |private )(?:noncomputable )?section\b|(?:public |private |meta )+import\b)"
+    r"module\b|(?:public |private )(?:noncomputable )?section\b|(?:public |private |meta )+import\b|"
+    # The other commands the gate's parser ends a declaration at (gates/leandecls.BOUNDARY_RE; kept in
+    # sync by tests/test_replay_breaks.py). Without `omit`/`include`, stubbing a proof deleted the next
+    # lemma's `omit … in` line (libsignal-verify PR 51, SharedHops.lean; the assurance pass).
+    r"local\b|scoped\b|notation\b|infix|prefix|postfix|macro|syntax\b|elab|run_cmd\b|deriving\b|export\b|"
+    r"omit\b|include\b)"
 )
 SECTION_RE = re.compile(r"^(?:@\[[^\]]*\]\s*)*(?:public |private )?(?:noncomputable )?section\b")
 OPEN = "([{⦃⟨"

@@ -5,6 +5,9 @@ of the toy project: what it stubs and how it names each break (issue #37).
   where the proof was.
 - An error in an `example` is the example's, not the declaration above it (before: escalated as that
   `def`, "definition no longer type-checks").
+- Stubbing keeps the next declaration's `omit … in` / `include … in` lines (before: the replay's
+  parser read them as the end of the stubbed proof and deleted them, and the gate found the stubbed
+  state was not the head plus stubs).
 """
 from __future__ import annotations
 
@@ -75,3 +78,32 @@ def test_an_error_in_an_example_is_the_examples(analysis):
     assert not any(e["decl"] == "constRuntime" for e in res["statement_errors"]), res["statement_errors"]
     assert "constRuntime" not in " ".join(res["definition_broken"])
     assert "exact (rfl : 3 = 3 | 4)" in text  # an example is never stubbed
+
+
+def test_stubbing_keeps_omit_and_include_lines(analysis):
+    res, text = analysis
+    assert set(res["broken_proofs"]) >= {"Toy/Specs.lean::parse_broken", "Toy/Specs.lean::tactic_broken"}
+    expected = (BROKEN.replace("  have h : x = x := by\n    exact (rfl : x = x | 4)\n  simp\n", "").replace(
+        "theorem parse_broken (x : Nat) : x + 0 = x := by\n", "theorem parse_broken (x : Nat) : x + 0 = x := by sorry\n")
+        .replace("theorem tactic_broken (x : Nat) : x + 1 = x + 1 + 0 := by\n  exact Nat.lt_irrefl x\n",
+                 "theorem tactic_broken (x : Nat) : x + 1 = x + 1 + 0 := by sorry\n"))
+    assert text == expected
+
+
+def test_omit_and_include_end_a_declaration_in_the_replay_parser():
+    src = "theorem a : True := by\n  trivial\n\nomit [Inhabited α] in\ntheorem b : True := trivial\n"
+    d = parse_decls(src)
+    assert d["a"]["end_line"] == 2
+    assert sorry_out(src, d, {"a"}) == "theorem a : True := by sorry\n\nomit [Inhabited α] in\ntheorem b : True := trivial\n"
+
+
+@pytest.mark.parametrize("line", ["omit [Inhabited α] in", "include h in", "local notation \"x\" => 1",
+                                  "scoped instance : Inhabited Nat := ⟨0⟩", "notation \"y\" => 2", "infixl:65 \" +' \" => Nat.add",
+                                  "prefix:max \"√\" => Nat.sqrt", "macro \"t\" : tactic => `(tactic| rfl)",
+                                  "syntax \"u\" : term", "elab \"v\" : term => pure default", "run_cmd pure ()",
+                                  "deriving instance Repr for Foo", "export Nat (succ)", "public section", "attribute [simp] a",
+                                  "#check Nat", "set_option pp.all true", "open Nat in", "end Foo", "universe u"])
+def test_the_replay_parser_ends_a_declaration_where_the_gates_does(line):
+    from gates.leandecls import BOUNDARY_RE as GATE
+    from mining.mine_history import BOUNDARY_RE as REPLAY
+    assert bool(GATE.match(line)) == bool(REPLAY.match(line)) == True, line
