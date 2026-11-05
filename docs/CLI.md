@@ -164,7 +164,9 @@ Per theorem, the outcome is one of:
 | `repaired` | Accepted by the gate. The Repaired table says whether the sweep (no model) or the agent made the repair. |
 | `passed-checks` | Every gate check that ran passed, but the kernel replay (G5) did not run, so it is not accepted. |
 | `statement-must-change` | The statement no longer type-checks. A person who owns the spec must decide the new statement. The report shows the Lean error, the statement, and how the extracted function it uses changed. |
-| `proof-hard` | No accepted repair within the budget. The reason is given: the agent gave up, a cap was reached, the file did not build, or the gate rejected the candidate and which checks failed. |
+| `proof-hard` | No accepted repair within the budget. The reason is given: the agent gave up, a cap was reached, or the file did not build. |
+| `gate-rejected` | The agent repaired it, but the gate rejected the candidate. The reason quotes the gate's violation and says whether it was about this repair or about the candidate as a whole (one bad repair rejects all). |
+| `example-fails` | (An escalation.) An `example` whose proof fails. The bot repairs named theorems only. |
 | `blocked-on` | Waits on another theorem that must be fixed first. |
 | `infrastructure-failure` | The agent or build environment failed before saying anything about the theorem. |
 | `gate-unavailable` | The gate could not decide (see section 6). Nothing is accepted, and nothing is held against the repair. |

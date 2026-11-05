@@ -80,7 +80,7 @@ def mostly_in(files: list[str]) -> str:
 
 
 KIND = {"statement-must-change": "statement no longer type-checks", "added-by-pr": "added by this PR; its proof fails",
-        "extraction-setup": "extracted code does not build"}
+        "extraction-setup": "extracted code does not build", "example-fails": "an `example`'s proof fails"}
 
 
 def human_items(r: dict) -> list[dict]:

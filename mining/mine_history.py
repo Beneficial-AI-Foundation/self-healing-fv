@@ -224,7 +224,9 @@ MODIFIERS = r"(?:private|public|protected|meta|noncomputable|partial|unsafe|nonr
 DECL_RE = re.compile(
     r"^[ \t]*(?:@\[[^\]]*\][ \t]*)*"
     rf"(?:{MODIFIERS}[ \t]+)*"
-    r"(theorem|lemma|def|abbrev|instance|axiom|opaque|structure|inductive|class)\b[ \t]*"
+    # `example` too (issue #37): without it an example's proof was read as the end of the declaration
+    # above it, and an error there escalated that declaration (a `def`) instead of the example.
+    r"(theorem|lemma|def|abbrev|instance|axiom|opaque|structure|inductive|class|example)\b[ \t]*"
     r"([^\s:({\[⦃]*)"
 )
 # Lines that end the previous declaration even though they are not declarations.
@@ -232,7 +234,12 @@ BOUNDARY_RE = re.compile(
     r"^(@\[|set_option\b|namespace\b|end\b|section\b|noncomputable section|open\b|variable\b|"
     r"attribute\b|#|universe\b|mutual\b|import\b|"
     # Lean module system (e.g. SPQR after #651): `module`, `public section`, `public import`.
-    r"module\b|(?:public |private )(?:noncomputable )?section\b|(?:public |private |meta )+import\b)"
+    r"module\b|(?:public |private )(?:noncomputable )?section\b|(?:public |private |meta )+import\b|"
+    # The other commands the gate's parser ends a declaration at (gates/leandecls.BOUNDARY_RE; kept in
+    # sync by tests/test_replay_breaks.py). Without `omit`/`include`, stubbing a proof deleted the next
+    # lemma's `omit … in` line (libsignal-verify PR 51, SharedHops.lean; the assurance pass).
+    r"local\b|scoped\b|notation\b|infix|prefix|postfix|macro|syntax\b|elab|run_cmd\b|deriving\b|export\b|"
+    r"omit\b|include\b)"
 )
 SECTION_RE = re.compile(r"^(?:@\[[^\]]*\]\s*)*(?:public |private )?(?:noncomputable )?section\b")
 OPEN = "([{⦃⟨"
@@ -330,7 +337,9 @@ def parse_decls(src: str | None) -> dict[str, dict]:
         stmt, body = split_statement(text)
         header, statement = split_header(norm(stmt))
         name = cur["name"]
-        if not name:  # name wrapped onto the next line, e.g. long Aeneas-generated names
+        if cur["kind"] == "example":  # unnamed: keyed by its statement, which is stable across edits
+            name = f"<example>{statement[len('example'):].strip()[:80]}"
+        elif not name:  # name wrapped onto the next line, e.g. long Aeneas-generated names
             m = re.match(rf"(?:{MODIFIERS} )*\w+ ([^\s:({{\[⦃]+)", statement)
             name = m.group(1) if m and cur["kind"] != "instance" else f"<{cur['kind']}>:{statement[:80]}"
         key = name

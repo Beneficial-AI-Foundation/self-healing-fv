@@ -98,6 +98,7 @@ Each entry of `repairs` has `theorem` (fully qualified), `file`, `decl` (name as
 - `repaired_by`: `"sweep"` when the sweep produced the repair;
 - `reason`: why it was not repaired (free text);
 - `blocked_by`: for `blocked-on`, the theorems it waits for;
+- `parse_error`: true when the broken proof does not parse (Lean stops reading it at a syntax error);
 - `prebuild_ok`: whether the file built after the last attempt;
 - `bot_diff`: live only, the bot's edit of the proof as the head has it (in replay it is in `human_fix`).
 
@@ -105,12 +106,13 @@ Each entry of `repairs` has `theorem` (fully qualified), `file`, `decl` (name as
 |---|---|
 | `repaired` | Accepted by the gate |
 | `passed-checks` | Every gate check that ran passed, but G5 did not run: not accepted |
-| `proof-hard` | No accepted repair within the budget, or the gate rejected the candidate (`reason` names the failing checks) |
+| `proof-hard` | No accepted repair within the budget |
+| `gate-rejected` | The agent repaired it, but the gate rejected the candidate; `reason` quotes the gate's violation, and says whether it was about this repair or about the candidate as a whole (§4.3: one bad repair rejects all) |
 | `blocked-on` | Depends on a theorem that is still broken; or sits in a module that cannot be built until escalated statements are fixed (`blocked_by` names them); or the case is ineligible (`reason` says which) |
 | `infrastructure-failure` | The agent or the environment failed before saying anything about the theorem |
 | `gate-unavailable` | The gate could not decide. Nothing is accepted, and nothing is held against the repair. |
 
-Each entry of `escalations` has `theorem`, `file`, `line`, `outcome` (`statement-must-change`; live also `extraction-setup`, when the extracted code itself does not build at the head: then `theorem` is the file's name and only `errors` follows, and `added-by-pr`, a theorem the PR added whose proof fails: it has no version before the PR, so the bot does not repair it; its stub stays, and nothing that uses it is accepted), `errors` (Lean's messages), `statement` (as it stands), `definition` (when a definition body no longer type-checks, else null), `extraction_change` (a list of `{name, before, after}` signatures of extracted functions named in the errors) and `rename_only` (always null for now).
+Each entry of `escalations` has `theorem`, `file`, `line`, `outcome` (`statement-must-change`; `example-fails`, an `example` whose proof fails, which the bot does not repair (`parse_error` when the proof does not parse); live also `extraction-setup`, when the extracted code itself does not build at the head: then `theorem` is the file's name and only `errors` follows, and `added-by-pr`, a theorem the PR added whose proof fails: it has no version before the PR, so the bot does not repair it; its stub stays, and nothing that uses it is accepted), `errors` (Lean's messages), `statement` (as it stands), `definition` (when a definition body no longer type-checks, else null), `extraction_change` (a list of `{name, before, after}` signatures of extracted functions named in the errors) and `rename_only` (always null for now).
 
 Each attempt object has `adapter`, `model`, `resolved_model`, `stop` (`done`, `gave-up`, `max-turns`, `budget`, `timeout` or `error`), `tokens`, `tokens_complete`, `cost_usd`, `cost_status`, `reported_cost_usd`, `turns`, `seconds`, `final_message`, `diagnosis`, `transcript`, `error`. `turns` is in the adapter's own unit (`agent.turns_unit`), so it is not comparable across adapters.
 

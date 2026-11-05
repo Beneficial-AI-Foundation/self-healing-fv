@@ -163,6 +163,16 @@ def broken_deps(broken: list[dict], base_records: dict) -> dict[str, set[str]]:
     return {b["name"]: (set(base_records.get(b["name"], {}).get("uses", [])) & names) - {b["name"]} for b in broken}
 
 
+def private_twin(name: str, module: str | None, records: dict, frozen: dict) -> str:
+    """A copy of gates/compare.private_twin (the pipeline never imports the gate's logic, §4.8)."""
+    if name in records or not module:
+        return name
+    prefix = f"_private.{module}.0."
+    twin = name[len(prefix):] if name.startswith(prefix) else prefix + name
+    r = records.get(twin)
+    return twin if r is not None and r.get("module") == module and twin not in frozen else name
+
+
 def leaves_first(broken: list[dict], base_records: dict) -> list[dict]:
     """Order broken theorems so that each comes after the broken theorems it uses (§3.3 S4)."""
     deps = broken_deps(broken, base_records)
@@ -347,7 +357,9 @@ class Run:
             key = f"{b['file']}::{b['key']}"
             src = (cand / b["file"]).read_text()
             entry = {"theorem": b["name"], "file": b["file"], "decl": b["key"],
-                     "line": (decl_text(src, b["key"]) or {}).get("line"), "attempts": []}
+                     "line": (decl_text(src, b["key"]) or {}).get("line"), "attempts": [],
+                     # The proof does not parse on the new toolchain (issue #37): said so in the report.
+                     **({"parse_error": True} if details.get(key, {}).get("parse_error") else {})}
             report["repairs"].append(entry)
             failed_deps = sorted(d for d in deps.get(b["name"], ()) if d not in repaired)
             if failed_deps:
@@ -807,6 +819,9 @@ class Run:
             else:
                 frozen = {n: r for n, r in Bj["records"].items() if "error" not in r
                           and not (r.get("written") is False and n not in Kj["records"])}
+                # The gate's `private_twin` (gates/compare.py, §11 q26): a record Lean 4.31 made private
+                # is the same declaration under `_private.<Mod>.0.`, frozen under K's name.
+                frozen = {private_twin(n, r.get("module"), Kj["records"], frozen): r for n, r in frozen.items()}
             observed = sum(1 for n in frozen if n in Kj["records"] and "error" not in Kj["records"][n])
             missing_frozen = sorted(n for n in frozen if n not in Kj["records"] or "error" in Kj["records"][n])
             stmt_broken = []
@@ -860,6 +875,15 @@ class Run:
                                               "definition": s.get("definition"),
                                               "errors": s["errors"], "rename_only": None,  # TODO(§3.3 S2)
                                               "extraction_change": self.extraction_change(s["errors"])})
+            examples: dict[tuple, list[dict]] = {}
+            for e in self.replay.get("example_errors", []):
+                examples.setdefault((e["file"], e["decl"]), []).append(e)
+            for (f, _), errs in examples.items():
+                # Issue #37: an error in an `example` is the example's, not the declaration above it.
+                line = min(e["line"] for e in errs)
+                report["escalations"].append({"theorem": f"example at {f}:{line}", "file": f, "line": line,
+                                              "outcome": "example-fails", "errors": [e["msg"] for e in errs],
+                                              **({"parse_error": True} if any(e.get("parse_error") for e in errs) else {})})
             if stmt_broken:
                 self.p.step(f"escalate: {', '.join(s['key'] for s in stmt_broken)} → statement-must-change "
                             "(the bot never changes a statement)")
@@ -1035,24 +1059,43 @@ class Run:
         v = verdict.get("verdict")
         failed = verdict.get("failed_checks", [])
         status = {t["name"]: t.get("status") for t in verdict.get("theorems", [])}
+        own = {t["name"]: t.get("failed_checks") or [] for t in verdict.get("theorems", [])}
+        viols = [x for c in (verdict.get("checks") or {}).values() for x in c.get("violations") or []]
+
+        def gate_reason(name: str) -> str:
+            """Why the gate rejected the candidate, from its own violations: this theorem's first, else the
+            candidate's (the gate judges it as a whole, §4.3). The agent's repair may be fine on its own."""
+            mine = [x for x in viols if x.get("decl") in (name, short(name))]
+            x = (mine or viols or [{}])[0]
+            what = f"{x.get('check', '?')}: " + (f"`{short(x['decl'])}`: " if x.get("decl") and not mine else "") + \
+                (x.get("msg") or "")
+            return (("the gate rejected this repair" if mine or own.get(name) else
+                     "the gate rejected the candidate as a whole, not for this repair")
+                    + (f" ({what[:300]})" if x else f" ({', '.join(failed)})" if failed else ""))
+
         for e in report["repairs"]:
             if e.get("outcome") != "candidate":
                 continue
             if v == "accepted" or v == "partially-accepted" and status.get(e["theorem"]) == "accepted":
                 e["outcome"] = "repaired"
             elif v == "partially-accepted":  # defensive: the gate accepts a candidate as a whole
-                e["outcome"] = "proof-hard"
-                e["reason"] = f"not accepted by the gate ({status.get(e['theorem']) or 'no verdict for it'})"
+                undecided = status.get(e["theorem"]) in ("undecided", None)
+                e["outcome"] = "gate-unavailable" if undecided else "gate-rejected"
+                e["reason"] = (f"not decided by the gate ({status.get(e['theorem']) or 'no verdict for it'})" if undecided
+                               else gate_reason(e["theorem"]))
             elif v == "passed-without-kernel-replay":
                 e["outcome"] = "passed-checks"
                 e["reason"] = "every gate check that ran passed; not accepted until the kernel replay (G5) runs"
             elif v == "gate-unavailable":
                 e["outcome"] = "gate-unavailable"
                 e["reason"] = "; ".join(verdict.get("unavailable", []))[:500] or "the gate could not decide"
+            elif failed:
+                # Not `proof-hard` (the assurance pass): the agent produced a proof; the gate refused it.
+                e["outcome"] = "gate-rejected"
+                e["reason"] = gate_reason(e["theorem"])
             else:
                 e["outcome"] = "proof-hard"
-                e["reason"] = f"candidate rejected by the gate ({', '.join(failed)})" if failed else \
-                    "case not accepted (complete-case acceptance)"
+                e["reason"] = "case not accepted (complete-case acceptance)"
 
     @staticmethod
     def close_open_outcomes(report: dict) -> None:

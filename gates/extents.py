@@ -11,7 +11,8 @@ outside every range is gap text, and must not change:
 
 - Gaps compare byte for byte. The only allowed differences: blank lines where the candidate added a
   declaration, and a `set_option maxHeartbeats N in` line (N > 0) directly before a repaired theorem
-  (it lies outside the theorem's range).
+  or an added one (it lies outside the theorem's range). Before a repaired theorem only N may change
+  on an existing line; an added line is the plain one, with no comment.
 - Extents pair by the names of the records whose range is the extent. One the candidate removed or
   reordered is a violation. One that is not a repaired theorem's must be byte-identical.
 - An extent only the candidate has is an added declaration: its records must all be theorems, and its
@@ -22,13 +23,15 @@ of it; ranges that coincide (several theorems from one macro call) are one exten
 names; each member of a `mutual` block is its own extent, and `mutual`/`end` are gap text.
 
 Fail closed: a touched module without ranges, a range outside its file, one that does not start at a
-declaration (after its docstring, attributes and modifiers: a declaration keyword, or a token, which
-is a macro call; an added one must be `theorem`/`lemma`, and any other must match K's text), or two
-ranges that partly overlap make the gate unable to decide. This runs next to the
+declaration (after its docstring, attributes, modifiers and any comments between them: a declaration
+keyword, or a token, which is a macro call; an added one must be `theorem`/`lemma`, and any other must
+match K's text; or a constructor's `|`, only strictly inside its `inductive`), or two ranges that
+partly overlap make the gate unable to decide. This runs next to the
 textual G0 (`scope.check`), which stays; it is stricter, never a replacement.
 """
 from __future__ import annotations
 
+import difflib
 import re
 
 from .leandecls import MODIFIERS
@@ -42,8 +45,9 @@ WS = r"[ \t\r\n]"
 NOT_WS = r"[^ \t\r\n]"
 
 # `set_option maxHeartbeats N in`, optionally with a trailing line comment (group 2, kept verbatim).
-HEARTBEATS_LINE = re.compile(r"^([ \t]*set_option[ \t]+maxHeartbeats[ \t]+)(\d+)([ \t]+in)([ \t]*(?:--.*)?)$")
-DOC = re.compile(r"/--.*?-/" + WS + "*", re.S)
+# N is ASCII digits only (Python's `\d` also takes other scripts' digits); a hex or binary numeral is
+# not a heartbeats line, so it stays gap text and must match.
+HEARTBEATS_LINE = re.compile(r"^([ \t]*set_option[ \t]+maxHeartbeats[ \t]+)([0-9]+)([ \t]+in)([ \t]*(?:--.*)?)$")
 ATTR = re.compile(r"@\[(?:[^\[\]]|\[[^\[\]]*\])*\]" + WS + "*")
 MODS = re.compile(r"(?:" + MODIFIERS + r")" + WS + "+")
 DECL_KW = re.compile(r"(?:theorem|lemma|def|abbrev|instance|structure|class|inductive|coinductive|axiom|opaque|"
@@ -61,14 +65,46 @@ def offsets(text: str) -> list[int]:
     return out
 
 
+def comment_end(t: str, i: int) -> int | None:
+    """End of the comment that starts at `t[i]`, as Lean's lexer reads it: a `--` line comment runs
+    to the end of its line; a block comment (`/-`, docstrings `/--` included) nests and ends at its
+    matching `-/`. None if no comment starts there, or it is unterminated."""
+    if t.startswith("--", i):
+        j = t.find("\n", i)
+        return len(t) if j == -1 else j + 1
+    if not t.startswith("/-", i):
+        return None
+    depth, j = 0, i
+    while j < len(t):
+        if t.startswith("/-", j):
+            depth += 1
+            j += 2
+        elif t.startswith("-/", j):
+            depth -= 1
+            j += 2
+            if depth == 0:
+                return j
+        else:
+            j += 1
+    return None
+
+
 def head(text: str) -> str:
-    """The text of a declaration command after its docstring, attributes and modifiers."""
-    t = text
+    """The text of a declaration command after its docstring, attributes and modifiers, and any
+    comments between them (the assurance pass, 2026-11-05: dalek writes `@[externally_verified,
+    progress] -- …` on its own line before `theorem`). A comment only counts after one of those
+    (a range never starts at a plain comment); docstrings and block comments nest, as in Lean. Display
+    and matching only: the comments stay inside the extent, which G0 compares byte for byte."""
+    t, seen = text, False
     while True:
-        m = DOC.match(t) or ATTR.match(t) or MODS.match(t)
-        if not m:
+        m = ATTR.match(t) or MODS.match(t)
+        if m:
+            t, seen = t[m.end():], True
+            continue
+        e = comment_end(t, 0) if (t.startswith("/--") or seen) else None
+        if e is None:
             return t
-        t = t[m.end():]
+        t, seen = t[e:].lstrip(LEAN_WS), True
 
 
 def extents(text: str, records: dict[str, dict]) -> tuple[list[dict], list[str]]:
@@ -94,15 +130,25 @@ def extents(text: str, records: dict[str, dict]) -> tuple[list[dict], list[str]]
             continue
         s, e = starts[sl - 1] + sc, starts[el - 1] + ec
         h = head(text[s:e])
-        if text[s] in LEAN_WS or not (DECL_KW.match(h) or TOKEN.match(h)):
-            # (`.strip()` below only formats the message)
-            problems.append(f"`{n}`: its range does not start at a declaration (line {sl}: {lines[sl - 1].strip()[:60]!r})")
+        where = f"line {sl}: {lines[sl - 1].strip()[:60]!r}"  # (`.strip()` only formats the message)
+        # A constructor's range starts at its `|`, or at its docstring before the `|` (issue #37).
+        ctor = r.get("kind") == "constructor" and h.startswith("|")
+        if text[s] in LEAN_WS or not (ctor or DECL_KW.match(h) or TOKEN.match(h)):
+            problems.append(f"`{n}`: its range does not start at a declaration ({where})")
             continue
-        spans.append((s, e, n))
+        spans.append((s, e, n, ctor, where))
     out: list[dict] = []
-    for s, e, n in sorted(spans, key=lambda x: (x[0], -x[1], x[2])):
+    for s, e, n, ctor, where in sorted(spans, key=lambda x: (x[0], -x[1], x[2])):
         cur = out[-1] if out else None
-        if cur and s >= cur["start"] and e <= cur["end"]:  # nested (a `where` helper, a field) or equal
+        inside = bool(cur) and s >= cur["start"] and e <= cur["end"] and (s, e) != (cur["start"], cur["end"])
+        if ctor:
+            # Part of its inductive, as a structure's field is, and only there: strictly inside an
+            # extent keyed by an `inductive` record. The inductive's text is then compared as a whole.
+            if not (inside and any(records[x].get("kind") == "inductive" for x in cur["key"])):
+                problems.append(f"`{n}`: a constructor's range that is not inside its `inductive` ({where})")
+                continue
+            cur["names"].append(n)
+        elif cur and s >= cur["start"] and e <= cur["end"]:  # nested (a `where` helper, a field) or equal
             cur["names"].append(n)
             if (s, e) == (cur["start"], cur["end"]):
                 cur["key"].append(n)
@@ -202,11 +248,22 @@ def repaired_head(k_extent: str) -> str | None:
 
 
 def first_difference(a: str, b: str) -> str:
+    """The first change from `a` to `b`, by line, in words (display only). Lines are shown as written,
+    trailing spaces included (a trailing space read `'' → ''` before); a removed or added line says so
+    and names its neighbour (a removed blank line before `end` read `'' → 'end …'`)."""
     al, bl = a.split("\n"), b.split("\n")
-    for x, y in zip(al, bl):
-        if x != y:
-            return f"{x.strip()[:80]!r} → {y.strip()[:80]!r}"  # display only
-    return f"{len(al)} → {len(bl)} lines"
+    show = lambda s: "a blank line" if not s.strip(LEAN_WS) else repr(s[:80])
+    for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(a=al, b=bl, autojunk=False).get_opcodes():
+        if tag == "equal":
+            continue
+        nxt = next((x for x in al[i2:] if x.strip(LEAN_WS)), None)  # the next line with text
+        where = f" before {show(nxt)}" if nxt is not None else " at the end"
+        if tag == "delete":
+            return f"removes {show(al[i1])}" + (f" (+{i2 - i1 - 1} more lines)" if i2 - i1 > 1 else "") + where
+        if tag == "insert":
+            return f"adds {show(bl[j1])}" + (f" (+{j2 - j1 - 1} more lines)" if j2 - j1 > 1 else "") + where
+        return f"{show(al[i1])} → {show(bl[j1])}"
+    return "no line differs"
 
 
 def check(path: str, k_text: str, c_text: str, k_records: dict[str, dict], c_records: dict[str, dict],
@@ -248,18 +305,37 @@ def check(path: str, k_text: str, c_text: str, k_records: dict[str, dict], c_rec
     # Gaps, in order. C's gap before kept extent i is the text since the previous kept extent, in
     # pieces around any added extents (cut out); more than one piece means declarations were added.
     kg = gaps(k_text, kx)
-    cg, pieces, pos = [], [], 0
+    cg, pieces, added, pos = [], [], [], 0
     for x in cx:
         pieces.append(c_text[pos:x["start"]])
         pos = x["end"]
         if x["key"] in kset:
-            cg.append(pieces)
-            pieces = []
-    cg.append(pieces + [c_text[pos:]])
+            cg.append((pieces, added))
+            pieces, added = [], []
+        else:
+            added.append(x["key"][0])
+    cg.append((pieces + [c_text[pos:]], added))
     raises = []
     kmap = {x["key"]: x for x in kx}
-    for i, (a, pcs) in enumerate(zip(kg, cg)):
+    for i, (a, (pcs, names)) in enumerate(zip(kg, cg)):
         nxt = kept[i]["key"] if i < len(kept) else None
+        # A raise directly before an added theorem (piece j precedes added theorem names[j]): allowed
+        # under the same rule as before a repaired theorem, the plain line with N > 0 (the assurance
+        # pass, 2026-11-05: a helper's own raise rejected every repair). It is taken out and reported
+        # against that theorem; any other form names the theorem it sits before.
+        pcs = list(pcs)
+        for j, name in enumerate(names):
+            lines, li, m = heartbeats_line(pcs[j])
+            if not m:
+                continue
+            n = int(m.group(2))
+            if n > 0 and not m.group(4).strip(LEAN_WS):
+                raises.append({"file": path, "decl": name, "maxHeartbeats": n})
+            else:
+                v(f"`{lines[li].strip()[:80]}` before the added theorem `{name}`: only the plain line "
+                  "`set_option maxHeartbeats N in` (N > 0, no comment) may be added there", decl=name)
+            del lines[li]
+            pcs[j] = "\n".join(lines)
         if nxt and any(n in repaired for n in nxt):
             # Only the text directly before the repaired theorem, not before an added declaration.
             a, last, hb = mask_heartbeats(a, pcs[-1])
@@ -273,6 +349,8 @@ def check(path: str, k_text: str, c_text: str, k_records: dict[str, dict], c_rec
         same = insertion_matches(a, pcs) if len(pcs) > 1 else a == b
         if not same:
             where = f"before `{nxt[0]}`" if nxt else "at the end of the file"
+            if names:
+                where += f" (where {', '.join(f'`{n}`' for n in names[:3])} {'was' if len(names) == 1 else 'were'} added)"
             v(f"changes text between declarations {where}: {first_difference(a, b)}", decl=nxt[0] if nxt else None)
     why: list[str] = []
     for x in kept:

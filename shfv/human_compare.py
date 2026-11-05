@@ -21,7 +21,7 @@ from . import report as report_mod
 from .modpaths import is_module_file
 
 # Rows of the §8.3 confusion matrix, in display order.
-BOT_GROUPS = ["repaired by the agent", "repaired by the sweep", "statement-must-change", "proof-hard",
+BOT_GROUPS = ["repaired by the agent", "repaired by the sweep", "statement-must-change", "proof-hard", "gate-rejected",
               "blocked-on", "passed-checks", "infrastructure-failure", "gate-unavailable"]
 HUMAN_GROUPS = ["kept the statement", "changed the statement", "removed or commented out", "definition (not labeled)",
                 "no human fix"]
