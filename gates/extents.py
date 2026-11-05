@@ -22,9 +22,10 @@ of it; ranges that coincide (several theorems from one macro call) are one exten
 names; each member of a `mutual` block is its own extent, and `mutual`/`end` are gap text.
 
 Fail closed: a touched module without ranges, a range outside its file, one that does not start at a
-declaration (after its docstring, attributes and modifiers: a declaration keyword, or a token, which
-is a macro call; an added one must be `theorem`/`lemma`, and any other must match K's text), or two
-ranges that partly overlap make the gate unable to decide. This runs next to the
+declaration (after its docstring, attributes and modifiers: a declaration
+keyword, or a token, which is a macro call; an added one must be `theorem`/`lemma`, and any other must
+match K's text; or a constructor's `|`, only strictly inside its `inductive`), or two ranges that
+partly overlap make the gate unable to decide. This runs next to the
 textual G0 (`scope.check`), which stays; it is stricter, never a replacement.
 """
 from __future__ import annotations
@@ -94,15 +95,25 @@ def extents(text: str, records: dict[str, dict]) -> tuple[list[dict], list[str]]
             continue
         s, e = starts[sl - 1] + sc, starts[el - 1] + ec
         h = head(text[s:e])
-        if text[s] in LEAN_WS or not (DECL_KW.match(h) or TOKEN.match(h)):
-            # (`.strip()` below only formats the message)
-            problems.append(f"`{n}`: its range does not start at a declaration (line {sl}: {lines[sl - 1].strip()[:60]!r})")
+        where = f"line {sl}: {lines[sl - 1].strip()[:60]!r}"  # (`.strip()` only formats the message)
+        # A constructor's range starts at its `|`, or at its docstring before the `|` (issue #37).
+        ctor = r.get("kind") == "constructor" and h.startswith("|")
+        if text[s] in LEAN_WS or not (ctor or DECL_KW.match(h) or TOKEN.match(h)):
+            problems.append(f"`{n}`: its range does not start at a declaration ({where})")
             continue
-        spans.append((s, e, n))
+        spans.append((s, e, n, ctor, where))
     out: list[dict] = []
-    for s, e, n in sorted(spans, key=lambda x: (x[0], -x[1], x[2])):
+    for s, e, n, ctor, where in sorted(spans, key=lambda x: (x[0], -x[1], x[2])):
         cur = out[-1] if out else None
-        if cur and s >= cur["start"] and e <= cur["end"]:  # nested (a `where` helper, a field) or equal
+        inside = bool(cur) and s >= cur["start"] and e <= cur["end"] and (s, e) != (cur["start"], cur["end"])
+        if ctor:
+            # Part of its inductive, as a structure's field is, and only there: strictly inside an
+            # extent keyed by an `inductive` record. The inductive's text is then compared as a whole.
+            if not (inside and any(records[x].get("kind") == "inductive" for x in cur["key"])):
+                problems.append(f"`{n}`: a constructor's range that is not inside its `inductive` ({where})")
+                continue
+            cur["names"].append(n)
+        elif cur and s >= cur["start"] and e <= cur["end"]:  # nested (a `where` helper, a field) or equal
             cur["names"].append(n)
             if (s, e) == (cur["start"], cur["end"]):
                 cur["key"].append(n)
