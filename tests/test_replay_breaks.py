@@ -107,3 +107,22 @@ def test_the_replay_parser_ends_a_declaration_where_the_gates_does(line):
     from gates.leandecls import BOUNDARY_RE as GATE
     from mining.mine_history import BOUNDARY_RE as REPLAY
     assert bool(GATE.match(line)) == bool(REPLAY.match(line)) == True, line
+
+
+# libsignal-verify PR 51's messages (Lean 4.35, from the run's report): sorryAx added, wrapped lists.
+PR51_FIXTURE = ("❌️ Docstring on `#guard_msgs` does not match generated message:\n\n"
+                "- info: 'Protocols.PQXDH.alwaysPanic_fails' depends on axioms:\n-  [propext,\n"
+                "+ info: 'Protocols.PQXDH.alwaysPanic_fails' depends on axioms: [propext,\n+  sorryAx,\n"
+                "   Classical.choice,\n   Quot.sound,\n   curve.PrivateKey.calculate_signature]")
+PR51_SPECS = ("❌️ Docstring on `#guard_msgs` does not match generated message:\n\n"
+              "- info: 'Protocols.Realization.rustRuntime_coherent' depends on axioms:\n-  [propext,\n-  Classical.choice,\n"
+              "-  Quot.sound]\n+ info: 'Protocols.Realization.rustRuntime_coherent' depends on axioms: [propext, sorryAx, "
+              "Classical.choice, Quot.sound]")
+
+
+def test_a_guard_that_gained_only_sorryax_is_not_an_error_outside_declarations():
+    from replay.replay_case import guard_sorry_only
+    assert guard_sorry_only(PR51_FIXTURE) and guard_sorry_only(PR51_SPECS)
+    assert not guard_sorry_only(PR51_SPECS.replace("sorryAx, ", "sorryAx, Lean.ofReduceBool, "))  # a real axiom too
+    assert not guard_sorry_only(PR51_SPECS.replace("-  Classical.choice,\n", ""))  # the docstring lacks one
+    assert not guard_sorry_only("unsolved goals")

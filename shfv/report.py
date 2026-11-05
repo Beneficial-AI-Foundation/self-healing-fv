@@ -9,6 +9,7 @@ Model-written text is quoted, truncated and neutralized (no @-mentions, no live 
 from __future__ import annotations
 
 import json
+import os
 import re
 from pathlib import Path
 
@@ -161,6 +162,17 @@ def gate_table(r: dict, g: dict) -> list[str]:
             elif unavailable:
                 mark, text = "⚪", text + " (no violation found, but not decided: the gate was unavailable)"
         lines.append(f"| {cid} {name} | {mark} | {text} |")
+    # Every `#guard_msgs` check a snapshot built blanked, and why (gates/guards.py, DESIGN.md §4.5).
+    for side, label in (("broken", "the stubbed broken state"), ("candidate", "the candidate")):
+        gs = (g.get("guards") or {}).get(side) or []
+        if gs:
+            bad = [x for x in gs if not x.get("explained")]
+            items = "; ".join(f"`{os.path.basename(x['file'])}:{x['line']}` (`{short_name(x['printed'])}`, rests on "
+                              + (", ".join(f"`{short_name(n)}`" for n in x.get("rests_on", [])[:3]) or "nothing shown")
+                              + ("" if x.get("explained") else ", **not only stubs**") + ")" for x in gs[:5])
+            lines.append(f"| `#guard_msgs` | {'❌' if bad else '✅'} | {len(gs)} check(s) on `#print axioms` in {label} "
+                         f"failed only by an added `sorryAx` and were built blanked: {items}"
+                         + (f" (+{len(gs) - 5} more)" if len(gs) > 5 else "") + " |")
     return lines
 
 

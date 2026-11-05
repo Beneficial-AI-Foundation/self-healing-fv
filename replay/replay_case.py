@@ -355,6 +355,27 @@ def parse_diags(out: str) -> list[dict]:
     return unique
 
 
+GUARD_HEADER = "Docstring on `#guard_msgs` does not match generated message:"
+
+
+def guard_sorry_only(msg: str) -> bool:
+    """Routing only (issue #37): does this `#guard_msgs` mismatch look like a `#print axioms` check
+    whose output gained `sorryAx` and nothing else (a proof it rests on is stubbed)? Such a check is a
+    consequence of the stubs, not an error outside declarations. The gate decides for itself, from the
+    source and Lean's message (gates/guards.py); this copy never decides an acceptance."""
+    first, _, rest = msg.partition("\n")
+    if GUARD_HEADER not in first:
+        return False
+    norm = lambda xs: [a.strip() for a in " ".join(xs).replace("does not depend on any axioms", "depends on axioms:")
+                       .replace("[", ",").replace("]", ",").split(",") if a.strip()]
+    lines = [x for x in rest.split("\n") if x.strip()]
+    if not lines or not all(x[:2] in ("- ", "+ ", "  ") for x in lines):
+        return False  # not a diff: leave it to the gate
+    exp = norm([x[2:] for x in lines if x[:1] in "- "])
+    act = norm([x[2:] for x in lines if x[:1] in "+ "])
+    return "sorryAx" not in exp and act.count("sorryAx") == 1 and sorted(a for a in act if a != "sorryAx") == sorted(exp)
+
+
 def classify_msg(msg: str) -> str:
     first = msg.split("\n", 1)[0].lower()
     for key, pat in [
@@ -542,6 +563,7 @@ def analyze_broken(broken: Path, project: Path, cfg: dict, miner: Miner, logdir:
     rounds, sorried, stmt_errors, file_errors, cascades, header_errors = [], {}, [], [], [], []
     def_errors: list[dict] = []
     example_errors: list[dict] = []  # `example`s whose proof fails: never stubbed, escalated
+    guard_errors: list[dict] = []  # `#guard_msgs` axiom checks that gained only `sorryAx` (the stubs)
     extraction_errors, external_overlaid, setup_failed, unparsed = [], [], False, False
     timeouts = []  # hung files: which declaration hangs is unknown, so all their proofs are sorried
     for rnd in range(1, MAX_ROUNDS + 1):
@@ -619,6 +641,11 @@ def analyze_broken(broken: Path, project: Path, cfg: dict, miner: Miner, logdir:
                 if short in pending or any(n.endswith("." + short) for n in pending):
                     cascades.append({"file": e["file"], "line": e["line"], "msg": e["msg"][:300], "round": rnd})
                     continue
+            if guard_sorry_only(e["msg"]):
+                # A `#print axioms` check that gained only `sorryAx`: a consequence of the stubs, which
+                # the gate re-checks (gates/guards.py), not an error outside declarations (issue #37).
+                guard_errors.append({"file": e["file"], "line": e["line"], "msg": e["msg"][:600], "round": rnd})
+                continue
             decls, src_text = decls_of(e["file"])
             name, where = locate(e, decls, src_text)
             entry = {"file": e["file"], "line": e["line"], "decl": name, "where": where,
@@ -665,7 +692,8 @@ def analyze_broken(broken: Path, project: Path, cfg: dict, miner: Miner, logdir:
     # hung file. The gate's head reference needs all of them (`gate compare --stubs`, DESIGN.md §4.9).
     stubbed = set(sorried) | {f"{t['file']}::{n}" for t in timeouts for n in t["sorried"]}
     sorried = {k: v for k, v in sorried.items() if k not in stmt_broken}
-    failing_modules = {mod_of.get(e["file"], e["file"]) for e in stmt_errors + file_errors + header_errors + example_errors}
+    failing_modules = {mod_of.get(e["file"], e["file"]) for e in
+                       stmt_errors + file_errors + header_errors + example_errors + guard_errors}
     blocked = blocked_modules(project, mods, failing_modules)
     result.update({
         # The change also edited trusted external models, and the new extraction needs them.
@@ -683,6 +711,9 @@ def analyze_broken(broken: Path, project: Path, cfg: dict, miner: Miner, logdir:
         # Definitions whose body no longer elaborates (also in statement_broken: frozen, never stubbed).
         "definition_broken": sorted({f"{e['file']}::{e['decl']}" for e in def_errors}),
         "example_errors": example_errors,
+        # Lake still fails these modules (no .olean), so their importers stay blocked in this analysis;
+        # the gate's snapshot builds them with the checks blanked and holds each to its stubs.
+        "guard_errors": guard_errors,
         # Repairable by proof edits alone? If not, the bot must escalate (gates forbid statement changes).
         "needs_statement_change": bool(stmt_broken),
         "file_errors": file_errors,

@@ -377,6 +377,31 @@ def compare(cfg: dict, base: dict, broken: dict, cand: dict, diff: str, referenc
             if s["name"] and not in_x(s["file"]) and body_is_stub(cand.get("sources", {}), s["file"], s["key"]):
                 kept_stubs.add(s["name"])
 
+    # --- `#guard_msgs` checks a snapshot blanked (gates/guards.py; DESIGN.md §4.5, owner decision
+    # 2026-11-05). Lean printed the expected axioms plus `sorryAx`; that is a consequence of the stubs
+    # only if the printed declaration rests on `sorry` through stubs alone. In the stubbed broken
+    # state: its stubs (else the gate cannot decide). In the candidate: the stubs it keeps (else G3,
+    # below); under complete acceptance it keeps none, so every blanked check there fails G3.
+    def explain(snap: dict, allowed: set[str]) -> list[dict]:
+        out = []
+        for g in (snap.get("guards") or {}).get("blanked", []):
+            r = snap.get("records", {}).get(g["printed"])
+            srcs = set(r.get("sorry_sources", [])) if r and "error" not in r else set()
+            ok = bool(r) and "error" not in r and SORRY in r.get("axioms", []) and bool(srcs) and srcs <= allowed
+            out.append({"file": g["file"], "line": g["line"], "printed": g["printed"], "rests_on": sorted(srcs)[:10],
+                        "explained": ok})
+        return out
+
+    if (base.get("guards") or {}).get("blanked"):
+        unavailable.append("the base snapshot has `#guard_msgs` checks that fail (it must build as it is)")
+    k_guards = explain(broken, repaired | {o["name"] for o in outside if o.get("name")})
+    c_guards = explain(cand, kept_stubs)
+    for g in k_guards:
+        if not g["explained"]:
+            unavailable.append(f"{g['file']}:{g['line']}: the `#guard_msgs` check on `{g['printed']}` fails in the "
+                               "stubbed broken state, and not only because of its stubs (it rests on "
+                               f"{', '.join(g['rests_on'][:3]) or 'no `sorry` the snapshot shows'})")
+
     # --- G1 statement identity, against the stubbed broken state.
     v1 = []
     for name, r in inventory_.items():
@@ -534,7 +559,12 @@ def compare(cfg: dict, base: dict, broken: dict, cand: dict, diff: str, referenc
         for p in touched:
             v3.append({"check": "G3", "file": p, "msg": f"changes {p}, in a module the stubbed broken state "
                        f"cannot build ({module_of(p, dirs)}): nothing there can be checked"})
-        new_failed = sorted(set(b.get("failed_modules", [])) - set(broken.get("build", {}).get("failed_modules", [])))
+        # A module whose only errors are blanked checks, each explained by kept stubs (below), builds
+        # once they are repaired: not a new failure. An unexplained one is a G3 violation below.
+        waiting = {module_of(g["file"], dirs) for g in c_guards} - {module_of(g["file"], dirs) for g in c_guards
+                                                                     if not g["explained"]}
+        new_failed = sorted(set(b.get("failed_modules", [])) - set(broken.get("build", {}).get("failed_modules", []))
+                            - waiting)
         if not b.get("ok") and new_failed:
             errs = [e for e in b.get("errors", []) if module_of(e["file"], dirs) in new_failed]
             v3.append({"check": "G3", "msg": f"build failed: {len(errs)} new error(s), in {', '.join(new_failed[:5])}",
@@ -548,6 +578,13 @@ def compare(cfg: dict, base: dict, broken: dict, cand: dict, diff: str, referenc
         errs = b.get("errors", [])
         v3.append({"check": "G3", "msg": f"build failed: {len(errs)} error(s), in "
                    f"{', '.join(b['failed_modules'][:5])}", "errors": errs[:10]})
+    for g in c_guards:
+        if not g["explained"]:
+            v3.append({"check": "G3", "file": g["file"], "decl": g["printed"],
+                       "msg": f"the `#guard_msgs` check at {g['file']}:{g['line']} fails in the candidate: "
+                              f"`{g['printed']}` still rests on `sorry`"
+                              + (" (" + ", ".join(g["rests_on"][:3]) + ")" if g["rests_on"] else "")
+                              + ("" if component else "; a complete candidate must build with every check as written")})
     not_obs = [m for m, s in cand.get("modules", {}).items() if s != "observed"]
     if not_obs and b.get("ok"):
         v3.append({"check": "G3", "msg": f"{len(not_obs)} audited module(s) not observed"})
@@ -637,4 +674,6 @@ def compare(cfg: dict, base: dict, broken: dict, cand: dict, diff: str, referenc
             # Component acceptance (§4.3): what the verdict does not cover, and what waits on a stub.
             "excluded": {"modules": sorted(xmods), "declarations": excluded_decls[:500],
                          "declarations_n": len(excluded_decls)},
-            "kept_stubs": sorted(kept_stubs), "blocked": blocked}
+            "kept_stubs": sorted(kept_stubs), "blocked": blocked,
+            # `#guard_msgs` checks the snapshots blanked, and what each printed declaration rests on.
+            "guards": {"broken": k_guards, "candidate": c_guards}}

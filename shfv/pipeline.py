@@ -493,8 +493,12 @@ class Run:
                      timeout=60 * self.cfg["lean"].get("build_timeout_minutes", 90))
         if r.returncode == 0:
             return True, ""
-        errs = [e for e in replay_case.parse_diags(r.stdout + r.stderr)
-                if e["severity"] == "error" and e["file"].endswith(b["file"])]
+        diags = [e for e in replay_case.parse_diags(r.stdout + r.stderr) if e["severity"] == "error"]
+        # `#print axioms` checks that gained only `sorryAx` wait on the theorems still stubbed (issue #37);
+        # the gate re-checks them. Only they failing, in this file or below it, is a build of this proof.
+        if diags and all(replay_case.guard_sorry_only(e["msg"]) for e in diags) and not r.timed_out:
+            return True, ""
+        errs = [e for e in diags if e["file"].endswith(b["file"]) and not replay_case.guard_sorry_only(e["msg"])]
         text = "\n\n".join(f"line {e['line']}: {e['msg']}" for e in errs[:5]) or ("timed out" if r.timed_out else "")
         return False, text[:4000]
 
@@ -508,7 +512,9 @@ class Run:
             return []
         d = decl_text((cand / b["file"]).read_text(), b["key"])
         errs = [e for e in replay_case.parse_diags(r.stdout + r.stderr)
-                if e["severity"] == "error" and e["file"].endswith(b["file"])]
+                if e["severity"] == "error" and e["file"].endswith(b["file"]) and not replay_case.guard_sorry_only(e["msg"])]
+        if not errs:
+            return []  # only `#print axioms` checks waiting on stubs (issue #37): nothing in this theorem
         inside = [e for e in errs if d and d["line"] <= e["line"] <= d["end_line"]]
         return inside or [{"kind": "other", "line": 0, "msg": "build failed outside the theorem"}]
 
