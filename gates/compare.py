@@ -101,6 +101,18 @@ def owning_record(name: str, records: dict) -> str | None:
     return None
 
 
+def private_twin(name: str, module: str | None, records: dict, frozen: dict) -> str:
+    """`name` if `records` has it; else the same declaration under the other visibility in the same
+    module (`X` ↔ `_private.<module>.0.X`), if `records` has exactly that and `frozen` does not
+    (two frozen declarations never share one record); else `name`, which is then missing."""
+    if name in records or not module:
+        return name
+    prefix = f"_private.{module}.0."
+    twin = name[len(prefix):] if name.startswith(prefix) else prefix + name
+    r = records.get(twin)
+    return twin if r is not None and r.get("module") == module and twin not in frozen else name
+
+
 def _fp(r: dict) -> tuple:
     return (r.get("kind"), r.get("canon"), r.get("body_canon"))
 
@@ -342,6 +354,11 @@ def compare(cfg: dict, base: dict, broken: dict, cand: dict, diff: str, referenc
         generated = sorted(n for n, r in base["records"].items()
                            if r.get("written") is False and n not in broken["records"])
         inventory_ = {n: r for n, r in base["records"].items() if "error" not in r and n not in generated}
+        # The same declaration under its private name (§11 q26): from Lean 4.31 `initialize`'s
+        # `initFn` is private, `_private.<Mod>.0.<name>`, same module and hygiene suffix, so a
+        # toolchain bump "removed" the base's record. Frozen under K's name, so G1 compares K's
+        # fingerprint with C's as for any other; a declaration really removed or renamed is missing.
+        inventory_ = {private_twin(n, r.get("module"), broken["records"], inventory_): r for n, r in inventory_.items()}
         excluded_decls = sorted(n for n, r in inventory_.items() if r["module"] in xmods)
         inventory_ = {n: r for n, r in inventory_.items() if r["module"] not in xmods}
         unobserved = []

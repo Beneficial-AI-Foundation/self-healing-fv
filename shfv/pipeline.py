@@ -163,6 +163,16 @@ def broken_deps(broken: list[dict], base_records: dict) -> dict[str, set[str]]:
     return {b["name"]: (set(base_records.get(b["name"], {}).get("uses", [])) & names) - {b["name"]} for b in broken}
 
 
+def private_twin(name: str, module: str | None, records: dict, frozen: dict) -> str:
+    """A copy of gates/compare.private_twin (the pipeline never imports the gate's logic, §4.8)."""
+    if name in records or not module:
+        return name
+    prefix = f"_private.{module}.0."
+    twin = name[len(prefix):] if name.startswith(prefix) else prefix + name
+    r = records.get(twin)
+    return twin if r is not None and r.get("module") == module and twin not in frozen else name
+
+
 def leaves_first(broken: list[dict], base_records: dict) -> list[dict]:
     """Order broken theorems so that each comes after the broken theorems it uses (§3.3 S4)."""
     deps = broken_deps(broken, base_records)
@@ -809,6 +819,9 @@ class Run:
             else:
                 frozen = {n: r for n, r in Bj["records"].items() if "error" not in r
                           and not (r.get("written") is False and n not in Kj["records"])}
+                # The gate's `private_twin` (gates/compare.py, §11 q26): a record Lean 4.31 made private
+                # is the same declaration under `_private.<Mod>.0.`, frozen under K's name.
+                frozen = {private_twin(n, r.get("module"), Kj["records"], frozen): r for n, r in frozen.items()}
             observed = sum(1 for n in frozen if n in Kj["records"] and "error" not in Kj["records"][n])
             missing_frozen = sorted(n for n in frozen if n not in Kj["records"] or "error" in Kj["records"][n])
             stmt_broken = []
