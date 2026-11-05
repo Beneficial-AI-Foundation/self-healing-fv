@@ -224,7 +224,9 @@ MODIFIERS = r"(?:private|public|protected|meta|noncomputable|partial|unsafe|nonr
 DECL_RE = re.compile(
     r"^[ \t]*(?:@\[[^\]]*\][ \t]*)*"
     rf"(?:{MODIFIERS}[ \t]+)*"
-    r"(theorem|lemma|def|abbrev|instance|axiom|opaque|structure|inductive|class)\b[ \t]*"
+    # `example` too (issue #37): without it an example's proof was read as the end of the declaration
+    # above it, and an error there escalated that declaration (a `def`) instead of the example.
+    r"(theorem|lemma|def|abbrev|instance|axiom|opaque|structure|inductive|class|example)\b[ \t]*"
     r"([^\s:({\[⦃]*)"
 )
 # Lines that end the previous declaration even though they are not declarations.
@@ -330,7 +332,9 @@ def parse_decls(src: str | None) -> dict[str, dict]:
         stmt, body = split_statement(text)
         header, statement = split_header(norm(stmt))
         name = cur["name"]
-        if not name:  # name wrapped onto the next line, e.g. long Aeneas-generated names
+        if cur["kind"] == "example":  # unnamed: keyed by its statement, which is stable across edits
+            name = f"<example>{statement[len('example'):].strip()[:80]}"
+        elif not name:  # name wrapped onto the next line, e.g. long Aeneas-generated names
             m = re.match(rf"(?:{MODIFIERS} )*\w+ ([^\s:({{\[⦃]+)", statement)
             name = m.group(1) if m and cur["kind"] != "instance" else f"<{cur['kind']}>:{statement[:80]}"
         key = name

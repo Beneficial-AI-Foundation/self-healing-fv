@@ -541,6 +541,7 @@ def analyze_broken(broken: Path, project: Path, cfg: dict, miner: Miner, logdir:
 
     rounds, sorried, stmt_errors, file_errors, cascades, header_errors = [], {}, [], [], [], []
     def_errors: list[dict] = []
+    example_errors: list[dict] = []  # `example`s whose proof fails: never stubbed, escalated
     extraction_errors, external_overlaid, setup_failed, unparsed = [], [], False, False
     timeouts = []  # hung files: which declaration hangs is unknown, so all their proofs are sorried
     for rnd in range(1, MAX_ROUNDS + 1):
@@ -578,15 +579,35 @@ def analyze_broken(broken: Path, project: Path, cfg: dict, miner: Miner, logdir:
             setup_failed = True
             break
         to_sorry: dict[str, set[str]] = hung_to_sorry
-        seen_errs = {(x["file"], x["decl"], x["msg"]) for x in stmt_errors + file_errors + header_errors}
+        seen_errs = {(x["file"], x["decl"], x["msg"]) for x in stmt_errors + file_errors + header_errors + example_errors}
         # Process "unknown identifier/constant X" errors last: when X is a declaration that failed
         # (and is sorried) this round, they are cascades; defer them a round and count them only
         # if they persist (#720 kernel errors, #535 `decompress_edwards_pure`).
         # Names may end in primes (`foo'`), so match backticks, or quotes up to the line end.
         UNKNOWN_RE = r"(?:\(kernel\) )?[Uu]nknown (?:constant|identifier) (?:`([^`]+)`|'(.+)'\s*$)"
         unknown = lambda e: re.match(UNKNOWN_RE, e["msg"].split("\n", 1)[0])
-        errs = sorted(errs, key=lambda e: bool(unknown(e)))
+        errs = sorted(errs, key=lambda e: (bool(unknown(e)), e["kind"] != "syntax"))  # parse errors first: the detail
         project_mods = set(mods)
+        # A parse error inside a proof body (issue #37: notation a dependency removed) ends Lean's reading
+        # of the proof there, and the cut-short declaration can then report errors on its statement line
+        # too. Those are consequences of the parse error this round: the proof is a break, stubbed like
+        # any other, and an error that survives the stub is a statement error next round (`already`).
+        parsed: dict[str, dict] = {}
+
+        def decls_of(rel: str) -> tuple[dict, str]:
+            if rel not in parsed:
+                p = broken / rel
+                t = p.read_text() if p.exists() else ""
+                parsed[rel] = {"decls": parse_decls(t), "src": t}
+            return parsed[rel]["decls"], parsed[rel]["src"]
+
+        parse_broken = set()
+        for e in errs:
+            if e["kind"] == "syntax":
+                d, t = decls_of(e["file"])
+                n, w = locate(e, d, t)
+                if w == "body" and n and d[n]["kind"] in SORRYABLE:
+                    parse_broken.add((e["file"], n))
         for e in errs:
             bi = re.match(r"bad import '([^']+)'", e["msg"])
             if bi and bi.group(1) in project_mods:
@@ -598,19 +619,26 @@ def analyze_broken(broken: Path, project: Path, cfg: dict, miner: Miner, logdir:
                 if short in pending or any(n.endswith("." + short) for n in pending):
                     cascades.append({"file": e["file"], "line": e["line"], "msg": e["msg"][:300], "round": rnd})
                     continue
-            src_path = broken / e["file"]
-            src_text = src_path.read_text() if src_path.exists() else ""
-            decls = parse_decls(src_text)
+            decls, src_text = decls_of(e["file"])
             name, where = locate(e, decls, src_text)
             entry = {"file": e["file"], "line": e["line"], "decl": name, "where": where,
                      "kind": e["kind"], "msg": e["msg"][:600], "round": rnd}
+            if (e["file"], name) in parse_broken:
+                entry["parse_error"] = True  # the proof does not parse; reported as such
+                if where in ("statement", "header"):
+                    continue  # a consequence of the parse error (above), checked again once stubbed
             already = f"{e['file']}::{name}" in sorried and decls[name]["body"] == ":= by sorry"
             if where == "body" and already:
                 where = entry["where"] = "statement"  # error survives sorrying: not a proof error
             if (e["file"], name, entry["msg"]) in seen_errs:
                 continue  # same error as earlier in this or a previous round
             seen_errs.add((e["file"], name, entry["msg"]))
-            if where == "body" and decls[name]["kind"] in SORRYABLE:
+            if where == "body" and decls[name]["kind"] == "example":
+                # An example's proof fails (issue #37). The gate repairs theorems only, and an example
+                # has no name to hold a repair to, so it is never stubbed: a human fixes it.
+                entry.update(where="example", **({"parse_error": True} if e["kind"] == "syntax" else {}))
+                example_errors.append(entry)
+            elif where == "body" and decls[name]["kind"] in SORRYABLE:
                 to_sorry.setdefault(e["file"], set()).add(name)
                 sorried.setdefault(f"{e['file']}::{name}", {**entry, "decl_kind": decls[name]["kind"]})
             elif where == "body":  # a definition's body (def, abbrev, instance, ...): never stubbed
@@ -637,7 +665,7 @@ def analyze_broken(broken: Path, project: Path, cfg: dict, miner: Miner, logdir:
     # hung file. The gate's head reference needs all of them (`gate compare --stubs`, DESIGN.md §4.9).
     stubbed = set(sorried) | {f"{t['file']}::{n}" for t in timeouts for n in t["sorried"]}
     sorried = {k: v for k, v in sorried.items() if k not in stmt_broken}
-    failing_modules = {mod_of.get(e["file"], e["file"]) for e in stmt_errors + file_errors + header_errors}
+    failing_modules = {mod_of.get(e["file"], e["file"]) for e in stmt_errors + file_errors + header_errors + example_errors}
     blocked = blocked_modules(project, mods, failing_modules)
     result.update({
         # The change also edited trusted external models, and the new extraction needs them.
@@ -654,6 +682,7 @@ def analyze_broken(broken: Path, project: Path, cfg: dict, miner: Miner, logdir:
         "statement_broken": sorted(stmt_broken),
         # Definitions whose body no longer elaborates (also in statement_broken: frozen, never stubbed).
         "definition_broken": sorted({f"{e['file']}::{e['decl']}" for e in def_errors}),
+        "example_errors": example_errors,
         # Repairable by proof edits alone? If not, the bot must escalate (gates forbid statement changes).
         "needs_statement_change": bool(stmt_broken),
         "file_errors": file_errors,
@@ -666,9 +695,9 @@ def analyze_broken(broken: Path, project: Path, cfg: dict, miner: Miner, logdir:
     result["_rounds_s"] = sum(r["build_s"] for r in rounds)
     if setup_failed:
         result["verdict"] = "setup failure: extracted code does not build in the broken state"
-    elif unparsed and not (sorried or stmt_errors or file_errors or header_errors or timeouts):
+    elif unparsed and not (sorried or stmt_errors or file_errors or header_errors or example_errors or timeouts):
         result["verdict"] = "unparsed build failure: see broken_tail"
-    elif sorried or stmt_errors or file_errors or header_errors or timeouts:
+    elif sorried or stmt_errors or file_errors or header_errors or example_errors or timeouts:
         result["verdict"] = "break confirmed"
     else:
         result["verdict"] = "no break: broken state builds green"

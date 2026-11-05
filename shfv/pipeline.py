@@ -347,7 +347,9 @@ class Run:
             key = f"{b['file']}::{b['key']}"
             src = (cand / b["file"]).read_text()
             entry = {"theorem": b["name"], "file": b["file"], "decl": b["key"],
-                     "line": (decl_text(src, b["key"]) or {}).get("line"), "attempts": []}
+                     "line": (decl_text(src, b["key"]) or {}).get("line"), "attempts": [],
+                     # The proof does not parse on the new toolchain (issue #37): said so in the report.
+                     **({"parse_error": True} if details.get(key, {}).get("parse_error") else {})}
             report["repairs"].append(entry)
             failed_deps = sorted(d for d in deps.get(b["name"], ()) if d not in repaired)
             if failed_deps:
@@ -860,6 +862,15 @@ class Run:
                                               "definition": s.get("definition"),
                                               "errors": s["errors"], "rename_only": None,  # TODO(§3.3 S2)
                                               "extraction_change": self.extraction_change(s["errors"])})
+            examples: dict[tuple, list[dict]] = {}
+            for e in self.replay.get("example_errors", []):
+                examples.setdefault((e["file"], e["decl"]), []).append(e)
+            for (f, _), errs in examples.items():
+                # Issue #37: an error in an `example` is the example's, not the declaration above it.
+                line = min(e["line"] for e in errs)
+                report["escalations"].append({"theorem": f"example at {f}:{line}", "file": f, "line": line,
+                                              "outcome": "example-fails", "errors": [e["msg"] for e in errs],
+                                              **({"parse_error": True} if any(e.get("parse_error") for e in errs) else {})})
             if stmt_broken:
                 self.p.step(f"escalate: {', '.join(s['key'] for s in stmt_broken)} → statement-must-change "
                             "(the bot never changes a statement)")

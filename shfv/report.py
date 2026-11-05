@@ -33,6 +33,7 @@ OUTCOME_TEXT = {
     "extraction-setup": "the extracted code does not build at the head, so no proof can be repaired against it",
     "added-by-pr": "added by this PR, its proof fails, and the bot does not repair it: it repairs only theorems that "
                    "have a version before the PR",
+    "example-fails": "an `example` whose proof fails: the bot repairs only named theorems, so a human fixes it",
 }
 
 
@@ -447,7 +448,7 @@ def render(r: dict, apply_cmd: str | None = None) -> str:
         why = ("the body of this definition no longer type-checks after the change (new extracted code or dependencies); definitions "
                "are frozen like statements, so changing it is a spec decision" if e.get("definition")
                else OUTCOME_TEXT.get(e["outcome"], e["outcome"]))
-        out.append(f"**Why:** {why}. Lean reports:")
+        out.append(f"**Why:** {why}{' (its proof does not parse)' if e.get('parse_error') else ''}. Lean reports:")
         out.append("")
         out.append(fence("\n\n".join(e.get("errors") or ["(no error text)"])[:3000]))
         if e.get("statement"):
@@ -468,6 +469,9 @@ def render(r: dict, apply_cmd: str | None = None) -> str:
         out.append(f"#### Not repaired: {link(r, e['file'], e.get('line'), short_name(e['theorem']))} · `{e['outcome']}`")
         out.append("")
         out.append(f"**Why:** {e.get('reason') or OUTCOME_TEXT.get(e['outcome'], '')}.")
+        if e.get("parse_error"):
+            out.append("The broken proof does not parse on the new toolchain (Lean stops reading it at a syntax "
+                       "error, e.g. notation that was renamed or removed).")
         for a in e.get("attempts", []):
             out.append(f"- attempt: {a['adapter']} `{a['model']}`, stopped: {a['stop']}, {a['turns']} turns, "
                        f"{usd(a.get('cost_usd'), a.get('cost_status'))}, {fmt_s(a['seconds'])}")
