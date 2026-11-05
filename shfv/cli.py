@@ -177,6 +177,27 @@ def layout_check(clone: Path, cfg: dict) -> bool:
     return not res["problems"]
 
 
+DOCTOR_TIMEOUT = 180
+DOCTOR_TAIL = 20
+
+
+def check_line(label: str, r) -> str:
+    """One `doctor` check's output (r: a gates.proc Result). A passing check is one line: the first line
+    of its output, cut to 80 characters. A failing one also gets the last DOCTOR_TAIL lines of its
+    stderr (of its stdout if stderr is empty), indented: the cause often comes after a leading warning,
+    e.g. elan's "could not canonicalize path" before a failed toolchain download (issue 38)."""
+    out = (r.stdout or r.stderr).strip()
+    if r.returncode == 0:
+        return f"✓ {label}: {out.splitlines()[0][:80] if out else ''}"
+    why = f"timed out after {DOCTOR_TIMEOUT} s" if getattr(r, "timed_out", False) else f"exit {r.returncode}"
+    lines = [ln.rstrip() for ln in (r.stderr.strip() or r.stdout.strip()).splitlines()]
+    head = f"✗ {label}: missing or failing ({why})" + ("" if lines else ", no output")
+    if len(lines) > DOCTOR_TAIL:
+        head += f"\n    … {len(lines) - DOCTOR_TAIL} earlier lines"
+        lines = lines[-DOCTOR_TAIL:]
+    return "\n".join([head] + [f"    {ln}" for ln in lines])
+
+
 def doctor(config: Path, repo: Path | None = None, work: Path = WORK, runs: Path = ROOT / "runs",
            adapter: str | None = None) -> int:
     """Check what a run needs before spending anything (review finding 16), for the target's agent
@@ -199,13 +220,13 @@ def doctor(config: Path, repo: Path | None = None, work: Path = WORK, runs: Path
     ok = True
     for label, cmd in checks:
         try:
-            r = proc.run(cmd, ROOT, timeout=180)
-            good = r.returncode == 0
-            detail = (r.stdout or r.stderr).strip().splitlines()[0][:80] if (r.stdout or r.stderr).strip() else ""
+            r = proc.run(cmd, ROOT, timeout=DOCTOR_TIMEOUT)
         except OSError as e:
-            good, detail = False, str(e)
-        ok &= good
-        print(f"{'✓' if good else '✗'} {label}: {detail if good else 'missing or failing: ' + detail}")
+            ok = False
+            print(f"✗ {label}: missing or failing: {e}")
+            continue
+        ok &= r.returncode == 0
+        print(check_line(label, r))
     print(f"{'✓' if clone.is_dir() else '✗'} target clone: {clone}" + ("" if clone.is_dir() else " (pass --repo to shfv repair)"))
     print(f"{'✓' if work.is_dir() else '•'} replay workspaces: {work}" + ("" if work.is_dir() else " (created on first run)"))
     for w in location_warnings(work, runs, [clone]):

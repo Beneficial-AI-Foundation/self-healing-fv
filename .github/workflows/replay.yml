@@ -173,8 +173,7 @@ jobs:
           key: lean4checker-${{ runner.os }}-${{ inputs.case || inputs.target }}-${{ hashFiles('gates/kernel.py') }}
           restore-keys: lean4checker-${{ runner.os }}-
 
-      # Full history: the replay takes the base, change and fix commits from it. The default Lean
-      # toolchain (for `shfv doctor`) is the change commit's, which the replay needs anyway.
+      # Full history: the replay takes the base, change and fix commits from it.
       # Live: the head is fetched by `fetch_ref` (refs/pull/<n>/head also serves PRs from forks), and
       # the base is its merge-base with `base`, as `shfv repair --base --head` computes it.
       - name: Clone the target repo
@@ -208,12 +207,28 @@ jobs:
           EOF
           )
           fi
-          elan default "$(git -C "$clone" show "$change:$root/lean-toolchain" 2>/dev/null || echo leanprover/lean4:stable)"
+          toolchain=$(git -C "$clone" show "$change:$root/lean-toolchain" 2>/dev/null || echo leanprover/lean4:stable)
+          base_toolchain=$(git -C "$clone" show "$base:$root/lean-toolchain" 2>/dev/null || true)
           # The replay store's cache key: the case's toolchains and Lake manifests (base and change).
           pins=$(for c in "$base" "$change"; do for f in lean-toolchain lake-manifest.json; do
             git -C "$clone" show "$c:$root/$f" 2>/dev/null; done; done | sha256sum | cut -c1-16)
           { echo "repo=$name"; echo "pins=$pins"; echo "base=$base"; echo "change=$change"; echo "root=$root"
-            echo "clone=$clone"; } >> "$GITHUB_OUTPUT"
+            echo "clone=$clone"; echo "toolchain=$toolchain"; echo "base_toolchain=$base_toolchain"; } >> "$GITHUB_OUTPUT"
+
+      # The change commit's toolchain becomes the default (for `shfv doctor`; the replay needs it anyway),
+      # and the base commit's is installed too if it differs. elan would otherwise download each one on
+      # first use, inside a later step, where a failed download shows up as an unrelated error (issue 38).
+      # Here a failure stops the job in this step, with elan's own output and after retries.
+      - name: Install the Lean toolchain
+        env:
+          TOOLCHAIN: ${{ steps.clone.outputs.toolchain }}
+          BASE_TOOLCHAIN: ${{ steps.clone.outputs.base_toolchain }}
+        run: |
+          tcs=("$TOOLCHAIN")
+          [ -z "$BASE_TOOLCHAIN" ] || [ "$BASE_TOOLCHAIN" = "$TOOLCHAIN" ] || tcs+=("$BASE_TOOLCHAIN")
+          .github/scripts/install_toolchain.sh "${tcs[@]}"
+          elan default "$TOOLCHAIN"
+          lake --version
 
       # The replay store (replay/replay_case.py `Store`): built Lake packages (Mathlib, Aeneas, ...) by
       # revision, and the project's .lake/build by commit, which seed each state's build. Lake re-checks
