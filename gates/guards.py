@@ -30,12 +30,15 @@ import re
 from .extents import comment_end
 
 HEADER = "Docstring on `#guard_msgs` does not match generated message:"
-# `#guard_msgs in`, or with the whitespace option only (`(whitespace := lax)`, libsignal-verify writes it;
-# it changes how whitespace is compared, which `sorry_only` ignores anyway). Any other option (a message
-# filter such as `drop info`, `ordering`) is not this shape.
-GUARD_LINE = re.compile(r"^#guard_msgs(?:[ \t]*\([ \t]*whitespace[ \t]*:=[ \t]*(?:exact|normalized|lax)[ \t]*\))?[ \t]+in[ \t]*$")
+# `#guard_msgs in`, or with the whitespace option only (`(whitespace := lax)`, libsignal-verify writes it).
+# The mode decides how Lean compares (`WhitespaceMode.apply`), and `sorry_only` compares the same way.
+# Any other option (a message filter such as `drop info`, `ordering`) is not this shape.
+GUARD_LINE = re.compile(r"^#guard_msgs(?:[ \t]*\([ \t]*whitespace[ \t]*:=[ \t]*(exact|normalized|lax)[ \t]*\))?[ \t]+in[ \t]*$")
 PRINT_LINE = re.compile(r"^#print[ \t]+axioms[ \t]+(\S+)[ \t]*$")
-# One message of `#print axioms`, whitespace collapsed (Lean wraps long lists).
+# One message of `#print axioms`, whitespace collapsed (Lean wraps long lists): read for its printed name only.
+# The `sorryAx` element of an axiom list: bounded by `[`, `,`, `]` or whitespace on both sides, so a name
+# that merely contains it (`Foo.sorryAx`, `«sorryAx»`, `sorryAx'`) is not it.
+SORRY_ELT = re.compile(r"(?<![^ \t\r\n,\[])sorryAx(?![^ \t\r\n,\]])")
 AXIOMS_MSG = re.compile(r"^info: '(.+)' (?:depends on axioms: \[([^\[\]]*)\]|does not depend on any axioms)$")
 SORRY = "sorryAx"
 
@@ -109,31 +112,66 @@ def check_at(src: str, line: int) -> dict | None:
         start = before.rfind("/--", 0, start)
     if start == -1 or (src[:start].rstrip(" \t") and not src[:start].rstrip(" \t").endswith("\n")):
         return None  # not found, or something else on the docstring's first line
-    return {"start": start, "end": off + len(lines[line - 1]), "expected": src[start + 3:len(before) - 2].strip(),
-            "target": nxt.group(1)}
+    return {"start": start, "end": off + len(lines[line - 1]), "expected": src[start + 3:len(before) - 2].strip(" \t\r\n"),
+            "target": nxt.group(1), "mode": GUARD_LINE.match(lines[line - 1]).group(1) or "normalized"}
+
+
+def apply_mode(mode: str, s: str) -> str:
+    """Lean's `WhitespaceMode.apply` (Lean/Elab/GuardMsgs.lean, 4.35): how `#guard_msgs` compares."""
+    if mode == "exact":
+        return s
+    if mode == "normalized":
+        return s.replace("\n", " ")
+    return " ".join(x for x in re.split(r"[ \t\r\n]", s) if x)  # lax; Lean's `Char.isWhitespace`
+
+
+def without_sorry(out: str) -> str | None:
+    """Lean's output with its one `sorryAx` list element taken out, separator included, as Lean would
+    print the list without it (`[sorryAx]` alone: "does not depend on any axioms"). None unless the
+    output is one `depends on axioms: [...]` message with exactly one such element."""
+    m = re.search(r"depends on axioms: \[", out)
+    if not m or out.count("depends on axioms") != 1:
+        return None
+    head, tail = out[:m.start()], out[m.end():]
+    hits = list(SORRY_ELT.finditer(tail))
+    if len(hits) != 1 or "]" not in tail:
+        return None
+    a, b = hits[0].span()
+    after = re.match(r",[ \t\r\n]*", tail[b:])
+    before = re.search(r",[ \t\r\n]*$", tail[:a])
+    if after:  # first or a middle element: it and the separator after it
+        return head + "depends on axioms: [" + tail[:a] + tail[b + after.end():]
+    if before:  # the last element: the separator before it, and it
+        return head + "depends on axioms: [" + tail[:before.start()] + tail[b:]
+    if a == 0 and tail[b:b + 1] == "]":  # the only one
+        return head + "does not depend on any axioms" + tail[b + 1:]
+    return None
 
 
 def sorry_only(src: str, line: int, msg: str) -> tuple[dict | None, str]:
-    """Is the `#guard_msgs` error `msg`, reported at `line` of `src`, a check whose output differs
-    from its docstring only by an added `sorryAx` (whitespace aside)? (the check, with `printed`, the
-    full name Lean printed, and `axioms`, or None; and why not)."""
+    """Is the `#guard_msgs` error `msg`, reported at `line` of `src`, a check whose output is its
+    docstring plus one `sorryAx` and nothing else? Compared as text, the way Lean compares under the
+    check's whitespace mode, after taking that one list element out: no name is parsed for the
+    comparison, so a name with spaces, commas or `»` cannot be split or merged wrongly (Codex review,
+    2026-11-05). (the check, with `printed`, the full name Lean printed, or None; and why not)."""
     c = check_at(src, line)
     if c is None:
         return None, "not a `#guard_msgs in` + `#print axioms` check with a docstring"
     out = actual_output(msg)
     if out is None:
         return None, "not a `#guard_msgs` mismatch"
-    exp, act = parse_axioms(c["expected"]), parse_axioms(out)
-    if exp is None or act is None:
-        return None, "the expected or the actual output is not exactly one `#print axioms` message"
-    if exp[0] != act[0]:
-        return None, f"prints `{act[0]}`, the docstring expects `{exp[0]}`"
-    if SORRY in exp[1] or act[1].count(SORRY) != 1:
-        return None, "the docstring already has `sorryAx`, or the output has it other than once"
-    # As sets (Lean lists them in the order its walk met them, which a stub can change), no repeats.
-    rest = [a for a in act[1] if a != SORRY]
-    if sorted(rest) != sorted(exp[1]) or len(set(exp[1])) != len(exp[1]):
-        return None, "the axioms differ by more than `sorryAx`"
+    expected = c["expected"].replace("⏎\n", "\n")  # as Lean reads the docstring (trimmed in check_at)
+    out = out.strip(" \t\r\n")
+    if SORRY_ELT.search(expected):
+        return None, "the docstring already has `sorryAx`"
+    rest = without_sorry(out)
+    if rest is None:
+        return None, "the output is not one `#print axioms` list with exactly one `sorryAx` element"
+    if apply_mode(c["mode"], rest) != apply_mode(c["mode"], expected):
+        return None, "the output differs from the docstring by more than `sorryAx`"
+    act = parse_axioms(out)
+    if act is None:
+        return None, "the printed name cannot be read"
     return {**c, "printed": act[0], "axioms": act[1]}, ""
 
 

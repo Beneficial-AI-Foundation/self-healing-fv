@@ -179,8 +179,12 @@ def msg(expected: list[str], actual: list[str]) -> str:
 
 @pytest.mark.parametrize("actual,ok", [
     (["info: 'M.t' depends on axioms: [propext, sorryAx, Quot.sound]"], True),
-    (["info: 'M.t' depends on axioms: [propext,", "  sorryAx, Quot.sound]"], True),       # wrapped
-    (["info: 'M.t' depends on axioms: [sorryAx, Quot.sound, propext]"], True),             # another order
+    # Wrapped: under the default (normalized) mode Lean compares newlines as spaces, so the rest differs.
+    (["info: 'M.t' depends on axioms: [propext,", "  sorryAx, Quot.sound]"], False),
+    (["info: 'M.t' depends on axioms: [sorryAx, Quot.sound, propext]"], False),            # another order
+    (["info: 'M.t' depends on axioms: [sorryAx, propext, Quot.sound]"], True),             # first
+    (["info: 'M.t' depends on axioms: [propext, Quot.sound, sorryAx]"], True),             # last
+    (["info: 'M.t' depends on axioms: [propext, Foo.sorryAx, Quot.sound]"], False),        # not the element
     (["info: 'M.t' depends on axioms: [propext, sorryAx, Quot.sound, Classical.choice]"], False),  # + a real axiom
     (["info: 'M.t' depends on axioms: [sorryAx, Quot.sound]"], False),                     # one dropped
     (["info: 'M.t' depends on axioms: [propext, sorryAx, sorryAx, Quot.sound]"], False),
@@ -204,6 +208,24 @@ def test_whitespace_inside_a_quoted_name_is_kept():
     src = SRC.replace("[propext, Quot.sound]", "[«a,b»]")  # a comma inside a quoted name is not a separator
     assert guards.sorry_only(src, LINE, msg([], ["info: 'M.t' depends on axioms: [«a,b», sorryAx]"]))[0] is not None
     assert guards.sorry_only(src, LINE, msg([], ["info: 'M.t' depends on axioms: [«a», «b», sorryAx]"]))[0] is None
+
+
+def test_the_whitespace_mode_is_lean_s():
+    """Compared as Lean compares under the check's mode (`WhitespaceMode.apply`), after taking the one
+    `sorryAx` element out (Codex follow-up, 2026-11-05: collapsing whitespace under every mode was looser
+    than Lean's `exact` and `normalized`)."""
+    wrapped = ["info: 'M.t' depends on axioms: [propext,", "  sorryAx,", "  Quot.sound]"]
+    lax = SRC.replace("#guard_msgs in", "#guard_msgs (whitespace := lax) in")
+    assert guards.sorry_only(lax, LINE, msg([], wrapped))[0] is not None
+    exact = SRC.replace("#guard_msgs in", "#guard_msgs (whitespace := exact) in")
+    assert guards.sorry_only(exact, LINE, msg([], ["info: 'M.t' depends on axioms: [propext, sorryAx, Quot.sound]"]))[0] is not None
+    assert guards.sorry_only(exact.replace("[propext, Quot.sound]", "[propext,  Quot.sound]"), LINE,
+                             msg([], ["info: 'M.t' depends on axioms: [propext, sorryAx, Quot.sound]"]))[0] is None
+    # Names Lean prints unquoted, with `»`, spaces or commas (Codex follow-up): text, never split.
+    odd = SRC.replace("[propext, Quot.sound]", "[a» b]")
+    assert guards.sorry_only(odd, LINE, msg([], ["info: 'M.t' depends on axioms: [a»  b, sorryAx]"]))[0] is None
+    odd = SRC.replace("[propext, Quot.sound]", "[a, b»]")
+    assert guards.sorry_only(odd, LINE, msg([], ["info: 'M.t' depends on axioms: [a,b», sorryAx]"]))[0] is None
 
 
 def test_the_other_forms_of_the_message():
