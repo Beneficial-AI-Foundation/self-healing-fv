@@ -31,6 +31,7 @@ textual G0 (`scope.check`), which stays; it is stricter, never a replacement.
 """
 from __future__ import annotations
 
+import difflib
 import re
 
 from .leandecls import MODIFIERS
@@ -247,11 +248,22 @@ def repaired_head(k_extent: str) -> str | None:
 
 
 def first_difference(a: str, b: str) -> str:
+    """The first change from `a` to `b`, by line, in words (display only). Lines are shown as written,
+    trailing spaces included (a trailing space read `'' → ''` before); a removed or added line says so
+    and names its neighbour (a removed blank line before `end` read `'' → 'end …'`)."""
     al, bl = a.split("\n"), b.split("\n")
-    for x, y in zip(al, bl):
-        if x != y:
-            return f"{x.strip()[:80]!r} → {y.strip()[:80]!r}"  # display only
-    return f"{len(al)} → {len(bl)} lines"
+    show = lambda s: "a blank line" if not s.strip(LEAN_WS) else repr(s[:80])
+    for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(a=al, b=bl, autojunk=False).get_opcodes():
+        if tag == "equal":
+            continue
+        nxt = next((x for x in al[i2:] if x.strip(LEAN_WS)), None)  # the next line with text
+        where = f" before {show(nxt)}" if nxt is not None else " at the end"
+        if tag == "delete":
+            return f"removes {show(al[i1])}" + (f" (+{i2 - i1 - 1} more lines)" if i2 - i1 > 1 else "") + where
+        if tag == "insert":
+            return f"adds {show(bl[j1])}" + (f" (+{j2 - j1 - 1} more lines)" if j2 - j1 > 1 else "") + where
+        return f"{show(al[i1])} → {show(bl[j1])}"
+    return "no line differs"
 
 
 def check(path: str, k_text: str, c_text: str, k_records: dict[str, dict], c_records: dict[str, dict],

@@ -1059,24 +1059,43 @@ class Run:
         v = verdict.get("verdict")
         failed = verdict.get("failed_checks", [])
         status = {t["name"]: t.get("status") for t in verdict.get("theorems", [])}
+        own = {t["name"]: t.get("failed_checks") or [] for t in verdict.get("theorems", [])}
+        viols = [x for c in (verdict.get("checks") or {}).values() for x in c.get("violations") or []]
+
+        def gate_reason(name: str) -> str:
+            """Why the gate rejected the candidate, from its own violations: this theorem's first, else the
+            candidate's (the gate judges it as a whole, §4.3). The agent's repair may be fine on its own."""
+            mine = [x for x in viols if x.get("decl") in (name, short(name))]
+            x = (mine or viols or [{}])[0]
+            what = f"{x.get('check', '?')}: " + (f"`{short(x['decl'])}`: " if x.get("decl") and not mine else "") + \
+                (x.get("msg") or "")
+            return (("the gate rejected this repair" if mine or own.get(name) else
+                     "the gate rejected the candidate as a whole, not for this repair")
+                    + (f" ({what[:300]})" if x else f" ({', '.join(failed)})" if failed else ""))
+
         for e in report["repairs"]:
             if e.get("outcome") != "candidate":
                 continue
             if v == "accepted" or v == "partially-accepted" and status.get(e["theorem"]) == "accepted":
                 e["outcome"] = "repaired"
             elif v == "partially-accepted":  # defensive: the gate accepts a candidate as a whole
-                e["outcome"] = "proof-hard"
-                e["reason"] = f"not accepted by the gate ({status.get(e['theorem']) or 'no verdict for it'})"
+                undecided = status.get(e["theorem"]) in ("undecided", None)
+                e["outcome"] = "gate-unavailable" if undecided else "gate-rejected"
+                e["reason"] = (f"not decided by the gate ({status.get(e['theorem']) or 'no verdict for it'})" if undecided
+                               else gate_reason(e["theorem"]))
             elif v == "passed-without-kernel-replay":
                 e["outcome"] = "passed-checks"
                 e["reason"] = "every gate check that ran passed; not accepted until the kernel replay (G5) runs"
             elif v == "gate-unavailable":
                 e["outcome"] = "gate-unavailable"
                 e["reason"] = "; ".join(verdict.get("unavailable", []))[:500] or "the gate could not decide"
+            elif failed:
+                # Not `proof-hard` (the assurance pass): the agent produced a proof; the gate refused it.
+                e["outcome"] = "gate-rejected"
+                e["reason"] = gate_reason(e["theorem"])
             else:
                 e["outcome"] = "proof-hard"
-                e["reason"] = f"candidate rejected by the gate ({', '.join(failed)})" if failed else \
-                    "case not accepted (complete-case acceptance)"
+                e["reason"] = "case not accepted (complete-case acceptance)"
 
     @staticmethod
     def close_open_outcomes(report: dict) -> None:

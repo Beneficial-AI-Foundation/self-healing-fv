@@ -26,6 +26,7 @@ CHECK_ROWS = [
 OUTCOME_TEXT = {
     "statement-must-change": "the statement no longer type-checks after the change (new extracted code or dependencies)",
     "proof-hard": "no accepted repair within the budget",
+    "gate-rejected": "the agent repaired it, but the gate rejected the candidate",
     "blocked-on": "waits for another theorem to be fixed first",
     "infrastructure-failure": "the run failed before it could say anything about this theorem",
     "gate-unavailable": "the gate could not decide, so nothing about this theorem was accepted or rejected",
@@ -119,6 +120,13 @@ def gate_table(r: dict, g: dict) -> list[str]:
         inv = ((g.get("checks", {}).get("G1") or {}).get("info") or {}).get("inventory", inv)
     build = g.get("candidate_build_seconds")
     lines = ["| Check | | |", "|---|---|---|"]
+    # Under a gate-unavailable verdict a check that found nothing did not pass: the gate could not
+    # decide (the assurance pass, live PR 51: G0–G5 all read ✅). Say why first, and mark no check ✅.
+    unavailable = g.get("verdict") == "gate-unavailable"
+    if unavailable:
+        why = g.get("unavailable") or ["no reason recorded"]
+        lines.append(f"| Gate | ⚪ | **could not decide**: {why[0][:300]}" + (f" (+{len(why) - 1} more)" if len(why) > 1 else "")
+                     + " |")
     for cid, name, desc in CHECK_ROWS:
         c = g["checks"].get(cid)
         if c is None:
@@ -150,6 +158,8 @@ def gate_table(r: dict, g: dict) -> list[str]:
                 text = first + (f" (+{len(v) - 3} more)" if len(v) > 3 else "")
                 if cid == "G1" and not v and g.get("eligible") is False:
                     text = "not certifiable: some frozen declarations do not elaborate in the broken state"
+            elif unavailable:
+                mark, text = "⚪", text + " (no violation found, but not decided: the gate was unavailable)"
         lines.append(f"| {cid} {name} | {mark} | {text} |")
     return lines
 
