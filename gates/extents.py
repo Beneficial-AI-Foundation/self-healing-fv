@@ -22,7 +22,7 @@ of it; ranges that coincide (several theorems from one macro call) are one exten
 names; each member of a `mutual` block is its own extent, and `mutual`/`end` are gap text.
 
 Fail closed: a touched module without ranges, a range outside its file, one that does not start at a
-declaration (after its docstring, attributes and modifiers: a declaration
+declaration (after its docstring, attributes, modifiers and any comments between them: a declaration
 keyword, or a token, which is a macro call; an added one must be `theorem`/`lemma`, and any other must
 match K's text; or a constructor's `|`, only strictly inside its `inductive`), or two ranges that
 partly overlap make the gate unable to decide. This runs next to the
@@ -44,7 +44,6 @@ NOT_WS = r"[^ \t\r\n]"
 
 # `set_option maxHeartbeats N in`, optionally with a trailing line comment (group 2, kept verbatim).
 HEARTBEATS_LINE = re.compile(r"^([ \t]*set_option[ \t]+maxHeartbeats[ \t]+)(\d+)([ \t]+in)([ \t]*(?:--.*)?)$")
-DOC = re.compile(r"/--.*?-/" + WS + "*", re.S)
 ATTR = re.compile(r"@\[(?:[^\[\]]|\[[^\[\]]*\])*\]" + WS + "*")
 MODS = re.compile(r"(?:" + MODIFIERS + r")" + WS + "+")
 DECL_KW = re.compile(r"(?:theorem|lemma|def|abbrev|instance|structure|class|inductive|coinductive|axiom|opaque|"
@@ -62,14 +61,46 @@ def offsets(text: str) -> list[int]:
     return out
 
 
+def comment_end(t: str, i: int) -> int | None:
+    """End of the comment that starts at `t[i]`, as Lean's lexer reads it: a `--` line comment runs
+    to the end of its line; a block comment (`/-`, docstrings `/--` included) nests and ends at its
+    matching `-/`. None if no comment starts there, or it is unterminated."""
+    if t.startswith("--", i):
+        j = t.find("\n", i)
+        return len(t) if j == -1 else j + 1
+    if not t.startswith("/-", i):
+        return None
+    depth, j = 0, i
+    while j < len(t):
+        if t.startswith("/-", j):
+            depth += 1
+            j += 2
+        elif t.startswith("-/", j):
+            depth -= 1
+            j += 2
+            if depth == 0:
+                return j
+        else:
+            j += 1
+    return None
+
+
 def head(text: str) -> str:
-    """The text of a declaration command after its docstring, attributes and modifiers."""
-    t = text
+    """The text of a declaration command after its docstring, attributes and modifiers, and any
+    comments between them (the assurance pass, 2026-11-05: dalek writes `@[externally_verified,
+    progress] -- …` on its own line before `theorem`). A comment only counts after one of those
+    (a range never starts at a plain comment); docstrings and block comments nest, as in Lean. Display
+    and matching only: the comments stay inside the extent, which G0 compares byte for byte."""
+    t, seen = text, False
     while True:
-        m = DOC.match(t) or ATTR.match(t) or MODS.match(t)
-        if not m:
+        m = ATTR.match(t) or MODS.match(t)
+        if m:
+            t, seen = t[m.end():], True
+            continue
+        e = comment_end(t, 0) if (t.startswith("/--") or seen) else None
+        if e is None:
             return t
-        t = t[m.end():]
+        t, seen = t[e:].lstrip(LEAN_WS), True
 
 
 def extents(text: str, records: dict[str, dict]) -> tuple[list[dict], list[str]]:
