@@ -48,3 +48,17 @@ def test_warns_for_runs_inside_a_clone(tmp_path):
 def test_warns_for_nested_work_and_runs(tmp_path):
     w = cli.location_warnings(tmp_path / "x" / "work", tmp_path / "x", [])
     assert any("nested" in x for x in w)
+
+
+def test_actions_keeps_run_records_outside_the_checkout():
+    """replay.yml (also called by live.yml and pr-repair.yml) runs from this repo's checkout, so the
+    default `runs/` would put the run records inside it; doctor and repair get $RUNNER_TEMP/runs."""
+    wf = (ROOT / ".github" / "workflows" / "replay.yml").read_text()
+    code = [ln for ln in wf.splitlines() if not ln.lstrip().startswith("#")]
+    assert any('echo "SHFV_RUNS=$RUNNER_TEMP/runs" >> "$GITHUB_ENV"' in ln for ln in code)
+    doctor = [ln for ln in code if "shfv doctor" in ln]
+    assert doctor and all('--runs "$SHFV_RUNS"' in ln for ln in doctor)
+    assert any("uv run shfv repair" in ln for ln in code)
+    assert any("args+=(" in ln and '--runs "$SHFV_RUNS"' in ln for ln in code)  # repair's arguments
+    assert not any('"runs/' in ln or " runs/" in ln for ln in code)  # the run folder is read from $SHFV_RUNS
+    assert any('readlink -f "$SHFV_RUNS/$CASE_DIR/latest"' in ln for ln in code)

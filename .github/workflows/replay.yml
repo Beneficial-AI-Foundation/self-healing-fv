@@ -108,6 +108,9 @@ jobs:
             echo "::error::caps must be numbers"; exit 1; }
           mkdir -p "$RUNNER_TEMP/stats"
           echo "STATS=$RUNNER_TEMP/stats" >> "$GITHUB_ENV"
+          # Run records outside this repo's checkout (DESIGN.md §8.5, `shfv doctor`'s location check), and
+          # not nested with the work folder ($RUNNER_TEMP/work or /mnt/shfv/work, "Free disk").
+          echo "SHFV_RUNS=$RUNNER_TEMP/runs" >> "$GITHUB_ENV"
 
       # This repo at this workflow's commit, also when another repo's workflow calls it (where the
       # default would be the caller's repo).
@@ -261,7 +264,7 @@ jobs:
           CLONE: ${{ steps.clone.outputs.clone }}
         run: |
           uv sync --quiet
-          uv run shfv doctor --config "targets/$NAME.toml" --repo "$CLONE"
+          uv run shfv doctor --config "targets/$NAME.toml" --repo "$CLONE" --runs "$SHFV_RUNS"
 
       - name: Start resource sampler
         run: |
@@ -283,7 +286,7 @@ jobs:
           else
             args=(--case "$CASE")
           fi
-          args+=(--per-run-usd "$PER_RUN_USD" --per-run-minutes "$PER_RUN_MINUTES" --label actions)
+          args+=(--per-run-usd "$PER_RUN_USD" --per-run-minutes "$PER_RUN_MINUTES" --label actions --runs "$SHFV_RUNS")
           if [ "$AGENT" = "true" ]; then
             [ -n "$ANTHROPIC_API_KEY" ] || { echo "::error::agent is on but the ANTHROPIC_API_KEY secret is not set"; exit 1; }
             args+=(--auth api-key)
@@ -300,7 +303,7 @@ jobs:
         if: always()
         run: |
           kill "$(cat "$STATS/sampler.pid" 2>/dev/null)" 2>/dev/null || true
-          run_dir=$(readlink -f "runs/$CASE_DIR/latest" 2>/dev/null || true)
+          run_dir=$(readlink -f "$SHFV_RUNS/$CASE_DIR/latest" 2>/dev/null || true)
           echo "RUN_DIR=$run_dir" >> "$GITHUB_ENV"
           # The full report on the run's summary page, one click from the PR comment (its short form).
           # It holds no prompts or transcripts: the same text as report.md in the artifact.

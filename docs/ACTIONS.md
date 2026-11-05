@@ -175,7 +175,7 @@ Then **Doctor** runs `shfv doctor` (CLI.md section 1). A failed check prints the
 ## What a run produces
 
 - **Job summary** (the run's page): the runner (cores, memory, disk), resource use per pipeline stage, any OOM kills, disk use at the end, and `report.md`.
-- **Artifact `run-record-…`**: the run directory, `runs/<case>/<run id>/` (CLI.md section 5): `report.json`, `report.md`, and each attempt's prompt and the bot's `suggestion.patch`. **Raw model output is left out by default**: each attempt's `transcript.jsonl` and, for Codex, its `codex-home/` (session state). Dispatch with `upload_transcripts` on to include them; review them before sharing.
+- **Artifact `run-record-…`**: the run directory, `<runs>/<case>/<run id>/` (CLI.md section 5; on Actions `<runs>` is `$RUNNER_TEMP/runs`, outside this repo's checkout, so `shfv doctor` does not warn that the run records are inside it): `report.json`, `report.md`, and each attempt's prompt and the bot's `suggestion.patch`. **Raw model output is left out by default**: each attempt's `transcript.jsonl` and, for Codex, its `codex-home/` (session state). Dispatch with `upload_transcripts` on to include them; review them before sharing.
 - **Artifact `runner-stats-…`**: the pipeline's output (`shfv.log`, which shows the agent's tool calls one line each, not its messages), the resource samples every 5 seconds (`samples.csv`), the summary (`resources.md`), and the replay's build logs.
 
 Artifacts are kept for 90 days. Anyone can download a public repo's artifacts, which is why transcripts are opt-in. A target repo's runs of `pr-repair.yml` never upload prompts or transcripts at all (`record: reports`).
