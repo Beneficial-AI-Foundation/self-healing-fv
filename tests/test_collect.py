@@ -251,3 +251,36 @@ def test_main_appends_only_new_runs(tmp_path, monkeypatch):
     lines = [json.loads(x) for x in out.read_text().splitlines()]
     assert [x["run_id"] for x in lines] == [1, 2] and calls == [set(), {1, 2}]
     assert lines[0]["repo"] == "o/spqr" and lines[0]["target"] == "spqr"
+
+
+def test_summary_aggregates_per_target_and_overall(tmp_path):
+    live = tmp_path / "live"
+    live.mkdir()
+
+    def ledger(target, rows):
+        (live / f"{target}.jsonl").write_text("".join(
+            json.dumps({"repo": f"o/{target}", "target": target, **r}) + "\n" for r in rows))
+
+    accepted = collect.row(run(2), decisions(), REPORT)
+    failed = collect.row(run(3), decisions(), None)  # picked, no report: a crash
+    skipped = collect.row(run(1), decisions(run=False, skip="draft"), None)
+    ledger("spqr", [skipped, accepted, failed])
+    ledger("dalek", [collect.row(run(4), decisions(), {**REPORT, "verdict": "partially-accepted"})])
+    s = collect.summary(live)
+    table = {line.split(" | ")[0].lstrip("| "): line.split(" | ") for line in s.splitlines()
+             if line.startswith("| ") and " – " in line}
+    # Target | Period | Runs | Bot runs (PRs) | Accepted | Partial | Escalated | Gate-unavailable | Crash | No-break | ...
+    assert table["spqr"][2:10] == ["3", "2 (1)", "1", "0", "0", "0", "1", "0"]
+    assert table["dalek"][2:6] == ["1", "1 (1)", "0", "1"]
+    assert table["**All**"][2:4] == ["4", "3 (2)"]
+    assert table["**All**"][10:12] == ["6 → 4", "$2.40"]  # 3 theorems a report, 2 repaired; $1.20 a report
+    assert "| 2026-10-30 | spqr | 7 | crash | – |" in s  # a crash has no counts
+
+
+def test_main_writes_the_summary(tmp_path, monkeypatch):
+    out = tmp_path / "live" / "spqr.jsonl"
+    monkeypatch.setattr(collect, "github_api", lambda token: None)
+    monkeypatch.setattr(collect, "collect", lambda api, token, repo, wf, seen: [
+        collect.row(run(1), decisions(run=False, skip="draft"), None)])
+    collect.main("o/spqr", "spqr", "self-heal.yml", out)
+    assert "| spqr | 2026-10-30 – 2026-10-30 | 1 | 0 (0) |" in (out.parent / "SUMMARY.md").read_text()

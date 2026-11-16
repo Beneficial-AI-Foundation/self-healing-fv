@@ -1,0 +1,457 @@
+--- a/Protocols/Models/PQXDH/UAKE/CorrectnessLemmas.lean
++++ b/Protocols/Models/PQXDH/UAKE/CorrectnessLemmas.lean
+@@ -65,8 +65,9 @@
+       ∀ m : G ⊕ PQPK, Pr{let y ← (do
+         let (pk, sk) ← dhKeygen (F := F) P.gen
+         let σ ← P.sign pk sk m
+-        P.verify pk m σ)}[y = true] = 1 :=
+-  Iff.rfl
++        P.verify pk m σ)}[y = true] = 1 := by
++  refine forall_congr' fun m => ?_
++  rw [probOutput_probComp_evalDist, prEvent_eq_evalDist_singleton]
+ 
+ /-- For a perfectly complete signature scheme, verifying an honestly generated
+   signature can only return `true`. -/
+--- a/Protocols/Models/PQXDH/UAKE/SecurityLemmas/KeyGuessing.lean
++++ b/Protocols/Models/PQXDH/UAKE/SecurityLemmas/KeyGuessing.lean
+@@ -102,8 +102,18 @@
+     decide_eq_false_iff_not, not_and, not_forall, Decidable.not_not, keySet,
+     List.toFinset_append, Finset.mem_union, List.mem_toFinset, Option.mem_toList] at hbad h ⊢
+   rcases h with h | h
+-  · obtain ⟨x, y, s, hs, hy, hyx, rfl⟩ := h hbad.1
+-    exact Or.inl ⟨y, ⟨s, hs, hy⟩, hyx⟩
++  · replace h := of_decide_eq_false h
++    simp only [List.map_append, List.map_cons, List.map_nil, List.filterMap_append,
++      List.filterMap_map, List.nodup_append, List.filterMap_cons, transcriptBundle,
++      List.head?_cons, List.filterMap_nil, List.nodup_cons, List.not_mem_nil,
++      not_false_eq_true, List.nodup_nil, and_true, List.mem_cons, List.mem_map,
++      List.mem_filterMap] at h
++    by_contra hc
++    refine h ⟨hbad.1, trivial, ?_⟩
++    rintro a ⟨y, ⟨s, hs, hy⟩, rfl⟩ b hb rfl
++    rcases hb with hb | hb
++    · exact hc (Or.inl ⟨y, ⟨s, hs, hy⟩, hb⟩)
++    · exact hb
+   · right
+     obtain ⟨-, h2⟩ := hbad
+     rcases hh : (env.challenge.transcript).entries.head? with _ | ⟨m, tc⟩
+@@ -247,7 +257,8 @@
+             · simp only [↓reduceIte, StateT.run_bind, StateT.run_monadLift, monadLift_self,
+                 bind_pure_comp, StateT.run_map, StateT.run_set, map_pure, Functor.map_map,
+                 support_map, Set.mem_image] at hz
+-              obtain ⟨y, -, hz⟩ := hz
++              obtain ⟨y, -, hz⟩ := (mem_support_bind_iff _ _ _).1 hz
++              simp only [pure_bind, StateT.run_pure, support_pure, Set.mem_singleton_iff] at hz
+               subst hz
+               exact env.sessionsStarted_set_extend h hs _ _ (by simp [recordOne]; rfl) _
+                 (by simp [recordOne]; omega) _ _
+@@ -255,7 +266,8 @@
+             simp only [StateT.run_bind, StateT.run_monadLift, monadLift_self, bind_pure_comp,
+               StateT.run_map, StateT.run_set, map_pure, Functor.map_map, support_map, Set.mem_image]
+               at hz
+-            obtain ⟨y, -, hz⟩ := hz
++            obtain ⟨y, -, hz⟩ := (mem_support_bind_iff _ _ _).1 hz
++            simp only [pure_bind, StateT.run_pure, support_pure, Set.mem_singleton_iff] at hz
+             subst hz
+             exact env.sessionsStarted_set_extend h hs _ _ (by simp [recordOne]; rfl) _
+               (by simp [recordOne]) _ _
+@@ -367,14 +379,16 @@
+             · simp only [↓reduceIte, StateT.run_bind, StateT.run_monadLift, monadLift_self,
+                 bind_pure_comp, StateT.run_map, StateT.run_set, map_pure, Functor.map_map,
+                 support_map, Set.mem_image] at hz
+-              obtain ⟨y, -, hz⟩ := hz
++              obtain ⟨y, -, hz⟩ := (mem_support_bind_iff _ _ _).1 hz
++              simp only [pure_bind, StateT.run_pure, support_pure, Set.mem_singleton_iff] at hz
+               subst hz
+               exact badEnv_set_of_head P msg hasOPK env hs _ (by simp [recordOne, he]) _ _
+           | complete st' =>
+             simp only [StateT.run_bind, StateT.run_monadLift, monadLift_self, bind_pure_comp,
+               StateT.run_map, StateT.run_set, map_pure, Functor.map_map, support_map, Set.mem_image]
+               at hz
+-            obtain ⟨y, -, hz⟩ := hz
++            obtain ⟨y, -, hz⟩ := (mem_support_bind_iff _ _ _).1 hz
++            simp only [pure_bind, StateT.run_pure, support_pure, Set.mem_singleton_iff] at hz
+             subst hz
+             exact badEnv_set_of_head P msg hasOPK env hs _ (by simp [recordOne, he]) _ _
+         · simp only [add_apply_inr, bind_pure_comp, pure_bind, StateT.run_bind, StateT.run_get,
+@@ -409,6 +423,18 @@
+           subst hz
+           exact badEnv_challenge_append P msg hasOPK env h _ _ _ _ w [] (by simp [recordOne])
+ 
++theorem prEvent_bind_le_of_forall_mem_support_le {α β : Type} {mx : ProbComp α}
++    {f : α → ProbComp β} {q : β → Prop} {ε : ℝ≥0∞}
++    (h : ∀ x ∈ support mx, Pr{let y ← (f x)}[(q) y] ≤ ε) :
++    Pr{let y ← (mx >>= f)}[(q) y] ≤ ε := by
++  let _ : MeasurableSpace α := ⊤
++  rw [prEvent_bind_eq_lintegral_of_discrete]
++  calc ∫⁻ a, Pr{let y ← f a}[q y] ∂𝒟[mx]
++      ≤ ∫⁻ _, ε ∂𝒟[mx] := MeasureTheory.lintegral_mono_ae
++        (evalDist.ae_of_forall_mem_support mx _ MeasurableSet.of_discrete h)
++    _ = ε * 𝒟[mx] Set.univ := MeasureTheory.lintegral_const ε
++    _ ≤ ε := mul_le_of_le_one_right' (evalDist_apply_univ_le_one mx)
++
+ theorem oracle_hit [DecidableEq PQPK] (tk : RecipientIdentity F G S) (ε : ℝ≥0∞)
+     (hpk : ∀ pk, Pr{let y ← (Prod.fst <$> P.pqkem.keygen)}[y = pk] ≤ ε) (t)
+     (ht : t = Sum.inr .openT) (env : Env (uakeInitiator P msg hasOPK))
+@@ -417,16 +443,19 @@
+       ε * ((env.tSessions.length + 1 : ℕ) : ℝ≥0∞) := by
+   subst ht
+   rw [oracleImpl_openT_run]
+-  refine (probEvent_bind_le_probEvent
+-    (p := fun r => badEnv P msg hasOPK (env.openNext r) = true)
+-    fun r _ hr => by simp [probEvent_pure, hr]).trans ?_
++  refine (prEvent_bind_le_prEvent_mul_of_forall_le _ _
++    (fun r => badEnv P msg hasOPK (env.openNext r) = true) _ (ε := 1)
++    (fun _ _ => prEvent_le_one _) fun r hr => by simp [hr]).trans ?_
++  rw [mul_one]
+   have hinit : (uakeInitiator P msg hasOPK).T.init tk = (recipient P hasOPK).init tk := rfl
+   rw [hinit]
+-  refine (probEvent_bind_le_of_forall_le
+-    (ε := Pr{let kp ← P.pqkem.keygen}[kp.1 ∈ keySet P msg hasOPK env]) fun opk _ => ?_).trans ?_
+-  · refine probEvent_bind_le_probEvent fun kp _ hkp =>
+-      le_antisymm (probEvent_bind_le_of_forall_le fun bd hbd => ?_) zero_le
+-    erw [probEvent_pure]
++  refine (prEvent_bind_le_of_forall_le _ _ _
++    (ε := Pr{let kp ← P.pqkem.keygen}[kp.1 ∈ keySet P msg hasOPK env]) fun opk => ?_).trans ?_
++  · refine (prEvent_bind_le_prEvent_mul_of_forall_le _ _ _ _ (ε := 1)
++      (fun _ _ => prEvent_le_one _) fun kp hkp =>
++      le_antisymm (prEvent_bind_le_of_forall_mem_support_le fun bd hbd => ?_) zero_le).trans
++      (by rw [mul_one])
++    erw [prEvent_pure]
+     split_ifs with hb
+     · exfalso
+       refine hkp ?_
+--- a/Protocols/Models/PQXDH/UAKE/SecurityLemmas/SharedHops.lean
++++ b/Protocols/Models/PQXDH/UAKE/SecurityLemmas/SharedHops.lean
+@@ -171,7 +171,7 @@
+         Pr{let y ← (forgeHonestGoodExp P msg hasOPK A)}[y = true] := by
+     simp only [forgeExp, sigForgeExp, pqpkGuessedExp, forgeHonestGoodExp]
+     let : MeasurableSpace (ChallengeResult (uakeInitiator P msg hasOPK) ×
+-      (A.State × Env (uakeInitiator P msg hasOPK) × RecipientIdentity F G SPK SSK S)) := ⊤
++      (A.State × Env (uakeInitiator P msg hasOPK) × RecipientIdentity F G S)) := ⊤
+     rw [prEvent_bind_eq_lintegral_of_discrete, prEvent_bind_eq_lintegral_of_discrete,
+       prEvent_bind_eq_lintegral_of_discrete, prEvent_bind_eq_lintegral_of_discrete,
+       ← MeasureTheory.lintegral_add_left Measurable.of_discrete,
+@@ -244,19 +244,18 @@
+   have hε0 : 0 ≤ εpk := nonneg_of_probOutput_le _ hpk
+   have hpk' : ∀ pk, Pr{let y ← (Prod.fst <$> P.pqkem.keygen)}[y = pk] ≤
+       ENNReal.ofReal εpk := fun pk =>
+-    (ENNReal.le_ofReal_iff_toReal_le probOutput_ne_top hε0).2 (hpk pk)
++    (ENNReal.le_ofReal_iff_toReal_le (by finiteness) hε0).2 (hpk pk)
+   have key : Pr{let y ← (pqpkGuessedExp P msg hasOPK A)}[y = true] ≤
+       ENNReal.ofReal εpk * ((q * q : ℕ) : ℝ≥0∞) := by
+-    rw [← probEvent_eq_eq_probOutput]
+     simp only [pqpkGuessedExp, challengePhase, bind_assoc]
+-    refine probEvent_bind_le_of_forall_le fun ukt _ => ?_
++    refine prEvent_bind_le_of_forall_le _ _ _ fun ukt => ?_
+     have hinit : (uakeInitiator P msg hasOPK).U.init ukt.1 = pure (.waitForMsg (.inl ukt.1)) :=
+       rfl
+     simp only [challengeSession, bind_assoc, hinit, pure_bind, Party.InitResult.opening,
+       Party.InitResult.state, recordOpt]
+-    refine (probEvent_bind_le_probEvent
+-      (p := fun z => KeyGuessing.badEnv P msg hasOPK z.2 = true)
+-      fun z _ hz => le_antisymm (probEvent_bind_le_of_forall_le fun k0 _ => ?_) zero_le).trans ?_
++    refine (prEvent_bind_le_prEvent_of_forall_eq_zero _ _
++      (fun z => KeyGuessing.badEnv P msg hasOPK z.2 = true) _
++      fun z hz => le_antisymm (prEvent_bind_le_of_forall_le _ _ _ fun k0 => ?_) zero_le).trans ?_
+     · have hk : pqpkGuessed P msg hasOPK
+           ⟨k0.join, z.2.challenge.transcript, z.2.tSessions.map (·.transcript)⟩ =
+             KeyGuessing.badEnv P msg hasOPK z.2 := rfl
+--- a/Protocols/ToVCVio/CryptoFoundations/AEAD.lean
++++ b/Protocols/ToVCVio/CryptoFoundations/AEAD.lean
+@@ -224,7 +224,6 @@
+     (ctxtToVf_hproj aead k) A.run []
+   simp only [simulateQ_bind, StateT.run_bind, ← QueryImpl.simulateQ_compose, ← h]
+   simp [withUnif, ctxtVfImpl]
+-  rfl
+ 
+ /-- Embeds the plain adversary's queries into the decryption game's oracles: uniform queries
+ and encryption queries pass through unchanged. -/
+@@ -267,7 +266,6 @@
+     (ctxtToDec_hproj aead k) A.run []
+   simp only [simulateQ_bind, StateT.run_bind, ← QueryImpl.simulateQ_compose, ← h]
+   simp [withUnif, ctxtDecImpl]
+-  rfl
+ 
+ omit [DecidableEq Msg] in
+ /-- `ctxtToVf A` has exactly the plain advantage of `A`. -/
+@@ -534,17 +532,11 @@
+     (h : ∀ x ∈ support mx,
+       Pr{let y ← (f x)}[(P) y] ≤ ∑ i ∈ Finset.range n, Pr{let y ← (g i x)}[(Q) y]) :
+     Pr{let y ← (mx >>= f)}[(P) y] ≤ ∑ i ∈ Finset.range n, Pr{let y ← (mx >>= g i)}[(Q) y] := by
+-  simp only [probEvent_bind_eq_tsum]
+-  calc ∑' x, Pr{let y ← mx}[y = x] * Pr{let y ← (f x)}[(P) y]
+-      ≤ ∑' x, Pr{let y ← mx}[y = x] * ∑ i ∈ Finset.range n, Pr{let y ← (g i x)}[(Q) y] := by
+-        refine ENNReal.tsum_le_tsum fun x => ?_
+-        by_cases hx : x ∈ support mx
+-        · exact mul_le_mul' le_rfl (h x hx)
+-        · simp [probOutput_eq_zero_of_not_mem_support hx]
+-    _ = ∑' x, ∑ i ∈ Finset.range n, Pr{let y ← mx}[y = x] * Pr{let y ← (g i x)}[(Q) y] := by
+-        simp only [Finset.mul_sum]
+-    _ = ∑ i ∈ Finset.range n, ∑' x, Pr{let y ← mx}[y = x] * Pr{let y ← (g i x)}[(Q) y] := by
+-        exact Summable.tsum_finsetSum fun _ _ => ENNReal.summable
++  let _ : MeasurableSpace β := ⊤
++  simp only [prEvent_bind_eq_lintegral_of_discrete]
++  rw [← MeasureTheory.lintegral_finsetSum _ fun _ _ => Measurable.of_discrete]
++  exact MeasureTheory.lintegral_mono_ae
++    (evalDist.ae_of_forall_mem_support mx _ MeasurableSet.of_discrete h)
+ 
+ /-- The plain game's win event, read off a final state of `vfGuessGameImpl`. -/
+ private def vfWin (aead : Scheme ProbComp Msg Key AD C) (k : Key) (fallback : AD × C)
+@@ -562,8 +554,7 @@
+     (L : List (AD × C)) (hp : (aead.decrypt k p.1 p.2).isSome) (hpL : p ∉ L) :
+     Pr{let z ← ((simulateQ (vfGuessGameImpl aead fallback j k) oa).run (g, L))}[
+       vfWin aead k fallback z.2 = true] = 1 := by
+-  rw [probEvent_eq_one_iff]
+-  refine ⟨by simp, fun z hz => ?_⟩
++  refine prEvent_eq_one_of_forall_mem_support _ _ fun z hz => ?_
+   have hinv := simulateQ_run_preserves_inv_of_query (vfGuessGameImpl aead fallback j k)
+     (fun s => s.1.guess = some p ∧ s.2 = L) (fun t s hs y hy => ?_) oa (g, L) ⟨hg, rfl⟩ z hz
+   · obtain ⟨h1, h2⟩ := hinv
+@@ -590,14 +581,13 @@
+     (hc : c ∈ support (aead.encrypt k ad m)) :
+     aead.decrypt k ad c = some m := by
+   have h := hcorrect m ad
+-  rw [probOutput_eq_one_iff] at h
++  rw [OracleComp.prEvent_eq_one_iff] at h
+   have hmem : decide (aead.decrypt k ad c = some m) ∈ support (CorrectExp aead m ad) := by
+     unfold CorrectExp
+     refine (mem_support_bind_iff _ _ _).mpr ⟨k, mem_support_uniformSample Key, ?_⟩
+     refine (mem_support_bind_iff _ _ _).mpr ⟨c, hc, ?_⟩
+     simp
+-  rw [h.2] at hmem
+-  simpa using hmem
++  simpa using h _ hmem
+ 
+ /-- The core bound: from a log `L` of valid pairs, the verification game's flag has
+ probability at most the sum, over the next `n` verification-query indices, of the plain game's
+@@ -638,7 +628,7 @@
+       by_cases hfresh : (aead.decrypt k p.1 p.2).isSome = true ∧ p ∉ L
+       · refine le_trans ?_
+           (Finset.single_le_sum (fun i _ => zero_le) (Finset.mem_range.2 (Nat.succ_pos n')))
+-        refine le_trans probEvent_le_one (le_of_eq ?_)
++        refine le_trans (prEvent_le_one _) (le_of_eq ?_)
+         exact (vfGuessGame_capture aead fallback (c + 0) k _ _ p (by simp) L
+           hfresh.1 hfresh.2).symm
+       · have hok : (aead.decrypt k p.1 p.2).isSome = decide (p ∈ L) := by
+@@ -708,11 +698,13 @@
+         Pr{let y ← (INT_CTXT_Game aead (vfToCtxtAt fallback i B))}[y = true] := by
+   rw [INT_CTXT_Game_eq]
+   simp only [run_vfToCtxt_succ, map_bind]
+-  rw [probOutput_bind_bind_swap, probOutput_bind_eq_tsum, tsum_fintype,
+-    ← Fin.sum_univ_eq_sum_range]
++  rw [prEvent_bind_bind_swap_of_uniform, prEvent_bind_of_discrete,
++    MeasureTheory.lintegral_fintype, ← Fin.sum_univ_eq_sum_range]
+   refine Finset.sum_congr rfl fun i _ => ?_
+-  rw [probOutput_query, INT_CTXT_Game_eq]
+-  simp
++  rw [INT_CTXT_Game_eq, mul_comm]
++  congr 1
++  · simp
++  · simp
+ 
+ private theorem probOutput_INT_CTXT_VF_Game_le_sum (aead : Scheme ProbComp Msg Key AD C)
+     (hcorrect : PerfectlyCorrect aead) (fallback : AD × C) (B : INT_CTXT_VF_Adversary aead)
+@@ -720,9 +712,9 @@
+     Pr{let y ← (INT_CTXT_VF_Game aead B)}[y = true] ≤
+       ∑ i ∈ Finset.range v,
+         Pr{let y ← (INT_CTXT_Game aead (vfToCtxtAt fallback i B))}[y = true] := by
+-  simp only [INT_CTXT_VF_Game_eq, INT_CTXT_Game_vfToCtxtAt_eq, ← probEvent_eq_eq_probOutput]
++  simp only [INT_CTXT_VF_Game_eq, INT_CTXT_Game_vfToCtxtAt_eq]
+   refine probEvent_bind_le_sum fun k _ => ?_
+-  simp only [probEvent_map, Function.comp_def]
++  simp only [prEvent_map]
+   simpa using vfGuessGame_core aead hcorrect fallback k B.run v 0 [] hv (by simp)
+ 
+ omit [DecidableEq Msg] [SampleableType Key] in
+@@ -904,8 +896,7 @@
+     (L : List (AD × C)) (hp : (aead.decrypt k p.1 p.2).isSome) (hpL : p ∉ L) :
+     Pr{let z ← ((simulateQ (decGuessGameImpl aead fallback j k) oa).run (g, L))}[
+       decWin aead k fallback z.2 = true] = 1 := by
+-  rw [probEvent_eq_one_iff]
+-  refine ⟨by simp, fun z hz => ?_⟩
++  refine prEvent_eq_one_of_forall_mem_support _ _ fun z hz => ?_
+   have hinv := simulateQ_run_preserves_inv_of_query (decGuessGameImpl aead fallback j k)
+     (fun s => s.1.guess = some p ∧ s.2 = L) (fun t s hs y hy => ?_) oa (g, L) ⟨hg, rfl⟩ z hz
+   · obtain ⟨h1, h2⟩ := hinv
+@@ -967,7 +958,7 @@
+           p ∉ R.map (fun e => (e.1, e.2.2))
+       · refine le_trans ?_
+           (Finset.single_le_sum (fun i _ => zero_le) (Finset.mem_range.2 (Nat.succ_pos n')))
+-        refine le_trans probEvent_le_one (le_of_eq ?_)
++        refine le_trans (prEvent_le_one _) (le_of_eq ?_)
+         exact (decGuessGame_capture aead fallback (c + 0) k _ _ p (by simp) _
+           hfresh.1 hfresh.2).symm
+       · have hans : aead.decrypt k p.1 p.2 = logLookup R p := by
+@@ -1028,11 +1019,13 @@
+         Pr{let y ← (INT_CTXT_Game aead (decToCtxtAt fallback i B))}[y = true] := by
+   rw [INT_CTXT_Game_eq]
+   simp only [run_decToCtxt_succ, map_bind]
+-  rw [probOutput_bind_bind_swap, probOutput_bind_eq_tsum, tsum_fintype,
+-    ← Fin.sum_univ_eq_sum_range]
++  rw [prEvent_bind_bind_swap_of_uniform, prEvent_bind_of_discrete,
++    MeasureTheory.lintegral_fintype, ← Fin.sum_univ_eq_sum_range]
+   refine Finset.sum_congr rfl fun i _ => ?_
+-  rw [probOutput_query, INT_CTXT_Game_eq]
+-  simp
++  rw [INT_CTXT_Game_eq, mul_comm]
++  congr 1
++  · simp
++  · simp
+ 
+ private theorem probOutput_INT_CTXT_D_Game_le_sum (aead : Scheme ProbComp Msg Key AD C)
+     (hcorrect : PerfectlyCorrect aead) (fallback : AD × C) (B : INT_CTXT_D_Adversary aead)
+@@ -1040,9 +1033,9 @@
+     Pr{let y ← (INT_CTXT_D_Game aead B)}[y = true] ≤
+       ∑ i ∈ Finset.range v,
+         Pr{let y ← (INT_CTXT_Game aead (decToCtxtAt fallback i B))}[y = true] := by
+-  simp only [INT_CTXT_D_Game_eq, INT_CTXT_Game_decToCtxtAt_eq, ← probEvent_eq_eq_probOutput]
++  simp only [INT_CTXT_D_Game_eq, INT_CTXT_Game_decToCtxtAt_eq]
+   refine probEvent_bind_le_sum fun k _ => ?_
+-  simp only [probEvent_map, Function.comp_def]
++  simp only [prEvent_map]
+   simpa using decGuessGame_core aead hcorrect fallback k B.run v 0 [] hv (by simp)
+ 
+ omit [DecidableEq Msg] [SampleableType Key] in
+@@ -1106,7 +1099,7 @@
+         ≤ ((v' + 1 : ℝ≥0∞) * ((v' + 1 : ℝ≥0∞)⁻¹ * ∑ i ∈ Finset.range (v' + 1),
+           Pr{let y ← (INT_CTXT_Game aead (vfToCtxtAt fallback i B))}[y = true])).toReal :=
+           ENNReal.toReal_mono (ENNReal.mul_ne_top (by simp) (ENNReal.mul_ne_top (by simp)
+-            (ENNReal.sum_ne_top.2 fun _ _ => probOutput_ne_top))) (key.trans hsum.le)
++            (ENNReal.sum_ne_top.2 fun _ _ => by simp))) (key.trans hsum.le)
+       _ = _ := by rw [ENNReal.toReal_mul]; push_cast; rfl
+ 
+ omit [DecidableEq Msg] in
+@@ -1152,7 +1145,7 @@
+         ≤ ((v' + 1 : ℝ≥0∞) * ((v' + 1 : ℝ≥0∞)⁻¹ * ∑ i ∈ Finset.range (v' + 1),
+           Pr{let y ← (INT_CTXT_Game aead (decToCtxtAt fallback i B))}[y = true])).toReal :=
+           ENNReal.toReal_mono (ENNReal.mul_ne_top (by simp) (ENNReal.mul_ne_top (by simp)
+-            (ENNReal.sum_ne_top.2 fun _ _ => probOutput_ne_top))) (key.trans hsum.le)
++            (ENNReal.sum_ne_top.2 fun _ _ => by simp))) (key.trans hsum.le)
+       _ = _ := by rw [ENNReal.toReal_mul]; push_cast; rfl
+ 
+ end AEAD
+--- a/Protocols/ToVCVio/CryptoFoundations/AKE/UAKE/OracleInvariants.lean
++++ b/Protocols/ToVCVio/CryptoFoundations/AKE/UAKE/OracleInvariants.lean
+@@ -41,6 +41,8 @@
+         pure ((env.tSessions.length, r.opening), env.openNext r) :
+         ProbComp ((unifSpec + oracleSpec K W).Range (Sum.inr .openT) × Env proto)) := by
+   simp [oracleImpl, opImpl, Env.openNext]
++  simp [map_eq_bind_pure_comp]
++  rfl
+ 
+ /-- An `openT` query adds exactly one session. -/
+ theorem oracleImpl_openT_count (lift : ProbCompLift ProbComp) (tk : TK) (t)
+--- a/Protocols/ToVCVio/EvalDist/Monad/Basic.lean
++++ b/Protocols/ToVCVio/EvalDist/Monad/Basic.lean
+@@ -25,11 +25,23 @@
+ theorem probEvent_bind_le_tsum {α β : Type} {mx : ProbComp α} {my : α → ProbComp β}
+     {q : β → Prop} (g : α → ℝ≥0∞) (h : ∀ x ∈ support mx, Pr{let y ← (my x)}[(q) y] ≤ g x) :
+     Pr{let y ← (mx >>= my)}[(q) y] ≤ ∑' x, Pr{let y ← mx}[y = x] * g x := by
+-  rw [probEvent_bind_eq_tsum]
+-  refine ENNReal.tsum_le_tsum fun x => ?_
+-  by_cases hx : x ∈ support mx
+-  · exact mul_le_mul' le_rfl (h x hx)
+-  · simp [probOutput_eq_zero_of_not_mem_support hx]
++  let _ : MeasurableSpace α := ⊤
++  have hae : ∀ᵐ x ∂𝒟[mx], x ∈ support mx :=
++    evalDist.ae_of_forall_mem_support mx (· ∈ support mx) MeasurableSet.of_discrete
++      fun _ h ↦ h
++  rw [prEvent_bind_eq_lintegral_of_discrete]
++  calc ∫⁻ x, Pr{let y ← my x}[q y] ∂𝒟[mx]
++      ≤ ∫⁻ x, g x ∂𝒟[mx] := MeasureTheory.lintegral_mono_ae
++        (evalDist.ae_of_forall_mem_support mx _ MeasurableSet.of_discrete h)
++    _ = ∫⁻ x in support mx, g x ∂𝒟[mx] := by
++        rw [MeasureTheory.Measure.restrict_eq_self_of_ae_mem hae]
++    _ = ∑' x : support mx, g x * 𝒟[mx] {(x : α)} :=
++        MeasureTheory.lintegral_countable g (support_finite mx).countable
++    _ ≤ ∑' x, g x * 𝒟[mx] {x} :=
++        ENNReal.tsum_comp_le_tsum_of_injective Subtype.val_injective
++          (fun x => g x * 𝒟[mx] {x})
++    _ = ∑' x, Pr{let y ← mx}[y = x] * g x := by
++        simp only [mul_comm, prEvent_eq_evalDist_singleton]
+ 
+ /-- A bound on the probability of every output of a `ProbComp` computation is nonnegative. -/
+ theorem nonneg_of_probOutput_le {α : Type} (oa : ProbComp α) {ε : ℝ}
+@@ -44,12 +56,9 @@
+     Pr{let x ← gen}[x.1 ∈ T] ≤ ε * (T.card : ℝ≥0∞) := by
+   calc Pr{let x ← gen}[x.1 ∈ T]
+       = Pr{let a ← (Prod.fst <$> gen)}[∃ x ∈ T, a = x] := by
+-        rw [probEvent_map]
+-        congr 1
+-        ext x
+         simp
+     _ ≤ ∑ x ∈ T, Pr{let a ← (Prod.fst <$> gen)}[a = x] :=
+-        probEvent_exists_finset_le_sum _ _ _
++        prEvent_exists_finset_le T _ (fun x a => a = x)
+     _ ≤ ∑ _x ∈ T, ε :=
+-        Finset.sum_le_sum fun x _ => by rw [probEvent_eq_eq_probOutput]; exact h x
++        Finset.sum_le_sum fun x _ => h x
+     _ = ε * (T.card : ℝ≥0∞) := by rw [Finset.sum_const, nsmul_eq_mul, mul_comm]
+--- a/Protocols/ToVCVio/OracleComp/QueryTracking/QueryBound.lean
++++ b/Protocols/ToVCVio/OracleComp/QueryTracking/QueryBound.lean
+@@ -25,6 +25,27 @@
+ 
+ variable {ι : Type} {spec : OracleSpec ι} {σ : Type}
+ 
++theorem lintegral_evalDist_eq_tsum_aux {β : Type} [MeasurableSpace β]
++    [DiscreteMeasurableSpace β] (mx : ProbComp β) (g : β → ℝ≥0∞) :
++    ∫⁻ x, g x ∂𝒟[mx] = ∑' x, Pr{let y ← mx}[y = x] * g x := by
++  have hae : ∀ᵐ x ∂𝒟[mx], x ∈ support mx :=
++    evalDist.ae_of_forall_mem_support mx (· ∈ support mx) MeasurableSet.of_discrete
++      fun _ h ↦ h
++  calc ∫⁻ x, g x ∂𝒟[mx]
++      = ∫⁻ x in support mx, g x ∂𝒟[mx] := by
++        rw [MeasureTheory.Measure.restrict_eq_self_of_ae_mem hae]
++    _ = ∑' x : support mx, g x * 𝒟[mx] {(x : β)} :=
++        MeasureTheory.lintegral_countable g (support_finite mx).countable
++    _ = ∑' x, g x * 𝒟[mx] {x} := by
++        refine tsum_subtype_eq_of_support_subset (f := fun x => g x * 𝒟[mx] {x})
++          (s := support mx) fun x hx => ?_
++        by_contra hx'
++        refine hx ?_
++        simp only [← prEvent_eq_evalDist_singleton, prEvent_eq_zero_of_not_mem_support mx hx',
++          mul_zero]
++    _ = ∑' x, Pr{let y ← mx}[y = x] * g x := by
++        simp only [mul_comm, prEvent_eq_evalDist_singleton]
++
+ /-- Potential bound for a bad event of a simulated oracle computation. Queries in `isCounted`
+ consume the budget `b`, raise `count` by one, and from a good state reach a bad state with
+ probability at most `ε * (count + 1)`. Other queries change neither `bad` nor `count`. Then,
+@@ -47,7 +68,7 @@
+   induction oa using OracleComp.inductionOn with
+   | pure a =>
+     intro b _ s _
+-    rw [simulateQ_pure, StateT.run_pure, probEvent_pure]
++    rw [simulateQ_pure, StateT.run_pure, prEvent_pure]
+     exact le_add_right (by split_ifs <;> simp_all)
+   | query_bind t k ih =>
+     intro b hb s hs
+@@ -69,10 +90,14 @@
+               rwa [h_count t s ht hs z hz] at h1
+           _ ≤ Pr{let z ← ((impl t).run s)}[bad z.2 = true] +
+                 ε * ((b' * (count s + 1 + b') : ℕ) : ℝ≥0∞) := by
+-              simp only [mul_add, ENNReal.tsum_add, mul_ite, mul_one, mul_zero]
+-              rw [← probEvent_eq_tsum_ite, ENNReal.tsum_mul_right]
+-              exact add_le_add le_rfl (mul_le_of_le_one_left zero_le
+-                (tsum_probOutput_le_one (mx := (impl t).run s)))
++              let _ : MeasurableSpace (spec.Range t × σ) := ⊤
++              rw [← lintegral_evalDist_eq_tsum_aux,
++                MeasureTheory.lintegral_add_right _ measurable_const, MeasureTheory.lintegral_const]
++              have hp := prEvent_bind_eq_lintegral_of_discrete ((impl t).run s) pure
++                (fun z : spec.Range t × σ => bad z.2 = true)
++              simp only [bind_pure, prEvent_pure] at hp
++              rw [hp]
++              exact add_le_add le_rfl (mul_le_of_le_one_right zero_le MeasureTheory.prob_le_one)
+           _ ≤ ε * ((count s + 1 : ℕ) : ℝ≥0∞) + ε * ((b' * (count s + 1 + b') : ℕ) : ℝ≥0∞) := by
+               gcongr; exact h_hit t s ht hs hbad
+           _ ≤ ε * (((b' + 1) * (count s + (b' + 1)) : ℕ) : ℝ≥0∞) := by
+@@ -81,7 +106,7 @@
+               nlinarith
+       · exact le_add_right (by simp)
+     · simp only [ht, if_false] at hcont
+-      refine probEvent_bind_le_of_forall_le fun z hz => ?_
++      refine prEvent_bind_le_of_forall_le_of_support _ _ _ fun z hz => ?_
+       obtain ⟨hbad, hcount⟩ := h_free t s ht hs z hz
+       have h1 := ih z.1 b (hcont z.1) z.2 (h_inv t s hs z hz)
+       rwa [hbad, hcount] at h1
