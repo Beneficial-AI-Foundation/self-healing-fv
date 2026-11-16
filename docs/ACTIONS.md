@@ -172,6 +172,8 @@ jobs:
   - A patch over 1 MB keeps only its hash, since large files stay out of git.
   - A patch is written only if the PR number is an integer and the head a full commit SHA, so a crafted name can't place a file outside `patches/`. Otherwise only the hash is kept, and the row is flagged.
 
+- **The summary.** Each collect rewrites `data/live/SUMMARY.md` from all the rows: one line per target and a total (runs, bot runs, outcomes, theorems broken and repaired, cost, median time, flagged runs), then one line per bot run. It is generated: change `summary()` in `shfv/collect.py`, not the file.
+
 For the pilot, collection is manual: run it weekly (at the latest every 90 days, before artifacts expire) and commit `data/live/`.
 
 ## Lean setup
