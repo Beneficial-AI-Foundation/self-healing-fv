@@ -1,0 +1,509 @@
+--- a/Protocols/Models/PQXDH/UAKE/Correctness.lean
++++ b/Protocols/Models/PQXDH/UAKE/Correctness.lean
+@@ -39,8 +39,7 @@
+     UAKE.PerfectlyCorrect (uakeInitiator P msg hasOPK) ProbCompRuntime.probComp := by
+   unfold UAKE.PerfectlyCorrect
+   rw [probOutput_probComp_evalDist]
+-  refine probOutput_eq_one_of_support_subset_singleton ?_ ?_
+-  · exact probFailure_of_liftM_PMF _
++  refine (evalDist_apply_setOf_eq_one_iff_forall_mem_support _ (fun b => b = true)).2 ?_
+   intro b hb
+   simp only [UAKE.CorrectExp, uakeInitiator, mem_support_bind_iff, support_pure,
+     Set.mem_singleton_iff, Prod.exists] at hb
+@@ -72,8 +71,7 @@
+     UAKE.PerfectlyCorrect (uakeRecipient P msg hasOPK) ProbCompRuntime.probComp := by
+   unfold UAKE.PerfectlyCorrect
+   rw [probOutput_probComp_evalDist]
+-  refine probOutput_eq_one_of_support_subset_singleton ?_ ?_
+-  · exact probFailure_of_liftM_PMF _
++  refine (evalDist_apply_setOf_eq_one_iff_forall_mem_support _ (fun b => b = true)).2 ?_
+   intro b hb
+   simp only [UAKE.CorrectExp, uakeRecipient, mem_support_bind_iff, support_pure,
+     Set.mem_singleton_iff, Prod.exists] at hb
+--- a/Protocols/Models/PQXDH/UAKE/CorrectnessLemmas.lean
++++ b/Protocols/Models/PQXDH/UAKE/CorrectnessLemmas.lean
+@@ -38,8 +38,18 @@
+ lemma support_eq_singleton_true_of_evalDist {oa : ProbComp Bool}
+     (h : ProbCompRuntime.probComp.evalDist oa {true} = 1) :
+     support oa = {true} := by
+-  rw [probOutput_probComp_evalDist, probOutput_eq_one_iff] at h
+-  exact h.2
++  rw [probOutput_probComp_evalDist] at h
++  have h' : ∀ b ∈ support oa, b = true := by
++    simpa only [Set.ofPred_eq_eq_singleton] using
++      (evalDist_apply_setOf_eq_one_iff_forall_mem_support oa (· = true)).1
++        (by simpa only [Set.ofPred_eq_eq_singleton] using h)
++  obtain ⟨b, hb⟩ := OracleComp.support_nonempty oa
++  ext x
++  simp only [Set.mem_singleton_iff]
++  constructor
++  · exact h' x
++  · rintro rfl
++    rwa [← h' b hb]
+ 
+ /-- Every key pair produced by `dhKeygen` satisfies `pk = sk • gen`. -/
+ lemma fst_eq_smul_of_mem_support_dhKeygen
+@@ -77,8 +87,8 @@
+     {cs : CT × SS} (hcs : cs ∈ support (P.pqkem.encaps kp.1))
+     {r : Option SS} (hr : r ∈ support (P.pqkem.decaps kp.2 cs.1)) : r = some cs.2 := by
+   have h := support_eq_singleton_true_of_evalDist hkem
+-  have hmem : decide (r = some cs.2) ∈ support P.pqkem.CorrectExp := by
+-    unfold KEMScheme.CorrectExp
++  have hmem : decide (r = some cs.2) ∈ support P.pqkem.correctnessExperiment := by
++    unfold KEMScheme.correctnessExperiment
+     refine (mem_support_bind_iff _ _ _).mpr ⟨kp, hkp, ?_⟩
+     refine (mem_support_bind_iff _ _ _).mpr ⟨cs, hcs, ?_⟩
+     refine (mem_support_bind_iff _ _ _).mpr ⟨r, hr, ?_⟩
+@@ -95,15 +105,14 @@
+     (hc : c ∈ support (P.aead.encrypt k ad m)) :
+     P.aead.decrypt k ad c = some m := by
+   have h := haead m ad
+-  rw [probOutput_eq_one_iff] at h
++  rw [prEvent_eq_one_iff] at h
+   have hmem : decide (P.aead.decrypt k ad c = some m) ∈
+       support (AEAD.CorrectExp P.aead m ad) := by
+     unfold AEAD.CorrectExp
+     refine (mem_support_bind_iff _ _ _).mpr ⟨k, mem_support_uniformSample K, ?_⟩
+     refine (mem_support_bind_iff _ _ _).mpr ⟨c, hc, ?_⟩
+     simp
+-  rw [h.2] at hmem
+-  simpa using hmem
++  simpa using h _ hmem
+ 
+ /-- Characterization of `initiate` on a pinned, correctly signed bundle: every
+   outcome is `some`, built from an ephemeral key, an encapsulation, and an
+@@ -134,12 +143,12 @@
+           (p.ikA.1, p.ikB, bundle.pqpkB.1), p.msg⟩) := by
+   simp only [initiate, hpin, ne_eq, not_true_eq_false, if_false,
+     mem_support_bind_iff, support_pure, Set.mem_singleton_iff] at hr
+-  obtain ⟨_, _, okSPK, hok, okPQPK, hok', hr⟩ := hr
++  obtain ⟨okSPK, hok, okPQPK, hok', hr⟩ := hr
+   obtain rfl := hok₁ _ hok
+   obtain rfl := hok₂ _ hok'
+   simp only [Bool.and_self, Bool.not_true, Bool.false_eq_true, if_false,
+     mem_support_bind_iff, support_pure, Set.mem_singleton_iff] at hr
+-  obtain ⟨_, _, ekA, hekA, cs, hcs, ctxt, hctxt, rfl⟩ := hr
++  obtain ⟨ekA, hekA, cs, hcs, ctxt, hctxt, rfl⟩ := hr
+   exact ⟨ekA, hekA, cs, hcs, ctxt, hctxt, rfl⟩
+ 
+ /-- DH agreement commutes on key pairs produced by `dhKeygen`. -/
+@@ -174,7 +183,7 @@
+       (im.ikA, p.ikB.1, p.pqpkB.1), m₀⟩ := by
+   simp only [accept, hid₁, hid₂, hid₃, ne_eq, not_true, or_self, if_false,
+     mem_support_bind_iff, support_pure, Set.mem_singleton_iff] at hr
+-  obtain ⟨_, _, o, ho, hr⟩ := hr
++  obtain ⟨o, ho, hr⟩ := hr
+   obtain rfl := hdec _ ho
+   simp only [hdecr, support_pure, Set.mem_singleton_iff] at hr
+   exact hr
+--- a/Protocols/PQXDH/Kdf.lean
++++ b/Protocols/PQXDH/Kdf.lean
+@@ -93,6 +93,10 @@
+   ∀ (dh1 dh2 dh3 : ECPub) (dh4 : Option ECPub) (ss : Key),
+     ∃ hk, deriveHK dh1 dh2 dh3 dh4 ss = .ok hk
+ 
++theorem spec_imp_exists_ok {α : Type} {m : Aeneas.Std.Result α} {p : α → Prop}
++    (h : m ⦃ x => p x ⦄) : ∃ x, m = .ok x ∧ p x := by
++  revert h; cases m <;> simp_all
++
+ /-- **`deriveHK` is total under the HKDF contract**: for any MAC interface `H` and under
+ `HkdfSha256Contract H`, `deriveHK` succeeds on all public keys, with or without the fourth DH
+ output, and every 32-byte shared secret. The assembled input has at most 192 bytes, so no append
+@@ -111,9 +115,9 @@
+       have h_cap : ∀ j, (alloc.vec.Vec.with_capacity U8 j).length = 0 := fun _ => rfl
+       unfold kdfInput
+       rcases dh4 with _ | d <;> dsimp only [Option.map] <;> step*
+-    obtain ⟨inp, h_eq, -⟩ := WP.spec_imp_exists h
++    obtain ⟨inp, h_eq, -⟩ := spec_imp_exists_ok h
+     exact ⟨inp, h_eq⟩
+-  obtain ⟨keys, h_keys, -⟩ := WP.spec_imp_exists (pqxdh.HandshakeKeys.derive_spec H h_hkdf inp)
++  obtain ⟨keys, h_keys, -⟩ := spec_imp_exists_ok (pqxdh.HandshakeKeys.derive_spec H h_hkdf inp)
+   refine ⟨keys, ?_⟩
+   rcases dh4 with _ | d <;> simp_all [deriveHK, pubSlice, sliceOfKey, lift, pure_tc_eq]
+ 
+--- a/Protocols/PQXDH/Kem.lean
++++ b/Protocols/PQXDH/Kem.lean
+@@ -85,7 +85,7 @@
+     ∃ kp ∈ support P.pqKeygen, ∃ r ∈ support P.coins, ∃ (ss ct : Slice U8) (r' : Rand),
+       kem.KeyPublic.encapsulate P.cryptoRngInst kp.public_key r = .ok (.Ok (ss, ct), r') ∧
+         kem.KeySecret.decapsulate kp.secret_key ct = .ok (.Ok ss) := by
+-  simp only [KEMScheme.CorrectExp, kyberKem, bind_pure_comp, bind_assoc, bind_map_left,
++  simp only [KEMScheme.correctnessExperiment, kyberKem, bind_pure_comp, bind_assoc, bind_map_left,
+     support_bind, ExceptT.support_liftM, ExceptT.mem_support_iff, support_map, Set.mem_iUnion,
+     Set.mem_image, decide_eq_true_eq, exists_eq_right, exists_prop, Prod.exists,
+     exists_and_right] at h
+--- a/Protocols/Realization/RustOracleComp.lean
++++ b/Protocols/Realization/RustOracleComp.lean
+@@ -108,8 +108,13 @@
+ functional-correctness specification of extracted code is used inside a protocol model. -/
+ theorem liftResult_eq_pure_of_spec {x : Result α} {a : α} (h : x ⦃ (· = a) ⦄) :
+     liftResult (O := O) x = pure a := by
+-  obtain ⟨y, rfl, rfl⟩ := WP.spec_imp_exists h
+-  simp
++  cases x using Result.cases with
++  | ret b =>
++    rw [WP.spec_ok] at h
++    subst h
++    simp
++  | vis i k => exact ((WP.spec_vis i k).mp h).elim
++  | div => exact (WP.spec_div.mp h).elim
+ 
+ /-- The possible outputs of a lifted computation are exactly the values it returns: a panic or
+ divergence has no possible output. -/
+@@ -142,45 +147,63 @@
+ /-- `rustRuntime` is coherent. It reads every computation through the native distribution of
+ `RustOracleComp unifSpec`, a lift of public randomness keeps its distribution, and every output of
+ positive probability is a possible output. -/
+-theorem rustRuntime_coherent : AKE.UAKE.RuntimeCoherent rustRuntime where
+-  lawful := inferInstance
+-  evalDist_eq _ := rfl
+-  lift_evalDist_eq mx := by
++theorem rustRuntime_coherent : AKE.UAKE.RuntimeCoherent rustRuntime := by
++  refine ⟨inferInstance, inferInstance, fun _ => rfl, ?_, ?_⟩
++  · intro α _ mx
+     change 𝒟[(liftM mx : ExceptT Fault ProbComp _)] = 𝒟[mx]
+-    exact SPMF.ext (ExceptT.probOutput_liftM mx)
+-  support_evalDist_subset mx := (support_eq_SPMF_support mx).symm.subset
++    exact ExceptT.evalDist_liftM mx
++  · intro α _ _ mx
++    exact evalDist.ae_of_forall_mem_support mx _ MeasurableSet.of_discrete fun _ h => h
+ 
+ /-- Fault erasure for outputs: the runtime gives an output `a` the probability that the
+ computation returns `a` without a fault. -/
+ theorem probOutput_rustRuntime [MeasurableSpace α] [MeasurableSingletonClass α]
+     (mx : RustOracleComp unifSpec α) (a : α) :
+-    rustRuntime.evalDist mx {a} = Pr{let r ← mx.run}[r = Except.ok a] :=
+-  ExceptT.probOutput_eq mx a
++    rustRuntime.evalDist mx {a} = Pr{let r ← mx.run}[r = Except.ok a] := by
++  change 𝒟[mx] {a} = _
++  have h : Measurable (fun r : Except Fault α => r = Except.ok a) := by
++    simpa [Set.image_singleton] using
++      (Except.measurableEmbedding_ok.measurableSet_image.mpr (measurableSet_singleton a)).mem
++  rw [ExceptT.evalDist_apply, Set.image_singleton, prEvent_eq_evalDist _ _ h]
++  rfl
+ 
+ /-- Fault erasure for missing mass: the probability that the runtime returns no value is the
+ probability of a fault. No other mass is lost. -/
+ theorem probFailure_rustRuntime [MeasurableSpace α] (mx : RustOracleComp unifSpec α) :
+     rustRuntime.prFail mx = Pr{let r ← mx.run}[r.toBool = false] := by
+-  change Pr[⊥ | mx] = _
+-  rw [ExceptT.probFailure_eq, probFailure_eq_zero, zero_add]
+-  congr 1
+-  funext r
+-  cases r <;> simp [Except.toBool]
++  change 1 - 𝒟[mx] Set.univ = _
++  have hs : {r : Except Fault α | r.toBool = false} = (Set.range Except.ok)ᶜ := by
++    ext r
++    cases r <;> simp [Except.toBool]
++  have hm : MeasurableSet (Set.range (Except.ok : α → Except Fault α)) :=
++    Except.measurableEmbedding_ok.measurableSet_range
++  have h : Measurable (fun r : Except Fault α => r.toBool = false) :=
++    measurableSet_setOfPred.mp (hs ▸ hm.compl)
++  rw [ExceptT.evalDist_apply_univ, prEvent_eq_evalDist _ _ h, hs,
++    MeasureTheory.measure_compl hm (MeasureTheory.measure_ne_top _ _),
++    MeasureTheory.measure_univ]
+ 
+ /-- An output has probability `0` exactly when it is not a possible output. -/
+ theorem probOutput_rustRuntime_eq_zero_iff [MeasurableSpace α] [MeasurableSingletonClass α]
+     (mx : RustOracleComp unifSpec α) (a : α) :
+     rustRuntime.evalDist mx {a} = 0 ↔ a ∉ support mx := by
+-  rw [probOutput_rustRuntime, probOutput_eq_zero_iff, ExceptT.mem_support_iff]
++  rw [probOutput_rustRuntime, OracleComp.prEvent_eq_zero_iff, ExceptT.mem_support_iff]
++  exact ⟨fun h hm => h _ hm rfl, fun h x hx hx' => h (hx' ▸ hx)⟩
+ 
+ /-- A panic has no output: every value has probability `0`. -/
+ @[simp] theorem probOutput_rustRuntime_liftResult_fail [MeasurableSpace α] (e : Error) (a : α) :
+     rustRuntime.evalDist (liftResult (Result.fail e : Result α)) {a} = 0 := by
+-  simp [probOutput_rustRuntime, liftResult_fail]
++  rw [liftResult_fail]
++  change 𝒟[(throw (Fault.panic e) : RustOracleComp unifSpec α)] {a} = 0
++  rw [ExceptT.evalDist_throw]
++  rfl
+ 
+ /-- Divergence has no output: every value has probability `0`. -/
+ @[simp] theorem probOutput_rustRuntime_liftResult_div [MeasurableSpace α] (a : α) :
+     rustRuntime.evalDist (liftResult (Result.div : Result α)) {a} = 0 := by
+-  simp [probOutput_rustRuntime, liftResult_div, RustOracleComp.div]
++  rw [liftResult_div, RustOracleComp.div]
++  change 𝒟[(throw Fault.divergence : RustOracleComp unifSpec α)] {a} = 0
++  rw [ExceptT.evalDist_throw]
++  rfl
+ 
+ end Protocols.Realization
+--- a/Protocols/ToVCVio/CryptoFoundations/AKE/UAKE/Runtime.lean
++++ b/Protocols/ToVCVio/CryptoFoundations/AKE/UAKE/Runtime.lean
+@@ -51,11 +51,14 @@
+     ∀ᵐ x ∂𝒟[mx], x ∈ support mx
+ 
+ /-- The canonical runtime of `ProbComp` is coherent. -/
+-theorem runtimeCoherent_probComp : RuntimeCoherent ProbCompRuntime.probComp where
+-  lawful := inferInstance
+-  evalDist_eq _ := rfl
+-  lift_evalDist_eq _ := rfl
+-  support_evalDist_subset mx := (support_eq_SPMF_support mx).symm.subset
++theorem runtimeCoherent_probComp : RuntimeCoherent ProbCompRuntime.probComp := by
++  refine
++    { lawfulAttach := inferInstance
++      lawful := inferInstance
++      evalDist_eq := fun _ => rfl
++      lift_evalDist_eq := fun _ => rfl
++      ae_mem_support := fun mx =>
++        evalDist.ae_of_forall_mem_support mx _ MeasurableSet.of_discrete fun _ hx ↦ hx }
+ 
+ /-- Under a coherent runtime, a property of every possible output holds almost surely for
+ the outputs the runtime observes. -/
+@@ -64,6 +67,6 @@
+     (mx : m α) {p : α → Prop}
+     (hp : ∀ x ∈ support mx, p x) : ∀ᵐ x ∂runtime.evalDist mx, p x := by
+   rw [h.evalDist_eq]
+-  exact fun x hx => hp x (h.support_evalDist_subset mx hx)
++  exact (h.ae_mem_support mx).mono fun x hx => hp x hx
+ 
+ end AKE.UAKE
+--- a/Protocols/ToVCVio/CryptoFoundations/AKE/UAKE/Transport.lean
++++ b/Protocols/ToVCVio/CryptoFoundations/AKE/UAKE/Transport.lean
+@@ -158,42 +158,48 @@
+       simp only [opImpl, StateT.run_bind, StateT.run_get, pure_bind,
+         Env.transport, List.getElem?_map]
+       cases hs : e.tSessions[sid]? with
+-      | none => simp [Env.transport]
++      | none => erw [StateT.run_pure, StateT.run_pure, map_pure]; rfl
+       | some t =>
+           simp only [Option.map_some]
+           cases hk : t.key with
+-          | none => simp [Env.transport]
++          | none => erw [StateT.run_pure, StateT.run_pure, map_pure]; rfl
+           | some key =>
+               simp only [StateT.run_bind, StateT.run_set,
+                 StateT.run_pure, pure_bind, map_pure]
++              erw [StateT.run_pure, StateT.run_pure, map_pure]
+               exact congrArg pure (Prod.ext rfl (by simp [Env.transport, List.map_set]))
+   | openT =>
+       simp only [opImpl, StateT.run_bind, StateT.run_monadLift, StateT.run_get,
+         StateT.run_set, StateT.run_pure, monadLift_self, bind_assoc, pure_bind,
+         hT.init_eq tk, bind_map_left, map_bind, map_pure]
+       refine bind_congr fun r => ?_
+-      cases r <;> simp [Party.InitResult.map, Env.transport, List.map_append]
++      cases r <;> simp [Party.InitResult.map, Env.transport, List.map_append] <;>
++        (erw [StateT.run_pure, StateT.run_pure, map_pure]
++         exact congrArg pure (Prod.ext rfl (by simp [Env.transport, List.map_append])))
+   | stepT sid w =>
+       simp only [opImpl, StateT.run_bind, StateT.run_get, pure_bind,
+         Env.transport, List.getElem?_map]
+       cases hs : e.tSessions[sid]? with
+-      | none => simp [Env.transport]
++      | none => erw [StateT.run_pure, StateT.run_pure, map_pure]; rfl
+       | some t =>
+         simp only [Option.map_some]
+         cases hk : t.key with
+-        | some k => simp [Env.transport]
++        | some k => erw [StateT.run_pure, StateT.run_pure, map_pure]; rfl
+         | none =>
+           simp only [StateT.run_bind, StateT.run_monadLift, monadLift_self,
+             bind_assoc, pure_bind, hT.step_eq t.state w, bind_map_left, map_bind]
+           refine bind_congr fun sr => ?_
+           cases sr with
+-          | reject => simp [Party.StepResult.map, Env.transport]
++          | reject =>
++              simp only [Party.StepResult.map]
++              erw [StateT.run_pure, StateT.run_pure, map_pure]; rfl
+           | acceptAndSend st' w' done =>
+               cases done with
+               | false =>
+                   simp only [Party.StepResult.map, reduceCtorEq, reduceIte,
+                     StateT.run_bind, StateT.run_set, StateT.run_pure, pure_bind,
+                     map_pure]
++                  erw [StateT.run_pure, StateT.run_pure, map_pure]
+                   exact congrArg pure (Prod.ext rfl (by simp [Env.transport,
+                     List.map_set]))
+               | true =>
+@@ -202,6 +208,7 @@
+                     monadLift_self, bind_assoc, pure_bind, hT.output_eq st',
+                     map_bind, map_pure]
+                   refine bind_congr fun key => ?_
++                  erw [StateT.run_pure, StateT.run_pure, map_pure]
+                   exact congrArg pure (Prod.ext rfl (by simp [Env.transport,
+                     List.map_set]))
+           | complete st' =>
+@@ -209,26 +216,35 @@
+                 StateT.run_set, StateT.run_pure, monadLift_self, bind_assoc,
+                 pure_bind, hT.output_eq st', map_bind, map_pure]
+               refine bind_congr fun key => ?_
++              erw [StateT.run_pure, StateT.run_pure, map_pure]
+               exact congrArg pure (Prod.ext rfl (by simp [Env.transport,
+                 List.map_set]))
+   | stepChallenge w =>
+       simp only [opImpl, StateT.run_bind, StateT.run_get, pure_bind, Env.transport]
+       cases hd : e.challengeDone with
+-      | true => simp [hd, Env.transport]
++      | true =>
++          simp [hd]
++          erw [StateT.run_pure, StateT.run_pure, map_pure]
++          exact congrArg pure (Prod.ext rfl (by simp [Env.transport, hd]))
+       | false =>
+           simp only [Bool.false_eq_true, if_false, StateT.run_bind,
+             StateT.run_monadLift, monadLift_self, bind_assoc, pure_bind,
+             hU.step_eq e.challenge.state w, bind_map_left, map_bind]
+           refine bind_congr fun sr => ?_
+           cases sr with
+-          | reject => simp [Party.StepResult.map, Env.transport, hd]
++          | reject =>
++              simp [Party.StepResult.map]
++              erw [StateT.run_pure, StateT.run_pure, map_pure]
++              exact congrArg pure (Prod.ext rfl (by simp [Env.transport, hd]))
+           | acceptAndSend st' w' done =>
+               simp only [Party.StepResult.map, StateT.run_bind, StateT.run_set,
+                 StateT.run_pure, pure_bind, map_pure]
++              erw [StateT.run_pure, StateT.run_pure, map_pure]
+               exact congrArg pure (Prod.ext rfl (by simp [Env.transport]))
+           | complete st' =>
+               simp only [Party.StepResult.map, StateT.run_bind, StateT.run_set,
+                 StateT.run_pure, pure_bind, map_pure]
++              erw [StateT.run_pure, StateT.run_pure, map_pure]
+               exact congrArg pure (Prod.ext rfl (by simp [Env.transport]))
+ 
+ variable (lift : ProbCompLift m)
+--- a/Protocols/ToVCVio/CryptoFoundations/HardnessAssumptions/DiffieHellman.lean
++++ b/Protocols/ToVCVio/CryptoFoundations/HardnessAssumptions/DiffieHellman.lean
+@@ -51,20 +51,22 @@
+     _root_.DiffieHellman.ddhRealExperiment g A
+       = nominalDDHExpReal (groupKeygen (F := F) g) Prod.fst
+         (fun kp pk => kp.2 • pk) (A g) := by
+-  simp [_root_.DiffieHellman.ddhExpReal, nominalDDHExpReal, groupKeygen, smul_smul]
++  simp [_root_.DiffieHellman.ddhRealExperiment, nominalDDHExpReal, groupKeygen, smul_smul]
+ 
+ lemma ddhExpRand_eq_nominalDDHExpRand (g : G) (A : _root_.DiffieHellman.DDHAdversary F G) :
+     _root_.DiffieHellman.ddhRandomExperiment g A
+       = nominalDDHExpRand (groupKeygen (F := F) g) Prod.fst (A g) := by
+-  simp [_root_.DiffieHellman.ddhExpRand, nominalDDHExpRand, groupKeygen]
++  simp [_root_.DiffieHellman.ddhRandomExperiment, nominalDDHExpRand, groupKeygen]
+ 
+ lemma ddhDistAdvantage_eq_nominalDDHDistAdvantage (g : G)
+     (A : _root_.DiffieHellman.DDHAdversary F G) :
+     (_root_.DiffieHellman.ddhAdvantage g A).toReal
+       = nominalDDHDistAdvantage (groupKeygen (F := F) g) Prod.fst
+         (fun kp pk => kp.2 • pk) (A g) := by
+-  unfold _root_.DiffieHellman.ddhDistAdvantage nominalDDHDistAdvantage
+-  rw [ddhExpReal_eq_nominalDDHExpReal, ddhExpRand_eq_nominalDDHExpRand]
++  unfold _root_.DiffieHellman.ddhAdvantage nominalDDHDistAdvantage
++  rw [ddhExpReal_eq_nominalDDHExpReal, ddhExpRand_eq_nominalDDHExpRand,
++    MeasureTheory.Measure.toReal_boolDist, prEvent_eq_evalDist_singleton,
++    prEvent_eq_evalDist_singleton]
+ 
+ end Nominal
+ 
+--- a/Protocols/ToVCVio/CryptoFoundations/KEMCorrectness.lean
++++ b/Protocols/ToVCVio/CryptoFoundations/KEMCorrectness.lean
+@@ -52,7 +52,9 @@
+     (runtime : ProbCompRuntime m) :
+     kem.correctnessError runtime = 0 ↔ kem.PerfectlyCorrect runtime := by
+   rw [correctnessError, PerfectlyCorrect, tsub_eq_zero_iff_le]
+-  exact ⟨fun h => le_antisymm probOutput_le_one h, fun h => h.ge⟩
++  exact ⟨fun h => le_antisymm
++    (MeasureTheory.measure_le_one (runtime.evalDist kem.correctnessExperiment) {true}) h,
++    fun h => h.ge⟩
+ 
+ /-- A `δ`-correct KEM's correctness experiment succeeds with probability at least `1 - δ`. -/
+ theorem one_sub_le_probOutput_of_deltaCorrect {kem : KEMScheme m K PK SK C}
+--- a/Protocols/ToVCVio/CryptoFoundations/SignatureAlg.lean
++++ b/Protocols/ToVCVio/CryptoFoundations/SignatureAlg.lean
+@@ -54,59 +54,32 @@
+         runtime.evalDist (mx >>= fun x => pure (f x)) = (runtime.evalDist mx).map f)
+     (adv : UnforgeableAdversary sigAlg) :
+     unforgeableAdvantage runtime adv ≤ adv.strongAdvantage runtime := by
+-  letI : DecidableEq M := Classical.decEq M
+-  letI : DecidableEq S := Classical.decEq S
+-  unfold unforgeableAdv.advantage unforgeableExp
+-    unforgeableAdv.strongAdvantage stronglyUnforgeableExp
+-  set joint : OracleComp spec ((M × S) × QueryLog (M →ₒ S) × Bool) := do
++  classical
++  let : MeasurableSpace ((M × S) × QueryLog (M →ₒ S) × Bool) := ⊤
++  let joint : OracleComp spec ((M × S) × QueryLog (M →ₒ S) × Bool) := do
+     let (pk, sk) ← sigAlg.keygen
+-    let impl : QueryImpl (spec + (M →ₒ S))
+-        (WriterT (QueryLog (M →ₒ S)) (OracleComp spec)) :=
+-      (HasQuery.toQueryImpl (spec := spec) (m := OracleComp spec)).liftTarget
+-        (WriterT (QueryLog (M →ₒ S)) (OracleComp spec)) +
+-        sigAlg.signingOracle pk sk
+-    let sim_adv : WriterT (QueryLog (M →ₒ S)) (OracleComp spec) (M × S) :=
+-      simulateQ impl (adv.main pk)
+-    let ((msg, σ), log) ← sim_adv.run
++    let ((msg, σ), log) ← sigAlg.runWithSigningOracle pk sk (adv.main pk)
+     let verified ← sigAlg.verify pk msg σ
+-    pure ((msg, σ), log, verified) with hjoint_def
+-  have hExp : (runtime.evalDist do
+-        let (pk, sk) ← sigAlg.keygen
+-        let impl : QueryImpl (spec + (M →ₒ S))
+-            (WriterT (QueryLog (M →ₒ S)) (OracleComp spec)) :=
+-          (HasQuery.toQueryImpl (spec := spec) (m := OracleComp spec)).liftTarget
+-            (WriterT (QueryLog (M →ₒ S)) (OracleComp spec)) +
+-            sigAlg.signingOracle pk sk
+-        let sim_adv : WriterT (QueryLog (M →ₒ S)) (OracleComp spec) (M × S) :=
+-          simulateQ impl (adv.main pk)
+-        let ((msg, σ), log) ← sim_adv.run
+-        let verified ← sigAlg.verify pk msg σ
+-        pure (!log.wasQueried msg && verified)) =
+-      (fun t : (M × S) × QueryLog (M →ₒ S) × Bool =>
+-        !t.2.1.wasQueried t.1.1 && t.2.2) <$> runtime.evalDist joint := by
+-    rw [← h_pull]
++    pure ((msg, σ), log, verified)
++  have hExp : runtime.evalDist (unforgeableExperiment adv) =
++      (runtime.evalDist joint).map (fun t : (M × S) × QueryLog (M →ₒ S) × Bool =>
++        !t.2.1.wasQueried t.1.1 && t.2.2) := by
++    rw [← h_pull _ Measurable.of_discrete]
+     congr 1
+-    simp only [hjoint_def, monad_norm]
+-  have hStrong : (runtime.evalDist do
+-        let (pk, sk) ← sigAlg.keygen
+-        let impl : QueryImpl (spec + (M →ₒ S))
+-            (WriterT (QueryLog (M →ₒ S)) (OracleComp spec)) :=
+-          (HasQuery.toQueryImpl (spec := spec) (m := OracleComp spec)).liftTarget
+-            (WriterT (QueryLog (M →ₒ S)) (OracleComp spec)) +
+-            sigAlg.signingOracle pk sk
+-        let sim_adv : WriterT (QueryLog (M →ₒ S)) (OracleComp spec) (M × S) :=
+-          simulateQ impl (adv.main pk)
+-        let ((msg, σ), log) ← sim_adv.run
+-        let verified ← sigAlg.verify pk msg σ
+-        pure (!log.wasQueriedWith msg σ && verified)) =
+-      (fun t : (M × S) × QueryLog (M →ₒ S) × Bool =>
+-        !t.2.1.wasQueriedWith t.1.1 t.1.2 && t.2.2) <$> runtime.evalDist joint := by
+-    rw [← h_pull]
++    simp only [unforgeableExperiment, joint, monad_norm]
++  have hStrong : stronglyUnforgeableExp runtime adv =
++      (runtime.evalDist joint).map (fun t : (M × S) × QueryLog (M →ₒ S) × Bool =>
++        !t.2.1.wasQueriedWith t.1.1 t.1.2 && t.2.2) := by
++    rw [stronglyUnforgeableExp, ← h_pull _ Measurable.of_discrete]
+     congr 1
+-    simp only [hjoint_def, monad_norm]
+-  rw [hExp, hStrong, ← probEvent_eq_eq_probOutput, ← probEvent_eq_eq_probOutput,
+-    probEvent_map, probEvent_map]
+-  refine probEvent_mono fun t _ hv => ?_
++    simp only [joint, runWithSigningOracle_def, monad_norm]
++    rfl
++  rw [unforgeableAdvantage, UnforgeableAdversary.strongAdvantage, hExp, hStrong,
++    MeasureTheory.Measure.map_apply Measurable.of_discrete (measurableSet_singleton true),
++    MeasureTheory.Measure.map_apply Measurable.of_discrete (measurableSet_singleton true)]
++  apply MeasureTheory.measure_mono
++  intro t hv
++  simp only [Set.mem_preimage, Set.mem_singleton_iff] at hv ⊢
+   obtain ⟨hfresh, hver⟩ := (Bool.and_eq_true _ _).mp hv
+   refine (Bool.and_eq_true _ _).mpr ⟨?_, hver⟩
+   cases hqw : t.2.1.wasQueriedWith t.1.1 t.1.2
+--- a/rust/Libsignal/Spec/Std/Alloc/Vec/ExtendFromSlice.lean
++++ b/rust/Libsignal/Spec/Std/Alloc/Vec/ExtendFromSlice.lean
+@@ -55,12 +55,11 @@
+     (h_len : v.length + s.length ≤ Usize.max) :
+     extend_from_slice cloneInst v s ⦃ (v' : alloc.vec.Vec T) =>
+       v'.val = v.val ++ s.val ∧ v'.length = v.length + s.length ⦄ := by
+-  have h_cl : Slice.clone cloneInst.clone s = ok s := by
+-    obtain ⟨s', h_eq, hs⟩ := WP.spec_imp_exists (Slice.clone_spec h_clone)
+-    rw [h_eq, ← hs]
+   unfold extend_from_slice
+   rw [dif_pos h_len]
+-  grind
++  apply WP.spec_bind (List.clone_spec h_clone)
++  rintro s' ⟨hs, _⟩
++  simp [hs]
+ 
+ /-- `alloc.vec.Vec.extend_from_slice` panics when the combined length exceeds `usize`. -/
+ theorem extend_from_slice_overflow {T : Type} (cloneInst : core.clone.Clone T)
